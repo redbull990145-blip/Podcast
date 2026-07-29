@@ -1,15 +1,17 @@
 "use client";
 
+import { memo } from "react";
 import Link from "next/link";
 import { CheckCircle2, Loader2, Pause, Play } from "lucide-react";
 import { usePlayer, type PlayableEpisode } from "@/lib/player/store";
 import { QueueButton } from "@/components/queue/queue-button";
 import { DownloadButton } from "@/components/downloads/download-button";
-import { cn, formatDurationLong, formatRelativeDate, stripHtml } from "@/lib/utils";
+import { cn, formatDurationLong, formatRelativeDate } from "@/lib/utils";
 
 export type EpisodeRowData = {
   id: string;
   title: string;
+  /** Already stripped of RSS markup by the caller. */
   description: string | null;
   enclosureUrl: string;
   durationSeconds: number | null;
@@ -22,7 +24,12 @@ export type EpisodeProgress = {
   played: boolean;
 };
 
-export function EpisodeRow({
+/**
+ * Memoized because a show page renders fifty of these and the player store
+ * updates several times a second while something is playing. Without this, every
+ * row re-renders on every tick even though only the playing row can change.
+ */
+export const EpisodeRow = memo(function EpisodeRow({
   episode,
   podcast,
   progress,
@@ -134,7 +141,7 @@ export function EpisodeRow({
 
           {episode.description && (
             <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-              {stripHtml(episode.description)}
+              {episode.description}
             </p>
           )}
 
@@ -168,4 +175,4 @@ export function EpisodeRow({
       </div>
     </li>
   );
-}
+});

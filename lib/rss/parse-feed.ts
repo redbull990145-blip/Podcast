@@ -195,7 +195,14 @@ function extractCategories(raw: unknown): string[] {
   });
 }
 
-/** <podcast:transcript> may repeat for different formats; prefer VTT, then SRT. */
+/**
+ * Picks a usable <podcast:transcript>, which may repeat once per format.
+ *
+ * Only timed formats are accepted. Publishers very commonly offer
+ * `type="text/html"` — a transcript web page — and that can never drive
+ * captions no matter how well we parse it, so storing one would just mean
+ * fetching and discarding it every time someone opens the captions panel.
+ */
 function extractTranscriptUrl(raw: unknown): string | null {
   const candidates: { url: string; type: string }[] = [];
 
@@ -221,13 +228,24 @@ function extractTranscriptUrl(raw: unknown): string | null {
   visit(raw);
   if (candidates.length === 0) return null;
 
-  const preferred =
-    candidates.find((c) => c.type.includes("vtt")) ??
-    candidates.find((c) => c.type.includes("srt")) ??
-    candidates.find((c) => c.type.includes("json")) ??
-    candidates[0];
+  // `type` is required by the spec but plenty of feeds omit it, so fall back to
+  // the file extension before giving up on an otherwise usable transcript.
+  const format = ({ url, type }: { url: string; type: string }) => {
+    const path = url.split("?")[0].toLowerCase();
+    if (type.includes("vtt") || path.endsWith(".vtt")) return "vtt";
+    if (type.includes("srt") || type.includes("subrip") || path.endsWith(".srt")) {
+      return "srt";
+    }
+    if (type.includes("json") || path.endsWith(".json")) return "json";
+    return "other";
+  };
 
-  return preferred.url;
+  const preferred =
+    candidates.find((c) => format(c) === "vtt") ??
+    candidates.find((c) => format(c) === "srt") ??
+    candidates.find((c) => format(c) === "json");
+
+  return preferred?.url ?? null;
 }
 
 /** Normalizes a parsed rss-parser output into our shape. */

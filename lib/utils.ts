@@ -33,6 +33,23 @@ export function formatDurationLong(totalSeconds: number | null | undefined): str
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
+/**
+ * Absolute date formatters.
+ *
+ * The locale is pinned rather than left to the runtime. `toLocaleDateString()`
+ * with no locale uses the *environment's* locale, and the server's is not the
+ * browser's — a Node process defaulting to en-GB renders "26 Jun" while the
+ * browser renders "Jun 26", which React reports as a hydration mismatch and
+ * then throws away and re-renders the whole subtree. Pinning makes both sides
+ * agree; the app's copy is English throughout anyway.
+ */
+const SHORT_DATE = new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short" });
+const SHORT_DATE_WITH_YEAR = new Intl.DateTimeFormat("en-US", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
+
 /** "3 days ago" style relative date, falling back to an absolute date past a month. */
 export function formatRelativeDate(date: Date | string | null | undefined): string {
   if (!date) return "";
@@ -42,19 +59,17 @@ export function formatRelativeDate(date: Date | string | null | undefined): stri
   const diffMs = Date.now() - d.getTime();
   const diffDays = Math.floor(diffMs / 86_400_000);
 
-  if (diffDays < 0) return d.toLocaleDateString();
   if (diffDays === 0) return "Today";
   if (diffDays === 1) return "Yesterday";
-  if (diffDays < 7) return `${diffDays} days ago`;
-  if (diffDays < 30) {
+  if (diffDays > 1 && diffDays < 7) return `${diffDays} days ago`;
+  if (diffDays >= 7 && diffDays < 30) {
     const weeks = Math.floor(diffDays / 7);
     return weeks === 1 ? "1 week ago" : `${weeks} weeks ago`;
   }
-  return d.toLocaleDateString(undefined, {
-    day: "numeric",
-    month: "short",
-    year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
-  });
+
+  return d.getFullYear() === new Date().getFullYear()
+    ? SHORT_DATE.format(d)
+    : SHORT_DATE_WITH_YEAR.format(d);
 }
 
 /** Strip HTML from RSS descriptions, which routinely contain markup. */

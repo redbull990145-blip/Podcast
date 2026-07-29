@@ -72,6 +72,34 @@ describe("parseFeedXml — Podcasting 2.0 feed", () => {
     const feed = await parseFeedXml(PC20_FEED);
     expect(feed.episodes[0].transcriptUrl).toBe("https://cdn.example/tx/sp-042.vtt");
   });
+
+  it("ignores an HTML-only transcript, which can never carry timings", async () => {
+    const xml = `<?xml version="1.0"?>
+      <rss version="2.0" xmlns:podcast="https://podcastindex.org/namespace/1.0">
+        <channel><title>HTML only</title><item>
+          <title>Ep 1</title><guid>html-1</guid>
+          <enclosure url="https://cdn.example/1.mp3" type="audio/mpeg" length="1"/>
+          <podcast:transcript url="https://example.com/1/transcript" type="text/html"/>
+        </item></channel>
+      </rss>`;
+
+    const feed = await parseFeedXml(xml);
+    expect(feed.episodes[0].transcriptUrl).toBeNull();
+  });
+
+  it("falls back to the file extension when type is missing", async () => {
+    const xml = `<?xml version="1.0"?>
+      <rss version="2.0" xmlns:podcast="https://podcastindex.org/namespace/1.0">
+        <channel><title>No type</title><item>
+          <title>Ep 1</title><guid>untyped-1</guid>
+          <enclosure url="https://cdn.example/1.mp3" type="audio/mpeg" length="1"/>
+          <podcast:transcript url="https://cdn.example/tx/1.srt?v=2"/>
+        </item></channel>
+      </rss>`;
+
+    const feed = await parseFeedXml(xml);
+    expect(feed.episodes[0].transcriptUrl).toBe("https://cdn.example/tx/1.srt?v=2");
+  });
 });
 
 describe("parseFeedXml — minimal RSS 2.0 feed", () => {

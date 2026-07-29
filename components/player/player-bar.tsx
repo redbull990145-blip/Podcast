@@ -1,21 +1,12 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import { useEffect, useState } from "react";
-import {
-  Loader2,
-  Pause,
-  Play,
-  RotateCcw,
-  RotateCw,
-  Volume2,
-  VolumeX,
-  X,
-} from "lucide-react";
+import { ChevronUp, Loader2, Pause, Play, RotateCcw, RotateCw, X } from "lucide-react";
 import { usePlayer } from "@/lib/player/store";
 import { SpeedControl } from "./speed-control";
-import { cn, formatDuration } from "@/lib/utils";
+import { VolumeControl } from "./volume-control";
+import { formatDuration } from "@/lib/utils";
 
 /**
  * Persistent player, docked above the mobile tab bar and along the bottom on
@@ -29,7 +20,6 @@ export function PlayerBar() {
   const currentTime = usePlayer((s) => s.currentTime);
   const duration = usePlayer((s) => s.duration);
   const error = usePlayer((s) => s.error);
-  const muted = usePlayer((s) => s.muted);
   const skipForwardSeconds = usePlayer((s) => s.skipForwardSeconds);
   const skipBackSeconds = usePlayer((s) => s.skipBackSeconds);
 
@@ -37,8 +27,8 @@ export function PlayerBar() {
   const seek = usePlayer((s) => s.seek);
   const skipForward = usePlayer((s) => s.skipForward);
   const skipBack = usePlayer((s) => s.skipBack);
-  const toggleMute = usePlayer((s) => s.toggleMute);
   const stop = usePlayer((s) => s.stop);
+  const setExpanded = usePlayer((s) => s.setExpanded);
 
   // While dragging the scrubber, show the dragged value rather than fighting
   // the timeupdate events streaming in underneath.
@@ -110,31 +100,41 @@ export function PlayerBar() {
       </div>
 
       <div className="mx-auto flex max-w-6xl items-center gap-3 px-3 py-2.5 sm:gap-4 sm:px-5">
-        {episode.artworkUrl && (
-          <Image
-            src={episode.artworkUrl}
-            alt=""
-            width={48}
-            height={48}
-            unoptimized
-            className="size-10 shrink-0 rounded-lg object-cover sm:size-12"
-          />
-        )}
+        {/*
+          Artwork and titles are one target that opens Now Playing, the way every
+          native player behaves. Deep links to the episode and show pages live
+          inside Now Playing rather than competing for the same few pixels here.
+        */}
+        <button
+          onClick={() => setExpanded(true)}
+          aria-label={`Open Now Playing for ${episode.title}`}
+          className="group flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left transition-opacity hover:opacity-80 sm:gap-4"
+        >
+          <span className="relative shrink-0">
+            {episode.artworkUrl ? (
+              <Image
+                src={episode.artworkUrl}
+                alt=""
+                width={96}
+                height={96}
+                sizes="48px"
+                className="size-10 rounded-lg object-cover sm:size-12"
+              />
+            ) : (
+              <span className="block size-10 rounded-lg bg-accent-subtle sm:size-12" />
+            )}
+            <span className="absolute inset-0 grid place-items-center rounded-lg bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
+              <ChevronUp className="size-5 text-white" />
+            </span>
+          </span>
 
-        <div className="min-w-0 flex-1">
-          <Link
-            href={`/episode/${episode.id}`}
-            className="block truncate text-sm font-medium hover:underline"
-          >
-            {episode.title}
-          </Link>
-          <Link
-            href={`/podcast/${episode.podcastId}`}
-            className="block truncate text-xs text-muted-foreground hover:underline"
-          >
-            {episode.podcastTitle}
-          </Link>
-        </div>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium">{episode.title}</span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {episode.podcastTitle}
+            </span>
+          </span>
+        </button>
 
         <div className="flex items-center gap-1 sm:gap-2">
           <button
@@ -185,16 +185,7 @@ export function PlayerBar() {
 
           <SpeedControl />
 
-          <button
-            onClick={toggleMute}
-            aria-label={muted ? "Unmute" : "Mute"}
-            className={cn(
-              "grid size-8 place-items-center rounded-full transition-colors hover:bg-surface-hover",
-              muted ? "text-accent" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
-          </button>
+          <VolumeControl />
 
           <button
             onClick={stop}

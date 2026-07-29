@@ -19,7 +19,15 @@ export type SttProvider = "groq" | "openai";
 export type LlmConfig = {
   provider: LlmProvider;
   baseUrl: string;
+  /** Primary model — used for display/logging (e.g. "openrouter/gpt-oss-20b:free"). */
   model: string;
+  /**
+   * Fallback chain tried in order. OpenRouter's free-variant models each carry
+   * their own separate rate limit, so when one is exhausted the next in this
+   * list is tried automatically rather than failing the request. Single-entry
+   * for providers where "the free tier" isn't a moving target.
+   */
+  models: string[];
   apiKey: string;
 };
 
@@ -30,11 +38,38 @@ export type SttConfig = {
   apiKey: string;
 };
 
+/**
+ * Best-guess API slugs for OpenRouter's currently free-variant models, ordered
+ * by general-purpose quality for summarization/Q&A. OpenRouter's free catalogue
+ * rotates and the display name shown in their UI is not always the exact API
+ * id — if a call 404s on "model not found", open the model's page at
+ * openrouter.ai/models, copy the id shown there (format org/name:free), and
+ * override this list via AI_OPENROUTER_MODELS (comma-separated) in .env.local.
+ */
+const DEFAULT_OPENROUTER_FREE_MODELS = [
+  "openai/gpt-oss-20b:free",
+  "google/gemma-4-31b:free",
+  "google/gemma-4-26b-a4b:free",
+  "nvidia/nemotron-3-super:free",
+  "nvidia/nemotron-3-ultra:free",
+  "nvidia/nemotron-3-nano-30b-a3b:free",
+];
+
+function openrouterModelChain(): string[] {
+  const override = process.env.AI_OPENROUTER_MODELS?.split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+  return override && override.length > 0 ? override : DEFAULT_OPENROUTER_FREE_MODELS;
+}
+
 const LLM_ENDPOINTS: Record<LlmProvider, { baseUrl: string; defaultModel: string }> = {
-  // Free-tier models during development.
+  // Free-tier models during development. See openrouterModelChain() for the
+  // full fallback list actually used — this single default is only the
+  // provider-level fallback for byokLlmConfig, where there is no quota
+  // pressure pushing between models.
   openrouter: {
     baseUrl: "https://openrouter.ai/api/v1",
-    defaultModel: "deepseek/deepseek-chat-v3.1:free",
+    defaultModel: DEFAULT_OPENROUTER_FREE_MODELS[0],
   },
   // Cheap enough per token to fund the free tier at launch.
   deepseek: {
@@ -81,10 +116,16 @@ export function defaultLlmConfig(): LlmConfig | null {
   if (!apiKey) return null;
 
   const endpoint = LLM_ENDPOINTS[provider];
+  const models =
+    provider === "openrouter"
+      ? openrouterModelChain()
+      : [process.env.AI_DEFAULT_MODEL || endpoint.defaultModel];
+
   return {
     provider,
     baseUrl: endpoint.baseUrl,
-    model: process.env.AI_DEFAULT_MODEL || endpoint.defaultModel,
+    model: models[0],
+    models,
     apiKey,
   };
 }
@@ -106,7 +147,15 @@ export function defaultSttConfig(): SttConfig | null {
 /** Builds an LLM config from a user's own key. */
 export function byokLlmConfig(provider: LlmProvider, apiKey: string): LlmConfig {
   const endpoint = LLM_ENDPOINTS[provider];
-  return { provider, baseUrl: endpoint.baseUrl, model: endpoint.defaultModel, apiKey };
+  // A user's own key is billed to them, so there's no reason to hop between
+  // free-tier models — always their provider's normal default.
+  return {
+    provider,
+    baseUrl: endpoint.baseUrl,
+    model: endpoint.defaultModel,
+    models: [endpoint.defaultModel],
+    apiKey,
+  };
 }
 
 /** Builds a speech-to-text config from a user's own key. */

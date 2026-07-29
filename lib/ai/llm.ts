@@ -26,11 +26,22 @@ type ChatResponse = {
   error?: { message?: string };
 };
 
-async function chat(
+/** Errors worth retrying against the next model in the fallback chain. */
+function isRetryableAcrossModels(status: number): boolean {
+  // 429: this specific free model's own rate limit is exhausted.
+  // 404: the model id is wrong or was removed from the free catalogue.
+  // 400: some providers report an unrecognized model id as a bad request.
+  return status === 429 || status === 404 || status === 400;
+}
+
+async function chatOnce(
   config: LlmConfig,
+  model: string,
   messages: ChatMessage[],
-  options: { maxTokens?: number; temperature?: number } = {},
-): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  options: { maxTokens?: number; temperature?: number },
+): Promise<
+  { ok: true; text: string } | { ok: false; error: string; status?: number }
+> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -45,7 +56,7 @@ async function chat(
         "x-title": "Cadence",
       },
       body: JSON.stringify({
-        model: config.model,
+        model,
         messages,
         max_tokens: options.maxTokens ?? 1500,
         temperature: options.temperature ?? 0.3,
@@ -55,19 +66,23 @@ async function chat(
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      if (response.status === 429) {
-        return {
-          ok: false,
-          error: "The AI service is rate limited right now. Try again shortly.",
-        };
-      }
-      if (response.status === 401 || response.status === 403) {
-        return { ok: false, error: "The AI API key was rejected." };
-      }
       // The provider's error body can echo request headers, so it is logged
       // server-side and never returned to the client.
-      console.error("LLM call failed", response.status, detail.slice(0, 200));
-      return { ok: false, error: "The AI service returned an error." };
+      console.error(
+        "LLM call failed",
+        model,
+        response.status,
+        detail.slice(0, 200),
+      );
+
+      if (response.status === 401 || response.status === 403) {
+        return { ok: false, error: "The AI API key was rejected.", status: response.status };
+      }
+      return {
+        ok: false,
+        error: "The AI service returned an error.",
+        status: response.status,
+      };
     }
 
     const data = (await response.json()) as ChatResponse;
@@ -83,6 +98,35 @@ async function chat(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * Tries each model in the config's fallback chain in order.
+ *
+ * OpenRouter's free-variant models each have their own separate rate limit, so
+ * one being exhausted does not mean the free tier is exhausted — it means the
+ * next model in the list probably works. An API-key rejection is not
+ * model-specific and stops the chain immediately rather than burning through
+ * every candidate for the same reason.
+ */
+async function chat(
+  config: LlmConfig,
+  messages: ChatMessage[],
+  options: { maxTokens?: number; temperature?: number } = {},
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  const candidates = config.models.length > 0 ? config.models : [config.model];
+  let last: { ok: false; error: string; status?: number } | null = null;
+
+  for (const model of candidates) {
+    const result = await chatOnce(config, model, messages, options);
+    if (result.ok) return result;
+
+    last = result;
+    if (result.status === 401 || result.status === 403) break;
+    if (result.status != null && !isRetryableAcrossModels(result.status)) break;
+  }
+
+  return { ok: false, error: last?.error ?? "The AI service returned an error." };
 }
 
 function truncate(transcript: string): string {

@@ -205,9 +205,9 @@ function QueueRowContent({ item }: { item: QueueRow }) {
           <Image
             src={artwork}
             alt=""
-            width={40}
-            height={40}
-            unoptimized
+            width={80}
+            height={80}
+            sizes="40px"
             className="size-10 rounded-lg object-cover"
           />
         ) : (

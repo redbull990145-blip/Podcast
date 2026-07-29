@@ -1,7 +1,7 @@
 import Image from "next/image";
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Rss } from "lucide-react";
 import { getUser } from "@/lib/supabase/server";
 import { db } from "@/lib/db/client";
@@ -34,33 +34,43 @@ export default async function PodcastPage({
   const podcast = await db.query.podcasts.findFirst({ where: eq(podcasts.id, id) });
   if (!podcast) notFound();
 
-  const episodes = await listEpisodes(podcast.id, 50);
+  // Independent of each other, so they go out together rather than paying three
+  // round-trips to Supabase in series.
+  const [episodes, subscription] = await Promise.all([
+    listEpisodes(podcast.id, 50),
+    db.query.subscriptions.findFirst({
+      where: (s, { and }) => and(eq(s.userId, user.id), eq(s.podcastId, podcast.id)),
+    }),
+  ]);
 
-  const subscription = await db.query.subscriptions.findFirst({
-    where: (s, { and }) => and(eq(s.userId, user.id), eq(s.podcastId, podcast.id)),
-  });
-
-  // One query for every episode's progress, rather than one per row.
+  // One query for every episode's progress, rather than one per row. Filtering
+  // by user in SQL rather than in JS means the database returns this user's rows
+  // only, instead of every listener's row for these episodes.
   const progressRows =
     episodes.length > 0
       ? await db
-          .select()
+          .select({
+            episodeId: playbackState.episodeId,
+            positionSeconds: playbackState.positionSeconds,
+            played: playbackState.played,
+          })
           .from(playbackState)
           .where(
-            inArray(
-              playbackState.episodeId,
-              episodes.map((e) => e.id),
+            and(
+              eq(playbackState.userId, user.id),
+              inArray(
+                playbackState.episodeId,
+                episodes.map((e) => e.id),
+              ),
             ),
           )
       : [];
 
   const progressByEpisode = new Map(
-    progressRows
-      .filter((r) => r.userId === user.id)
-      .map((r) => [
-        r.episodeId,
-        { positionSeconds: Number(r.positionSeconds), played: r.played },
-      ]),
+    progressRows.map((r) => [
+      r.episodeId,
+      { positionSeconds: Number(r.positionSeconds), played: r.played },
+    ]),
   );
 
   const description = stripHtml(podcast.description);
@@ -72,9 +82,9 @@ export default async function PodcastPage({
           <Image
             src={podcast.artworkUrl}
             alt=""
-            width={176}
-            height={176}
-            unoptimized
+            width={352}
+            height={352}
+            sizes="(max-width: 640px) 128px, 176px"
             priority
             className="size-32 shrink-0 rounded-2xl object-cover shadow-[var(--shadow-soft)] sm:size-44"
           />
@@ -138,7 +148,10 @@ export default async function PodcastPage({
             {episodes.map((episode) => (
               <EpisodeRow
                 key={episode.id}
-                episode={episode}
+                // Descriptions are RSS HTML. Stripping it here means it happens
+                // once on the server instead of fifty times in the browser, and
+                // the markup never ships to the client at all.
+                episode={{ ...episode, description: stripHtml(episode.description) }}
                 podcast={{
                   id: podcast.id,
                   title: podcast.title,

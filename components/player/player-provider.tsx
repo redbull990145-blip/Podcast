@@ -14,9 +14,19 @@ import { getAudio, usePlayer } from "@/lib/player/store";
 /** How often to persist position while playing. */
 const SYNC_INTERVAL_MS = 10_000;
 
+/**
+ * A failed media load is retried once after this delay. Publishers' CDNs drop
+ * the occasional request, and a silent retry is far better than telling someone
+ * their episode is broken when a second attempt would have worked.
+ */
+const RETRY_DELAY_MS = 700;
+
 export function PlayerProvider() {
   const pendingStartRef = useRef<number>(0);
   const lastSyncedRef = useRef<number>(0);
+  /** Episode id we have already retried, so we retry at most once per episode. */
+  const retriedRef = useRef<string | null>(null);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- element events -> store -------------------------------------------
   useEffect(() => {
@@ -28,7 +38,12 @@ export function PlayerProvider() {
     const onPlay = () => _sync({ isPlaying: true, error: null });
     const onPause = () => _sync({ isPlaying: false });
     const onWaiting = () => _sync({ isBuffering: true });
-    const onPlaying = () => _sync({ isBuffering: false, isPlaying: true });
+    // Audio is actually flowing, so any error banner from an earlier attempt is
+    // stale — and the retry budget resets for the next episode.
+    const onPlaying = () => {
+      retriedRef.current = null;
+      _sync({ isBuffering: false, isPlaying: true, error: null });
+    };
     const onTimeUpdate = () => _sync({ currentTime: audio.currentTime });
 
     const onLoadedMetadata = () => {
@@ -46,20 +61,47 @@ export function PlayerProvider() {
     };
 
     const onError = () => {
-      _sync({
-        isPlaying: false,
-        isBuffering: false,
-        error:
-          "This episode wouldn't load. The publisher's server may be down, or the file may have moved.",
-      });
+      const { episode } = usePlayer.getState();
+      // stop() clears the source, which fires `error` by spec. Nothing is
+      // loaded at that point, so there is nothing to report.
+      if (!episode || !audio.getAttribute("src")) return;
+
+      // First failure on this episode: retry once. Re-assigning src and calling
+      // load() is what actually re-issues the request — setting currentTime
+      // alone would not.
+      if (retriedRef.current !== episode.id) {
+        retriedRef.current = episode.id;
+        const resumeAt = audio.currentTime || usePlayer.getState().currentTime;
+        _sync({ isBuffering: true });
+
+        retryTimerRef.current = setTimeout(() => {
+          if (usePlayer.getState().episode?.id !== episode.id) return;
+          pendingStartRef.current = resumeAt;
+          audio.src = episode.enclosureUrl;
+          audio.load();
+          void audio.play().catch(() => {
+            _sync({ isPlaying: false, isBuffering: false });
+          });
+        }, RETRY_DELAY_MS);
+        return;
+      }
+
+      _sync({ isPlaying: false, isBuffering: false, error: describeError(audio.error) });
     };
 
     const onEnded = () => {
       _sync({ isPlaying: false });
-      const { episode, duration } = usePlayer.getState();
+      const { episode, duration, sleepTimer, setSleepTimer } = usePlayer.getState();
       if (!episode) return;
 
       void persistPosition(episode.id, duration, duration, true, "complete", episode);
+
+      // "Stop at end of episode" means exactly that — don't roll into the next
+      // one and wake the person up.
+      if (sleepTimer === "episode") {
+        setSleepTimer(null);
+        return;
+      }
       void advanceQueue(episode.id);
     };
 
@@ -73,6 +115,7 @@ export function PlayerProvider() {
     audio.addEventListener("ended", onEnded);
 
     return () => {
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
       audio.removeEventListener("play", onPlay);
       audio.removeEventListener("pause", onPause);
       audio.removeEventListener("waiting", onWaiting);
@@ -144,6 +187,23 @@ export function PlayerProvider() {
     };
   }, []);
 
+  // --- sleep timer ---------------------------------------------------------
+  useEffect(() => {
+    // Checked on a timer rather than scheduled with setTimeout so that changing
+    // or cancelling the timer never needs to unwind a pending callback, and so
+    // a device that suspended past the deadline still stops on wake.
+    const interval = setInterval(() => {
+      const { sleepTimer, isPlaying, pause, setSleepTimer } = usePlayer.getState();
+      if (typeof sleepTimer !== "number") return;
+      if (Date.now() < sleepTimer) return;
+
+      if (isPlaying) pause();
+      setSleepTimer(null);
+    }, 1_000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   // --- OS media controls ---------------------------------------------------
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
@@ -188,6 +248,27 @@ export function PlayerProvider() {
   }, []);
 
   return null;
+}
+
+/**
+ * Turns a MediaError into something a listener can act on.
+ *
+ * The distinction that matters is "try again" versus "this file is not going to
+ * play here" — a generic message leaves people retrying a dead link forever.
+ */
+function describeError(error: MediaError | null): string {
+  switch (error?.code) {
+    case MediaError.MEDIA_ERR_ABORTED:
+      return "Playback was interrupted. Press play to pick it back up.";
+    case MediaError.MEDIA_ERR_NETWORK:
+      return "The connection dropped while loading this episode. Check your network and try again.";
+    case MediaError.MEDIA_ERR_DECODE:
+      return "This episode's audio file appears to be corrupted. The publisher would need to re-upload it.";
+    case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+      return "This browser can't play this episode's audio format, or the file has moved.";
+    default:
+      return "This episode wouldn't load. The publisher's server may be down, or the file may have moved.";
+  }
 }
 
 /**

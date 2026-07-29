@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -11,6 +12,10 @@ export const metadata: Metadata = {
   applicationName: "Cadence",
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Cadence" },
   formatDetection: { telephone: false },
+  icons: {
+    icon: "/icon.svg",
+    apple: "/icon.svg",
+  },
 };
 
 export const viewport: Viewport = {
@@ -29,6 +34,12 @@ export const viewport: Viewport = {
  * This has to be a blocking inline script: doing it in React would let the
  * default (light) styles paint first, producing a white flash for dark-mode
  * users on every navigation to a fresh document.
+ *
+ * It goes through next/script rather than a bare <script> element. A raw script
+ * tag rendered from a component is emitted correctly during SSR, but React
+ * refuses to execute one during a client render and logs an error every time
+ * the root layout re-renders. `beforeInteractive` gets it into the document
+ * head ahead of everything else without React ever owning the element.
  */
 const themeScript = `
 (function() {
@@ -46,9 +57,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <Script
+          id="cadence-theme"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{ __html: themeScript }}
+        />
       </head>
-      <body className="min-h-dvh antialiased">{children}</body>
+      {/*
+        suppressHydrationWarning here (not just on <html>) is specifically for
+        attributes browser extensions inject directly into <body> before React
+        hydrates — e.g. `bis_register` from some password-manager/security
+        extensions. That mismatch is real but harmless: it's an attribute we
+        never render and never read, so suppressing the warning for it is
+        correct, not a Band-Aid over an actual bug in our markup.
+      */}
+      <body className="min-h-dvh antialiased" suppressHydrationWarning>
+        {children}
+      </body>
     </html>
   );
 }

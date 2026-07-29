@@ -12,6 +12,7 @@ import {
   storageEstimate,
   type DownloadedEpisode,
 } from "@/lib/offline/downloads";
+import { useDownloadStatus } from "@/lib/offline/download-status";
 import { usePlayer } from "@/lib/player/store";
 import { EmptyState } from "@/components/ui/page";
 import { formatDurationLong } from "@/lib/utils";
@@ -92,9 +93,9 @@ export function DownloadsList() {
                 <Image
                   src={item.artworkUrl}
                   alt=""
-                  width={44}
-                  height={44}
-                  unoptimized
+                  width={88}
+                  height={88}
+                  sizes="44px"
                   className="size-11 rounded-lg object-cover"
                 />
               ) : (
@@ -133,6 +134,9 @@ export function DownloadsList() {
 
             <button
               onClick={async () => {
+                // Keep the shared set in step, so a download button for this
+                // episode elsewhere in the app flips back immediately.
+                useDownloadStatus.getState().markRemoved(item.episodeId);
                 await removeDownload(item.episodeId);
                 void refresh();
               }}

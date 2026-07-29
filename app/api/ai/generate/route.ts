@@ -18,7 +18,9 @@ export const runtime = "nodejs";
  */
 export const maxDuration = 60;
 
-type GenerateKind = "show_notes" | "chapters";
+type GenerateKind = "show_notes" | "chapters" | "transcript";
+
+const KINDS: GenerateKind[] = ["show_notes", "chapters", "transcript"];
 
 /**
  * Produces AI show notes or chapters for an episode.
@@ -38,7 +40,8 @@ export async function POST(request: NextRequest) {
   } | null;
 
   const episodeId = body?.episodeId;
-  const kind: GenerateKind = body?.kind === "chapters" ? "chapters" : "show_notes";
+  const kind: GenerateKind =
+    body?.kind && KINDS.includes(body.kind) ? body.kind : "show_notes";
 
   if (!episodeId) {
     return NextResponse.json({ error: "An episode id is required." }, { status: 400 });
@@ -69,7 +72,12 @@ export async function POST(request: NextRequest) {
     .values({
       userId: user.id,
       episodeId,
-      kind: kind === "chapters" ? "generate_chapters" : "summarize",
+      kind:
+        kind === "chapters"
+          ? "generate_chapters"
+          : kind === "transcript"
+            ? "transcribe"
+            : "summarize",
       status: "transcribing",
       tier: decision.tier,
     })
@@ -118,17 +126,26 @@ export async function POST(request: NextRequest) {
     transcript = row;
   }
 
+  const segments = (transcript.segments ?? []) as {
+    start: number;
+    end: number;
+    text: string;
+  }[];
+
+  // Captions only need the transcript, so stop here rather than making an LLM
+  // call the caller never asked for.
+  if (kind === "transcript") {
+    await finish(job.id);
+    if (decision.tier === "default") await recordUsage(user.id, "jobs");
+    return NextResponse.json({ segments, source: transcript.source });
+  }
+
   await db
     .update(aiJobs)
     .set({ status: "summarizing", updatedAt: new Date() })
     .where(eq(aiJobs.id, job.id));
 
   // --- generation ---------------------------------------------------------
-  const segments = (transcript.segments ?? []) as {
-    start: number;
-    end: number;
-    text: string;
-  }[];
 
   if (kind === "chapters") {
     const result = await generateChapters(decision.llm, episode.title, segments);
@@ -184,6 +201,14 @@ async function finish(jobId: string) {
 }
 
 async function readCached(episodeId: string, kind: GenerateKind) {
+  if (kind === "transcript") {
+    const row = await db.query.transcripts.findFirst({
+      where: eq(transcripts.episodeId, episodeId),
+      columns: { segments: true, source: true },
+    });
+    return row?.segments ? { segments: row.segments, source: row.source } : null;
+  }
+
   if (kind === "chapters") {
     const episode = await db.query.episodes.findFirst({
       where: eq(episodes.id, episodeId),

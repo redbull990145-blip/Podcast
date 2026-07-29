@@ -43,6 +43,19 @@ type PlayerState = {
   /** Seconds jumped by the skip buttons. Overcast-style asymmetric defaults. */
   skipForwardSeconds: number;
   skipBackSeconds: number;
+
+  // --- UI ------------------------------------------------------------------
+  /** Now Playing is showing full-screen rather than just the docked bar. */
+  expanded: boolean;
+  /** Captions panel is open inside Now Playing. */
+  captionsOpen: boolean;
+
+  // --- sleep timer ---------------------------------------------------------
+  /**
+   * epoch ms at which playback stops, or "episode" to stop when this episode
+   * ends. Null when no timer is running.
+   */
+  sleepTimer: number | "episode" | null;
 };
 
 type PlayerActions = {
@@ -57,21 +70,34 @@ type PlayerActions = {
   setVolume: (volume: number) => void;
   toggleMute: () => void;
   stop: () => void;
+  setExpanded: (expanded: boolean) => void;
+  setCaptionsOpen: (open: boolean) => void;
+  /** Minutes from now, "episode" to stop at the end of this one, or null. */
+  setSleepTimer: (value: number | "episode" | null) => void;
   /** Called by the provider's event listeners — not from UI. */
   _sync: (patch: Partial<PlayerState>) => void;
 };
 
 let audioElement: HTMLAudioElement | null = null;
 
-/** The single shared audio element. Created on first use, never replaced. */
+/**
+ * The single shared audio element. Created on first use, never replaced.
+ *
+ * `crossOrigin` is deliberately NOT set. Setting it makes the browser issue the
+ * media request in CORS mode, and a response without `Access-Control-Allow-Origin`
+ * is then rejected outright — the element fires `error` and nothing plays. Most
+ * of the big hosts (Anchor/Spotify, Megaphone, Libsyn) send no CORS headers on
+ * audio at all, so opting in globally breaks playback for a large share of the
+ * catalogue in exchange for a Web Audio graph we only want on some shows.
+ *
+ * Skip-silence/volume-boost instead opt in per episode via `enableCrossOrigin`
+ * below, and fall back to plain playback when the host refuses.
+ */
 export function getAudio(): HTMLAudioElement | null {
   if (typeof window === "undefined") return null;
   if (!audioElement) {
     audioElement = new Audio();
     audioElement.preload = "metadata";
-    // Required for the Web Audio graph in Phase 4 to be able to attach at all;
-    // harmless when it can't.
-    audioElement.crossOrigin = "anonymous";
   }
   return audioElement;
 }
@@ -133,6 +159,9 @@ export const usePlayer = create<PlayerState & PlayerActions>((set, get) => ({
   duration: 0,
   error: null,
   muted: false,
+  expanded: false,
+  captionsOpen: false,
+  sleepTimer: null,
   ...loadPrefs(),
 
   load(episode, startAt = 0) {
@@ -150,7 +179,10 @@ export const usePlayer = create<PlayerState & PlayerActions>((set, get) => ({
     if (startAt > 0) audio.currentTime = startAt;
 
     audio.playbackRate = get().playbackRate;
+    // Without this, speeding up a voice makes it chipmunky.
+    audio.preservesPitch = true;
     audio.volume = get().volume;
+    audio.muted = get().muted;
 
     set({
       episode,
@@ -158,6 +190,9 @@ export const usePlayer = create<PlayerState & PlayerActions>((set, get) => ({
       duration: episode.durationSeconds ?? 0,
       error: null,
       isBuffering: true,
+      // A new episode invalidates whatever the sleep timer was counting down to
+      // only in the end-of-episode case; a wall-clock timer keeps running.
+      sleepTimer: get().sleepTimer === "episode" ? null : get().sleepTimer,
     });
 
     void audio.play().catch(() => {
@@ -234,9 +269,35 @@ export const usePlayer = create<PlayerState & PlayerActions>((set, get) => ({
     if (audio) {
       audio.pause();
       audio.removeAttribute("src");
+      // Clearing the source makes the element fire `error`; the provider ignores
+      // that event while no episode is loaded so no banner flashes on close.
       audio.load();
     }
-    set({ episode: null, isPlaying: false, currentTime: 0, duration: 0 });
+    set({
+      episode: null,
+      isPlaying: false,
+      currentTime: 0,
+      duration: 0,
+      error: null,
+      expanded: false,
+      captionsOpen: false,
+      sleepTimer: null,
+    });
+  },
+
+  setExpanded(expanded) {
+    set({ expanded, captionsOpen: expanded ? get().captionsOpen : false });
+  },
+
+  setCaptionsOpen(captionsOpen) {
+    set({ captionsOpen });
+  },
+
+  setSleepTimer(value) {
+    set({
+      sleepTimer:
+        typeof value === "number" ? Date.now() + value * 60_000 : value,
+    });
   },
 
   _sync(patch) {

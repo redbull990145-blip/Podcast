@@ -132,9 +132,9 @@ function SearchResultCard({
         <Image
           src={result.artworkUrl}
           alt=""
-          width={64}
-          height={64}
-          unoptimized
+          width={128}
+          height={128}
+          sizes="64px"
           className="size-16 shrink-0 rounded-lg object-cover"
         />
       ) : (

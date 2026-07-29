@@ -14,7 +14,12 @@ const PRESETS = [1, 1.25, 1.5, 1.75, 2, 2.5];
  * stuck with 1x / 1.5x / 2x when the speed you actually want is 1.35x. Presets
  * remain for the people who just want one tap.
  */
-export function SpeedControl() {
+export function SpeedControl({
+  /** "surface" matches the docked bar; "light" sits on the Now Playing backdrop. */
+  tone = "surface",
+}: {
+  tone?: "surface" | "light";
+} = {}) {
   const rate = usePlayer((s) => s.playbackRate);
   const setRate = usePlayer((s) => s.setRate);
   const [open, setOpen] = useState(false);
@@ -46,7 +51,12 @@ export function SpeedControl() {
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-label={`Playback speed, currently ${label}`}
-        className="h-8 min-w-12 rounded-full border border-border px-2.5 text-xs font-semibold tabular-nums text-foreground transition-colors hover:bg-surface-hover"
+        className={cn(
+          "h-8 min-w-12 rounded-full px-2.5 text-xs font-semibold tabular-nums transition-colors",
+          tone === "light"
+            ? "bg-white/15 text-white hover:bg-white/25"
+            : "border border-border text-foreground hover:bg-surface-hover",
+        )}
       >
         {label}
       </button>
@@ -55,10 +65,22 @@ export function SpeedControl() {
         <div
           role="dialog"
           aria-label="Playback speed"
-          className="absolute bottom-full right-0 z-50 mb-2 w-60 rounded-xl border border-border bg-surface p-3 shadow-[var(--shadow-lifted)]"
+          className={cn(
+            "absolute bottom-full z-50 mb-2 w-60 rounded-xl p-3 shadow-[var(--shadow-lifted)]",
+            tone === "light"
+              ? "left-0 bg-neutral-900/95 text-white backdrop-blur-xl"
+              : "right-0 border border-border bg-surface",
+          )}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-muted-foreground">Speed</span>
+            <span
+              className={cn(
+                "text-xs font-medium",
+                tone === "light" ? "text-white/60" : "text-muted-foreground",
+              )}
+            >
+              Speed
+            </span>
             <span className="text-sm font-semibold tabular-nums">{label}</span>
           </div>
 
@@ -70,10 +92,18 @@ export function SpeedControl() {
             value={rate}
             onChange={(e) => setRate(Number(e.target.value))}
             aria-label="Playback speed"
-            className="mt-3 w-full accent-[var(--accent)]"
+            className={cn(
+              "mt-3 w-full",
+              tone === "light" ? "accent-white" : "accent-[var(--accent)]",
+            )}
           />
 
-          <div className="mt-1 flex justify-between text-[10px] text-subtle-foreground">
+          <div
+            className={cn(
+              "mt-1 flex justify-between text-[10px]",
+              tone === "light" ? "text-white/50" : "text-subtle-foreground",
+            )}
+          >
             <span>{MIN_RATE}×</span>
             <span>{MAX_RATE}×</span>
           </div>
@@ -87,7 +117,9 @@ export function SpeedControl() {
                   "rounded-lg px-2 py-1.5 text-xs font-medium tabular-nums transition-colors",
                   Math.abs(rate - preset) < 0.001
                     ? "bg-accent text-accent-foreground"
-                    : "bg-surface-raised text-muted-foreground hover:bg-surface-hover hover:text-foreground",
+                    : tone === "light"
+                      ? "bg-white/10 text-white/75 hover:bg-white/20 hover:text-white"
+                      : "bg-surface-raised text-muted-foreground hover:bg-surface-hover hover:text-foreground",
                 )}
               >
                 {preset}×
@@ -95,7 +127,12 @@ export function SpeedControl() {
             ))}
           </div>
 
-          <p className="mt-3 text-[11px] leading-relaxed text-subtle-foreground">
+          <p
+            className={cn(
+              "mt-3 text-[11px] leading-relaxed",
+              tone === "light" ? "text-white/50" : "text-subtle-foreground",
+            )}
+          >
             Pitch stays natural at every speed.
           </p>
         </div>

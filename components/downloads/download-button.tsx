@@ -4,14 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Download, Loader2, Trash2 } from "lucide-react";
 import {
   downloadEpisode,
-  isDownloadSupported,
-  isDownloaded,
   removeDownload,
   type DownloadedEpisode,
 } from "@/lib/offline/downloads";
+import { useDownloadStatus } from "@/lib/offline/download-status";
 import { cn } from "@/lib/utils";
 
-type State = "checking" | "idle" | "downloading" | "done" | "error";
+/** Local, per-button state. Whether the file exists comes from the shared set. */
+type State = "idle" | "downloading" | "error";
 
 export function DownloadButton({
   episode,
@@ -22,25 +22,24 @@ export function DownloadButton({
   variant?: "icon" | "labelled";
   className?: string;
 }) {
-  const [state, setState] = useState<State>("checking");
+  const [state, setState] = useState<State>("idle");
   const [percent, setPercent] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  const ensureLoaded = useDownloadStatus((s) => s.ensureLoaded);
+  const statusLoaded = useDownloadStatus((s) => s.loaded);
+  const markDownloaded = useDownloadStatus((s) => s.markDownloaded);
+  const markRemoved = useDownloadStatus((s) => s.markRemoved);
+  // Selecting a boolean rather than the Set keeps a download elsewhere on the
+  // page from re-rendering every other row.
+  const done = useDownloadStatus((s) => s.ids.has(episode.episodeId));
+
   useEffect(() => {
-    let cancelled = false;
-    if (!isDownloadSupported()) {
-      setState("idle");
-      return;
-    }
-    void isDownloaded(episode.episodeId).then((has) => {
-      if (!cancelled) setState(has ? "done" : "idle");
-    });
-    return () => {
-      cancelled = true;
-      abortRef.current?.abort();
-    };
-  }, [episode.episodeId]);
+    ensureLoaded();
+  }, [ensureLoaded]);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   async function start() {
     setState("downloading");
@@ -59,7 +58,8 @@ export function DownloadButton({
     );
 
     if (result.ok) {
-      setState("done");
+      markDownloaded(episode.episodeId);
+      setState("idle");
       setPercent(100);
     } else {
       setState("error");
@@ -68,28 +68,27 @@ export function DownloadButton({
   }
 
   async function remove() {
-    await removeDownload(episode.episodeId);
-    setState("idle");
+    markRemoved(episode.episodeId);
     setPercent(0);
+    await removeDownload(episode.episodeId);
   }
 
-  const label =
-    state === "done"
-      ? "Remove download"
-      : state === "downloading"
-        ? `Downloading, ${percent}%`
-        : "Download for offline";
+  const label = done
+    ? "Remove download"
+    : state === "downloading"
+      ? `Downloading, ${percent}%`
+      : "Download for offline";
 
   function onClick() {
-    if (state === "done") void remove();
-    else if (state === "idle" || state === "error") void start();
-    else if (state === "downloading") abortRef.current?.abort();
+    if (state === "downloading") abortRef.current?.abort();
+    else if (done) void remove();
+    else void start();
   }
 
   const icon =
     state === "downloading" ? (
       <Loader2 className="size-4 animate-spin" />
-    ) : state === "done" ? (
+    ) : done ? (
       <Check className="size-4 text-success" />
     ) : (
       <Download className="size-4" />
@@ -100,15 +99,11 @@ export function DownloadButton({
       <div className={className}>
         <button
           onClick={onClick}
-          disabled={state === "checking"}
+          disabled={!statusLoaded}
           className="inline-flex h-12 items-center gap-2 rounded-[var(--radius-app)] border border-border bg-surface px-4 text-sm font-medium transition-colors hover:bg-surface-hover disabled:opacity-60"
         >
-          {state === "done" ? <Trash2 className="size-4" /> : icon}
-          {state === "done"
-            ? "Downloaded"
-            : state === "downloading"
-              ? `${percent}%`
-              : "Download"}
+          {done ? <Trash2 className="size-4" /> : icon}
+          {done ? "Downloaded" : state === "downloading" ? `${percent}%` : "Download"}
         </button>
         {error && <p className="mt-1.5 text-xs text-danger">{error}</p>}
       </div>
@@ -118,12 +113,12 @@ export function DownloadButton({
   return (
     <button
       onClick={onClick}
-      disabled={state === "checking"}
+      disabled={!statusLoaded}
       aria-label={label}
       title={label}
       className={cn(
         "relative grid size-8 place-items-center rounded-lg text-subtle-foreground transition-colors hover:bg-surface-hover hover:text-foreground",
-        state === "done" && "text-success",
+        done && "text-success",
         className,
       )}
     >

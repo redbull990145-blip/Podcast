@@ -59,9 +59,9 @@ export default async function EpisodePage({
           <Image
             src={artwork}
             alt=""
-            width={128}
-            height={128}
-            unoptimized
+            width={256}
+            height={256}
+            sizes="128px"
             priority
             className="size-20 shrink-0 rounded-xl object-cover shadow-[var(--shadow-soft)] sm:size-32"
           />

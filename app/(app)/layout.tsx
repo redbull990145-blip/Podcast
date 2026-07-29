@@ -6,6 +6,7 @@ import { AppSidebar } from "@/components/nav/app-sidebar";
 import { MobileNav } from "@/components/nav/mobile-nav";
 import { PlayerProvider } from "@/components/player/player-provider";
 import { PlayerBar } from "@/components/player/player-bar";
+import { NowPlayingHost } from "@/components/player/now-playing-host";
 
 /**
  * Authenticated shell.
@@ -35,6 +36,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <main className="min-w-0 pb-40 lg:pb-28">{children}</main>
 
           <PlayerBar />
+          <NowPlayingHost />
           <MobileNav />
           {/* Headless: owns the audio element, position sync and OS controls. */}
           <PlayerProvider />
