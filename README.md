@@ -13,8 +13,8 @@ what keeps running costs at roughly zero.
 | Phase | Scope | State |
 | --- | --- | --- |
 | 0 | Scaffolding, schema, auth, app shell | ✅ Done |
-| 1 | Search, subscribe, browse, play, resume | Next |
-| 2 | Queue, cross-device sync, OPML, offline/PWA | Planned |
+| 1 | Search, subscribe, browse, play, resume | ✅ Done |
+| 2 | Queue, cross-device sync, OPML, offline/PWA | Next |
 | 3 | AI transcripts, show notes, episode Q&A | Planned |
 | 4 | Recommendations, power mode, polish | Planned |
 

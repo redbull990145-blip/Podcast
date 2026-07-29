@@ -4,6 +4,8 @@ import { ThemeProvider } from "@/components/theme/theme-provider";
 import { QueryProvider } from "@/components/providers/query-provider";
 import { AppSidebar } from "@/components/nav/app-sidebar";
 import { MobileNav } from "@/components/nav/mobile-nav";
+import { PlayerProvider } from "@/components/player/player-provider";
+import { PlayerBar } from "@/components/player/player-bar";
 
 /**
  * Authenticated shell.
@@ -29,11 +31,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             }
           />
 
-          {/* Bottom padding leaves room for the mobile tab bar and, later, the
-              persistent player docked above it. */}
-          <main className="min-w-0 pb-24 lg:pb-8">{children}</main>
+          {/* Bottom padding clears the mobile tab bar and the docked player. */}
+          <main className="min-w-0 pb-40 lg:pb-28">{children}</main>
 
+          <PlayerBar />
           <MobileNav />
+          {/* Headless: owns the audio element, position sync and OS controls. */}
+          <PlayerProvider />
         </div>
       </QueryProvider>
     </ThemeProvider>

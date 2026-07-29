@@ -1,24 +1,34 @@
 import type { Metadata } from "next";
-import { Compass } from "lucide-react";
-import { EmptyState, PageHeader, PageShell } from "@/components/ui/page";
+import { eq } from "drizzle-orm";
+import { redirect } from "next/navigation";
+import { getUser } from "@/lib/supabase/server";
+import { db } from "@/lib/db/client";
+import { subscriptions } from "@/lib/db/schema";
+import { PageHeader, PageShell } from "@/components/ui/page";
+import { DiscoverPanel } from "@/components/podcasts/discover-panel";
 
 export const metadata: Metadata = { title: "Discover" };
 
-export default function DiscoverPage() {
+export default async function DiscoverPage() {
+  const user = await getUser();
+  if (!user) redirect("/login");
+
+  // Passed down so search results can render "Following" without a second
+  // round-trip per card.
+  const rows = await db.query.subscriptions.findMany({
+    where: eq(subscriptions.userId, user.id),
+    with: { podcast: { columns: { feedUrl: true } } },
+  });
+
   return (
     <PageShell>
       <PageHeader
         title="Discover"
-        description="Two catalogues plus raw RSS, so independent shows actually surface."
+        description="Searches Apple's catalogue and the independent Podcast Index at once."
       />
 
       <div className="mt-8">
-        {/* Phase 1 adds search; Phase 4 adds explained recommendations. */}
-        <EmptyState
-          Icon={Compass}
-          title="Search is coming next"
-          description="This is where podcast search, category browsing and add-by-RSS will live, followed by recommendations that tell you why they picked each show."
-        />
+        <DiscoverPanel subscribedFeedUrls={rows.map((r) => r.podcast.feedUrl)} />
       </div>
     </PageShell>
   );
