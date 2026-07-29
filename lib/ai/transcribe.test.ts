@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { calibrateSecondsPerByte, mergeSegments, planChunks } from "./transcribe";
+import {
+  calibrateSecondsPerByte,
+  formatResetWindow,
+  mergeSegments,
+  planChunks,
+  rateLimitMessage,
+} from "./transcribe";
 
 describe("planChunks", () => {
   it("returns a single range when the file fits in one chunk", () => {
@@ -134,5 +140,59 @@ describe("mergeSegments", () => {
       1 / 1000,
     );
     expect(merged).toEqual([]);
+  });
+});
+
+describe("formatResetWindow", () => {
+  it("reads Groq's compact minutes-and-seconds format", () => {
+    expect(formatResetWindow("59m20s")).toBe("59 minutes");
+    expect(formatResetWindow("12m30s")).toBe("13 minutes");
+  });
+
+  it("rounds to hours only once past a full hour", () => {
+    expect(formatResetWindow("60m")).toBe("an hour");
+    expect(formatResetWindow("150m")).toBe("3 hours");
+  });
+
+  it("reads a bare seconds value from Retry-After", () => {
+    expect(formatResetWindow("30")).toBe("30 seconds");
+  });
+
+  it("reads a fractional seconds-only value", () => {
+    expect(formatResetWindow("43.2s")).toBe("44 seconds");
+  });
+
+  it("switches to minutes past a minute and a half", () => {
+    expect(formatResetWindow("120")).toBe("2 minutes");
+  });
+
+  it("returns null for missing or nonsense input", () => {
+    expect(formatResetWindow(null)).toBeNull();
+    expect(formatResetWindow("soon")).toBeNull();
+    expect(formatResetWindow("0")).toBeNull();
+  });
+});
+
+describe("rateLimitMessage", () => {
+  const headersOf = (map: Record<string, string>) => ({
+    headers: { get: (name: string) => map[name] ?? null },
+  });
+
+  it("tells the user how long the shared allowance takes to free up", () => {
+    const message = rateLimitMessage(
+      headersOf({ "x-ratelimit-reset-audio-seconds": "59m20s" }),
+    );
+    expect(message).toContain("59 minutes");
+    expect(message).toContain("own Groq or OpenAI key");
+  });
+
+  it("falls back to Retry-After", () => {
+    expect(rateLimitMessage(headersOf({ "retry-after": "45" }))).toContain("45 seconds");
+  });
+
+  it("stays useful when no reset header is present", () => {
+    const message = rateLimitMessage(headersOf({}));
+    expect(message).toContain("used up for now");
+    expect(message).not.toContain("about");
   });
 });

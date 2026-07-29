@@ -1,5 +1,6 @@
 import type { SttConfig } from "./config";
 import type { TranscriptSegment } from "@/lib/db/schema";
+import { prepareChunk } from "./mp3";
 
 /**
  * Speech to text.
@@ -31,8 +32,17 @@ const CHUNK_TARGET_BYTES = 20 * 1024 * 1024;
  */
 const MAX_TOTAL_BYTES = 360 * 1024 * 1024;
 
-/** How many chunks transcribe at once. Bounded to respect free-tier rate limits. */
-const TRANSCRIBE_CONCURRENCY = 3;
+/** How many chunks transcribe at once. Bounded to keep peak memory modest. */
+const TRANSCRIBE_CONCURRENCY = 4;
+
+/**
+ * Stop starting new chunks past this point.
+ *
+ * The route is capped at 60s by the platform, and being killed mid-flight
+ * returns an opaque 502 with no explanation. Giving up a little early leaves
+ * room to answer with something the listener can act on.
+ */
+const JOB_DEADLINE_MS = 48_000;
 
 /**
  * Fallback calibration when neither a feed duration nor a usable first chunk is
@@ -197,11 +207,17 @@ async function probeAudio(
   }
 }
 
-/** Fetches one byte range as a Blob. */
-async function fetchRange(
+/**
+ * Fetches one byte range and trims it to a clean frame boundary.
+ *
+ * See lib/ai/mp3.ts for why the first chunk in particular must not keep the
+ * file's original header.
+ */
+async function fetchChunk(
   url: string,
   start: number,
   end: number,
+  isFirst: boolean,
   signal?: AbortSignal,
 ): Promise<Blob> {
   const controller = new AbortController();
@@ -215,7 +231,12 @@ async function fetchRange(
       signal: combined,
     });
     if (!response.ok) throw new Error(`range fetch failed: ${response.status}`);
-    return await response.blob();
+
+    const buffer = await response.arrayBuffer();
+    const prepared = prepareChunk(new Uint8Array(buffer), isFirst);
+    // Re-wrap the view's bytes: a subarray shares its parent's buffer, and the
+    // Blob constructor's type only accepts a plain ArrayBuffer view.
+    return new Blob([prepared.slice().buffer], { type: "audio/mpeg" });
   } finally {
     clearTimeout(timeout);
   }
@@ -257,16 +278,13 @@ async function transcribeBlob(
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
       if (response.status === 429) {
-        return {
-          ok: false,
-          error: "The transcription service is rate limited right now. Try again shortly.",
-        };
+        return { ok: false, error: rateLimitMessage(response) };
       }
       if (response.status === 401 || response.status === 403) {
         return { ok: false, error: "The transcription API key was rejected." };
       }
       // Never surface the raw provider body to the client — it can echo the key.
-      console.error("Transcription failed", response.status, detail.slice(0, 200));
+      console.error("Transcription failed", response.status, detail.slice(0, 300));
       return { ok: false, error: "Transcription failed. Please try again." };
     }
 
@@ -381,15 +399,22 @@ async function transcribeChunked(
   // same task keeps at most TRANSCRIBE_CONCURRENCY chunks resident in memory.
   let nextIndex = 0;
   let failure: string | null = null;
+  const deadline = Date.now() + JOB_DEADLINE_MS;
 
   async function worker() {
     for (;;) {
       const index = nextIndex++;
       if (index >= ranges.length || failure) return;
 
+      if (Date.now() > deadline) {
+        failure ??=
+          "This episode is too long to finish transcribing in one go. Adding your own Groq or OpenAI key in Settings lifts the shared limits that slow this down.";
+        return;
+      }
+
       const { start, end } = ranges[index];
       try {
-        const blob = await fetchRange(audioUrl, start, end, signal);
+        const blob = await fetchChunk(audioUrl, start, end, index === 0, signal);
         const transcribed = await transcribeBlob(blob, config, signal);
         if (!transcribed.ok) {
           failure ??= transcribed.error;
@@ -438,6 +463,53 @@ async function transcribeChunked(
   if (!text) return { ok: false, error: "The transcription came back empty." };
 
   return { ok: true, text, segments, model: `${config.provider}/${config.model}` };
+}
+
+/**
+ * Turns a provider 429 into something the listener can act on.
+ *
+ * The free tier's binding limit is audio-seconds per hour, shared across
+ * everyone using this deployment — so "try again shortly" is misleading when
+ * the real answer is closer to forty minutes. The reset headers say exactly
+ * how long, and saying so beats letting someone retry in a loop.
+ */
+export function rateLimitMessage(response: {
+  headers: { get(name: string): string | null };
+}): string {
+  const reset =
+    response.headers.get("x-ratelimit-reset-audio-seconds") ??
+    response.headers.get("retry-after");
+
+  const friendly = formatResetWindow(reset);
+  return friendly
+    ? `Daily transcription capacity is used up for now — it frees up in about ${friendly}. Add your own Groq or OpenAI key in Settings to skip the shared limit.`
+    : "Transcription capacity is used up for now. Try again later, or add your own Groq or OpenAI key in Settings to skip the shared limit.";
+}
+
+/** "59m20s" / "27.5" (seconds) / "43.2s" -> "an hour", "28 seconds", "44 seconds". */
+export function formatResetWindow(raw: string | null): string | null {
+  if (!raw) return null;
+
+  const trimmed = raw.trim();
+  // Bare numbers in a Retry-After header are seconds.
+  const bare = Number(trimmed);
+  const match = /^(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s?)?$/.exec(trimmed);
+
+  let seconds: number;
+  if (Number.isFinite(bare) && trimmed !== "") {
+    seconds = bare;
+  } else if (match && (match[1] || match[2])) {
+    seconds = Number(match[1] ?? 0) * 60 + Number(match[2] ?? 0);
+  } else {
+    return null;
+  }
+
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  if (seconds < 90) return `${Math.ceil(seconds)} seconds`;
+
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} minutes`;
+  return minutes < 90 ? "an hour" : `${Math.round(minutes / 60)} hours`;
 }
 
 /** Combines an optional caller signal with our own timeout signal. */
