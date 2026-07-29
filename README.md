@@ -15,8 +15,8 @@ what keeps running costs at roughly zero.
 | 0 | Scaffolding, schema, auth, app shell | ✅ Done |
 | 1 | Search, subscribe, browse, play, resume | ✅ Done |
 | 2 | Queue, cross-device sync, OPML, offline/PWA | ✅ Done |
-| 3 | AI transcripts, show notes, episode Q&A | Next |
-| 4 | Recommendations, power mode, polish | Planned |
+| 3 | AI transcripts, show notes, episode Q&A | ✅ Done |
+| 4 | Recommendations, power mode, polish | Next |
 
 ## Stack
 

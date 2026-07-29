@@ -11,6 +11,7 @@ import { getEpisodeWithPodcast } from "@/lib/podcasts/ingest";
 import { PageShell } from "@/components/ui/page";
 import { EpisodePlayButton } from "@/components/episodes/episode-play-button";
 import { ChaptersSection } from "@/components/chapters/chapters-section";
+import { AiPanel } from "@/components/ai/ai-panel";
 import { formatDurationLong, formatRelativeDate, stripHtml } from "@/lib/utils";
 
 export async function generateMetadata({
@@ -106,6 +107,8 @@ export default async function EpisodePage({
           played={progress?.played ?? false}
         />
       </div>
+
+      <AiPanel episodeId={episode.id} episodeTitle={episode.title} />
 
       <ChaptersSection episodeId={episode.id} />
 
