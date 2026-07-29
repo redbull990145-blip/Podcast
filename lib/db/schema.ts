@@ -147,10 +147,15 @@ export const episodes = pgTable(
     seasonNumber: integer("season_number"),
     imageUrl: text("image_url"),
     publishedAt: timestamp("published_at", { withTimezone: true }),
-    /** [{ startTime, title, url?, img? }] */
+    /** [{ startTime, title, url?, img? }] — resolved lazily, then cached here. */
     chapters: jsonb("chapters"),
     /** 'feed' | 'ai_generated' — drives the honest "AI-generated" badge. */
     chaptersSource: text("chapters_source"),
+    /**
+     * <podcast:chapters> URL. Persisted at ingest so resolving chapters for one
+     * episode is a single small fetch rather than a re-parse of the whole feed.
+     */
+    chaptersUrl: text("chapters_url"),
     /** <podcast:transcript> URL when the publisher provides one. */
     transcriptUrl: text("transcript_url"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

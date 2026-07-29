@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { CheckCircle2, Loader2, Pause, Play } from "lucide-react";
 import { usePlayer, type PlayableEpisode } from "@/lib/player/store";
+import { QueueButton } from "@/components/queue/queue-button";
+import { DownloadButton } from "@/components/downloads/download-button";
 import { cn, formatDurationLong, formatRelativeDate, stripHtml } from "@/lib/utils";
 
 export type EpisodeRowData = {
@@ -105,15 +107,29 @@ export function EpisodeRow({
             >
               {episode.title}
             </Link>
-            {progress?.played && (
-              <span
-                title="Played"
-                className="mt-0.5 shrink-0 text-success"
-                aria-label="Played"
-              >
-                <CheckCircle2 className="size-4" />
-              </span>
-            )}
+            <span className="flex shrink-0 items-center gap-1">
+              {progress?.played && (
+                <span
+                  title="Played"
+                  className="mt-0.5 text-success"
+                  aria-label="Played"
+                >
+                  <CheckCircle2 className="size-4" />
+                </span>
+              )}
+              <QueueButton episodeId={episode.id} />
+              <DownloadButton
+                episode={{
+                  episodeId: episode.id,
+                  enclosureUrl: episode.enclosureUrl,
+                  title: episode.title,
+                  podcastId: podcast.id,
+                  podcastTitle: podcast.title,
+                  artworkUrl: episode.imageUrl ?? podcast.artworkUrl,
+                  durationSeconds: episode.durationSeconds,
+                }}
+              />
+            </span>
           </div>
 
           {episode.description && (

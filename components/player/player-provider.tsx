@@ -57,9 +57,10 @@ export function PlayerProvider() {
     const onEnded = () => {
       _sync({ isPlaying: false });
       const { episode, duration } = usePlayer.getState();
-      if (episode) {
-        void persistPosition(episode.id, duration, duration, true, "complete", episode);
-      }
+      if (!episode) return;
+
+      void persistPosition(episode.id, duration, duration, true, "complete", episode);
+      void advanceQueue(episode.id);
     };
 
     audio.addEventListener("play", onPlay);
@@ -187,6 +188,56 @@ export function PlayerProvider() {
   }, []);
 
   return null;
+}
+
+/**
+ * Plays the next queued episode once the current one finishes.
+ *
+ * The finished episode is removed from the queue first, so an episode played
+ * straight through never lingers at the top of Up Next — a small thing that is
+ * wrong in several mainstream apps.
+ */
+async function advanceQueue(finishedEpisodeId: string) {
+  try {
+    await fetch(`/api/queue?episodeId=${finishedEpisodeId}`, { method: "DELETE" });
+
+    const res = await fetch("/api/queue");
+    if (!res.ok) return;
+
+    const { queue } = (await res.json()) as {
+      queue: {
+        episode: {
+          id: string;
+          title: string;
+          enclosureUrl: string;
+          durationSeconds: number | null;
+          imageUrl: string | null;
+          podcast: {
+            id: string;
+            title: string;
+            artworkUrl: string | null;
+            categories: string[];
+          };
+        };
+      }[];
+    };
+
+    const next = queue[0]?.episode;
+    if (!next) return;
+
+    usePlayer.getState().load({
+      id: next.id,
+      title: next.title,
+      enclosureUrl: next.enclosureUrl,
+      durationSeconds: next.durationSeconds,
+      artworkUrl: next.imageUrl ?? next.podcast.artworkUrl,
+      podcastId: next.podcast.id,
+      podcastTitle: next.podcast.title,
+      categories: next.podcast.categories,
+    });
+  } catch {
+    // Failing to advance just leaves the player stopped, which is recoverable.
+  }
 }
 
 async function persistPosition(

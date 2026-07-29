@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { Download } from "lucide-react";
-import { EmptyState, PageHeader, PageShell } from "@/components/ui/page";
+import { PageHeader, PageShell } from "@/components/ui/page";
+import { DownloadsList } from "@/components/downloads/downloads-list";
 
 export const metadata: Metadata = { title: "Downloads" };
 
@@ -9,15 +9,11 @@ export default function DownloadsPage() {
     <PageShell>
       <PageHeader
         title="Downloads"
-        description="Stored on this device only — we never upload your audio anywhere."
+        description="Stored in this browser only. We never upload your audio anywhere, and downloads don't count against any account limit."
       />
 
       <div className="mt-8">
-        <EmptyState
-          Icon={Download}
-          title="Nothing downloaded"
-          description="Downloaded episodes are kept in this browser's storage so they play with no connection at all."
-        />
+        <DownloadsList />
       </div>
     </PageShell>
   );

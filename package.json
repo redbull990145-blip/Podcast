@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -15,10 +15,12 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@hello-pangea/dnd": "^18.0.1",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.111.0",
     "@tanstack/react-query": "^5.101.4",
     "clsx": "^2.1.1",
+    "dexie": "^4.4.4",
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.27.0",
     "next": "^16.2.12",
@@ -30,6 +32,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@serwist/next": "^9.5.12",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^26.1.2",
     "@types/react": "^19.2.17",
@@ -37,6 +40,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^10.8.0",
     "eslint-config-next": "^16.2.12",
+    "serwist": "^9.5.12",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"

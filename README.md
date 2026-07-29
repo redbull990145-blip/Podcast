@@ -14,8 +14,8 @@ what keeps running costs at roughly zero.
 | --- | --- | --- |
 | 0 | Scaffolding, schema, auth, app shell | ✅ Done |
 | 1 | Search, subscribe, browse, play, resume | ✅ Done |
-| 2 | Queue, cross-device sync, OPML, offline/PWA | Next |
-| 3 | AI transcripts, show notes, episode Q&A | Planned |
+| 2 | Queue, cross-device sync, OPML, offline/PWA | ✅ Done |
+| 3 | AI transcripts, show notes, episode Q&A | Next |
 | 4 | Recommendations, power mode, polish | Planned |
 
 ## Stack
@@ -94,6 +94,12 @@ disables, with a note explaining why.
 | `npm run db:push` | Push the schema straight to the database |
 | `npm run db:studio` | Drizzle Studio |
 | `npm test` | Vitest |
+
+**Production builds use webpack, not Turbopack.** Serwist (the service worker
+toolchain) is a webpack plugin, so `npm run build` passes `--webpack`. Dev still
+runs on Turbopack — the service worker is disabled there anyway, since one left
+running in development caches hard enough to make code changes look like they
+never applied.
 
 ## Known advisories
 

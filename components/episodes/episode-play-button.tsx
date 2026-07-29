@@ -3,6 +3,8 @@
 import { CheckCircle2, Loader2, Pause, Play } from "lucide-react";
 import { usePlayer, type PlayableEpisode } from "@/lib/player/store";
 import { Button } from "@/components/ui/button";
+import { QueueButton } from "@/components/queue/queue-button";
+import { DownloadButton } from "@/components/downloads/download-button";
 import { formatDuration } from "@/lib/utils";
 
 /** Primary play control on the episode page, with resume state made explicit. */
@@ -49,6 +51,21 @@ export function EpisodePlayButton({
           Start over
         </Button>
       )}
+
+      <QueueButton episodeId={episode.id} variant="labelled" className="h-12" />
+
+      <DownloadButton
+        variant="labelled"
+        episode={{
+          episodeId: episode.id,
+          enclosureUrl: episode.enclosureUrl,
+          title: episode.title,
+          podcastId: episode.podcastId,
+          podcastTitle: episode.podcastTitle,
+          artworkUrl: episode.artworkUrl,
+          durationSeconds: episode.durationSeconds,
+        }}
+      />
 
       {played && (
         <span className="inline-flex items-center gap-1.5 text-sm text-success">

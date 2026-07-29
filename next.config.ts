@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import withSerwistInit from "@serwist/next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -10,4 +11,18 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+/**
+ * Serwist builds the service worker through a webpack plugin, so production
+ * builds run with `next build --webpack` (see package.json). Dev stays on
+ * Turbopack, which is fine because the service worker is disabled there — one
+ * left running in development caches aggressively enough to make code changes
+ * look like they never applied.
+ */
+const withSerwist = withSerwistInit({
+  swSrc: "app/sw.ts",
+  swDest: "public/sw.js",
+  disable: process.env.NODE_ENV === "development",
+  reloadOnOnline: true,
+});
+
+export default withSerwist(nextConfig);

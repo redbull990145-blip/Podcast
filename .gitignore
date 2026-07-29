@@ -37,6 +37,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 
+# generated service worker (built by Serwist during next build)
+public/sw.js
+public/sw.js.map
+public/swe-worker-*.js
+
 # testing
 coverage/
 

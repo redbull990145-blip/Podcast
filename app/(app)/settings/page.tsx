@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { getUser } from "@/lib/supabase/server";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { OpmlPanel } from "@/components/settings/opml-panel";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -55,15 +56,18 @@ export default async function SettingsPage() {
 
       <section className="mt-8">
         <h2 className="pt-4 text-xs font-semibold uppercase tracking-wider text-subtle-foreground">
+          Your data
+        </h2>
+        <OpmlPanel />
+      </section>
+
+      <section className="mt-8">
+        <h2 className="pt-4 text-xs font-semibold uppercase tracking-wider text-subtle-foreground">
           Coming in later phases
         </h2>
         <Row
           title="Power user mode"
           description="Reveals keyboard shortcuts, bulk actions, per-show playback rules and advanced filters. Free — it only controls how much UI is on screen."
-        />
-        <Row
-          title="Import and export"
-          description="Bring subscriptions in from any app via OPML, and take them out again whenever you like."
         />
         <Row
           title="Your own API key"

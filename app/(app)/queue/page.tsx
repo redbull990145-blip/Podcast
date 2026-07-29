@@ -1,23 +1,24 @@
 import type { Metadata } from "next";
-import { ListMusic } from "lucide-react";
-import { EmptyState, PageHeader, PageShell } from "@/components/ui/page";
+import { redirect } from "next/navigation";
+import { getUser } from "@/lib/supabase/server";
+import { PageHeader, PageShell } from "@/components/ui/page";
+import { QueueList } from "@/components/queue/queue-list";
 
 export const metadata: Metadata = { title: "Up Next" };
 
-export default function QueuePage() {
+export default async function QueuePage() {
+  const user = await getUser();
+  if (!user) redirect("/login");
+
   return (
     <PageShell>
       <PageHeader
         title="Up Next"
-        description="Drag to reorder, or use the keyboard. Syncs to your other devices."
+        description="Drag the handle to reorder, or focus it and use space then the arrow keys. Changes appear on your other devices within seconds."
       />
 
       <div className="mt-8">
-        <EmptyState
-          Icon={ListMusic}
-          title="Your queue is empty"
-          description="Add episodes from any show and they'll line up here, in the order you want them."
-        />
+        <QueueList userId={user.id} />
       </div>
     </PageShell>
   );

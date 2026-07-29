@@ -75,6 +75,7 @@ async function upsertEpisodes(podcastId: string, parsed: ParsedEpisode[]) {
           imageUrl: e.imageUrl,
           publishedAt: e.publishedAt,
           transcriptUrl: e.transcriptUrl,
+          chaptersUrl: e.chaptersUrl,
         })),
       )
       .onConflictDoUpdate({
@@ -91,6 +92,7 @@ async function upsertEpisodes(podcastId: string, parsed: ParsedEpisode[]) {
           imageUrl: sql`excluded.image_url`,
           publishedAt: sql`excluded.published_at`,
           transcriptUrl: sql`excluded.transcript_url`,
+          chaptersUrl: sql`excluded.chapters_url`,
           // chapters and chapters_source are deliberately not overwritten: an
           // AI-generated set would otherwise be wiped on every refresh.
         },
