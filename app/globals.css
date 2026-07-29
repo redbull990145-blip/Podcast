@@ -1,0 +1,157 @@
+@import "tailwindcss";
+
+/* Class-based dark mode so the user's explicit choice can beat the OS setting. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Design tokens.
+ *
+ * Semantic names only — components never reference a raw colour. Light and dark
+ * are defined as two complete sets so neither is an afterthought.
+ *
+ * oklch keeps perceived lightness consistent across hues, which is what stops
+ * the accent from looking muddy against dark surfaces.
+ */
+
+:root {
+  --background: oklch(0.994 0.002 265);
+  --surface: oklch(1 0 0);
+  --surface-raised: oklch(0.985 0.003 265);
+  --surface-hover: oklch(0.965 0.005 265);
+
+  --foreground: oklch(0.18 0.012 265);
+  --muted-foreground: oklch(0.52 0.016 265);
+  --subtle-foreground: oklch(0.65 0.014 265);
+
+  --border: oklch(0.918 0.006 265);
+  --border-strong: oklch(0.86 0.008 265);
+
+  --accent: oklch(0.556 0.208 287);
+  --accent-hover: oklch(0.5 0.213 287);
+  --accent-foreground: oklch(0.99 0 0);
+  --accent-subtle: oklch(0.955 0.025 287);
+
+  --success: oklch(0.62 0.15 155);
+  --warning: oklch(0.72 0.16 75);
+  --danger: oklch(0.58 0.2 25);
+
+  --radius: 0.75rem;
+
+  --shadow-soft: 0 1px 2px oklch(0.2 0.02 265 / 0.04), 0 4px 16px oklch(0.2 0.02 265 / 0.06);
+  --shadow-lifted: 0 2px 4px oklch(0.2 0.02 265 / 0.06), 0 12px 32px oklch(0.2 0.02 265 / 0.1);
+}
+
+.dark {
+  --background: oklch(0.145 0.014 268);
+  --surface: oklch(0.185 0.016 268);
+  --surface-raised: oklch(0.215 0.018 268);
+  --surface-hover: oklch(0.245 0.02 268);
+
+  --foreground: oklch(0.972 0.004 265);
+  --muted-foreground: oklch(0.7 0.016 265);
+  --subtle-foreground: oklch(0.58 0.016 265);
+
+  --border: oklch(0.275 0.017 268);
+  --border-strong: oklch(0.35 0.02 268);
+
+  --accent: oklch(0.685 0.185 288);
+  --accent-hover: oklch(0.74 0.175 288);
+  --accent-foreground: oklch(0.145 0.014 268);
+  --accent-subtle: oklch(0.26 0.06 288);
+
+  --success: oklch(0.7 0.16 155);
+  --warning: oklch(0.78 0.15 75);
+  --danger: oklch(0.68 0.19 25);
+
+  --shadow-soft: 0 1px 2px oklch(0 0 0 / 0.3), 0 4px 16px oklch(0 0 0 / 0.28);
+  --shadow-lifted: 0 2px 4px oklch(0 0 0 / 0.35), 0 12px 32px oklch(0 0 0 / 0.45);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-hover: var(--surface-hover);
+
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-subtle: var(--accent-subtle);
+
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+
+  --radius-app: var(--radius);
+
+  --shadow-soft: var(--shadow-soft);
+  --shadow-lifted: var(--shadow-lifted);
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Noto Sans", sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    /* The player is fixed to the bottom; keep anchored content clear of it. */
+    scroll-padding-bottom: 7rem;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Visible, consistent focus ring — keyboard navigation is a first-class path
+     in this app, not an afterthought bolted on for the power-user mode. */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background-color: var(--accent-subtle);
+    color: var(--foreground);
+  }
+}
+
+@layer utilities {
+  /* Respect users who ask for less motion — playback UI animates a lot. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* Slim scrollbars that match the theme rather than the OS. */
+@supports (scrollbar-width: thin) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+}
