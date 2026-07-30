@@ -1,5 +1,5 @@
 import type { SttConfig } from "./config";
-import type { TranscriptSegment } from "@/lib/db/schema";
+import type { TranscriptSegment, TranscriptWord } from "@/lib/db/schema";
 import { prepareChunk } from "./mp3";
 
 /**
@@ -44,13 +44,6 @@ const TRANSCRIBE_CONCURRENCY = 4;
  */
 const JOB_DEADLINE_MS = 48_000;
 
-/**
- * Fallback calibration when neither a feed duration nor a usable first chunk is
- * available: assume a 128kbps CBR stream (16000 bytes/sec). Only used to place
- * chunk boundaries on the timeline, and only when everything better is missing.
- */
-const NOMINAL_BYTES_PER_SEC = 16_000;
-
 const PROBE_TIMEOUT_MS = 20_000;
 const CHUNK_FETCH_TIMEOUT_MS = 45_000;
 const TRANSCRIBE_TIMEOUT_MS = 60_000;
@@ -60,20 +53,71 @@ export type TranscriptionResult =
   | { ok: false; error: string };
 
 type TranscribeOptions = {
-  /** Feed-reported episode length, used to place chunk boundaries accurately. */
-  durationSeconds?: number | null;
   signal?: AbortSignal;
 };
 
 type VerboseTranscription = {
   text?: string;
   segments?: { start?: number; end?: number; text?: string }[];
+  // Word-level timings, returned when timestamp_granularities[]=word is sent.
+  words?: { word?: string; start?: number; end?: number }[];
 };
 
-type ChunkResult = { startByte: number; byteLength: number; segments: TranscriptSegment[] };
+type ChunkResult = {
+  startByte: number;
+  byteLength: number;
+  segments: TranscriptSegment[];
+  /** Per-word timings for this chunk, chunk-relative (start from 0). */
+  words: TranscriptWord[];
+};
 
 const TOO_LONG_ERROR =
   "This episode is too long to transcribe automatically yet. Try an episode under about six hours.";
+
+const NON_MP3_TOO_LARGE_ERROR =
+  "This episode is an M4A/AAC file over the provider's 25 MB per-request cap. Splitting non-MP3 audio isn't supported yet — try a shorter episode or a different show for now.";
+
+/**
+ * Which audio container this file uses.
+ *
+ * Only MP3 can be split on arbitrary byte boundaries: its frames are
+ * self-synchronising, so a decoder can pick up mid-file. MP4/M4A wraps AAC in
+ * atoms with out-of-band sample tables, so a raw byte slice of the middle of
+ * an M4A file is not decodable as anything — every chunked upload comes back
+ * from the provider as "could not process file".
+ *
+ * The classifier consults magic bytes first (the source of truth), then falls
+ * back to Content-Type when the payload is too short to be sure. Anything it
+ * doesn't recognise is treated as non-MP3, so the caller errs on the safe
+ * whole-file path rather than shipping garbage to the provider.
+ */
+export type AudioKind = "mp3" | "mp4" | "other";
+
+export function detectAudioKind(head: Uint8Array, contentType: string | null): AudioKind {
+  if (head.length >= 3) {
+    // "ID3" — MP3 with an ID3v2 tag at the start.
+    if (head[0] === 0x49 && head[1] === 0x44 && head[2] === 0x33) return "mp3";
+    // MPEG audio sync word: 0xFF 0xEx/0xFx (Layer III bit set).
+    if (head[0] === 0xff && (head[1] & 0xe0) === 0xe0) return "mp3";
+  }
+
+  // MP4/M4A: "ftyp" atom, four bytes in.
+  if (
+    head.length >= 8 &&
+    head[4] === 0x66 &&
+    head[5] === 0x74 &&
+    head[6] === 0x79 &&
+    head[7] === 0x70
+  ) {
+    return "mp4";
+  }
+
+  const type = (contentType ?? "").toLowerCase();
+  if (type.includes("mpeg") || type.includes("mp3")) return "mp3";
+  if (type.includes("mp4") || type.includes("m4a") || type.includes("aac")) return "mp4";
+
+  return "other";
+}
 
 // ---------------------------------------------------------------------------
 // Pure helpers (unit-tested)
@@ -92,65 +136,98 @@ export function planChunks(
 }
 
 /**
- * Seconds-per-byte used to translate a chunk's byte offset into its start time
- * on the global timeline.
+ * The real duration of one chunk's audio, as Whisper heard it.
  *
- * MP3 podcast files are effectively constant-bitrate, so time is proportional
- * to byte position. A trustworthy feed duration gives the exact rate for the
- * whole file; failing that, the first chunk's measured duration calibrates it;
- * failing even that, a nominal bitrate keeps things roughly aligned.
+ * Within a chunk Whisper's timings are accurate and start from zero, so the end
+ * of the latest thing it transcribed is how long that slice of audio actually
+ * played for — regardless of the file's bitrate or any advertising stitched in.
+ *
+ * Words are the finer clock, but older Whisper variants return only segments;
+ * either is trustworthy, so prefer the later of the two.
  */
-export function calibrateSecondsPerByte(input: {
-  total: number;
-  durationSeconds?: number | null;
-  firstChunkBytes?: number;
-  firstChunkDuration?: number;
-}): number {
-  const { total, durationSeconds, firstChunkBytes, firstChunkDuration } = input;
-
-  if (durationSeconds && durationSeconds > 0 && total > 0) {
-    return durationSeconds / total;
-  }
-  if (firstChunkBytes && firstChunkBytes > 0 && firstChunkDuration && firstChunkDuration > 0) {
-    return firstChunkDuration / firstChunkBytes;
-  }
-  return 1 / NOMINAL_BYTES_PER_SEC;
+export function chunkDuration(chunk: { segments: TranscriptSegment[]; words: TranscriptWord[] }): number {
+  const lastSegment = chunk.segments.reduce((max, s) => Math.max(max, s.end), 0);
+  const lastWord = chunk.words.reduce((max, w) => Math.max(max, w.end), 0);
+  return Math.max(lastSegment, lastWord);
 }
 
 /**
- * Shifts every chunk's segments onto one timeline and merges them.
+ * Shifts every chunk's segments and words onto one timeline and merges them.
  *
- * Within a chunk Whisper's timings are accurate and start from zero; only the
- * chunk's own start time is unknown, and that comes from its byte offset. After
- * offsetting, segments are ordered and the odd duplicate that a frame of overlap
- * at a cut point can produce is dropped.
+ * Each chunk is a contiguous byte range of the served audio, played back to
+ * back. Whisper reports each chunk's timings from zero, and `chunkDuration`
+ * measures exactly how long that slice was — so chunk *i* starts at the sum of
+ * the durations of every chunk before it. That sum is exact: it does not depend
+ * on the file's bitrate or on the feed's reported duration, which is why a
+ * stitched-in ad can no longer accumulate error across the episode.
+ *
+ * After offsetting, words are grouped into whichever segment their start falls
+ * inside (so each line carries the per-word timings its fill needs), segments
+ * are ordered, and the odd duplicate a frame of overlap at a cut point can
+ * produce is dropped.
  */
-export function mergeSegments(
-  chunks: ChunkResult[],
-  secondsPerByte: number,
-): TranscriptSegment[] {
-  const all: TranscriptSegment[] = [];
-
+export function mergeSegments(chunks: ChunkResult[]): TranscriptSegment[] {
+  // Cumulative start time for each chunk, computed from measured durations.
+  const startTimes: number[] = [];
+  let cumulative = 0;
   for (const chunk of chunks) {
-    const offset = chunk.startByte * secondsPerByte;
+    startTimes.push(cumulative);
+    cumulative += chunkDuration(chunk);
+  }
+
+  type Item = {
+    segment: TranscriptSegment;
+    offset: number;
+    /** Words from the same chunk that fall inside this segment. */
+    words: TranscriptWord[];
+  };
+
+  const items: Item[] = [];
+
+  chunks.forEach((chunk, index) => {
+    const offset = startTimes[index];
+
+    const shiftedWords: TranscriptWord[] = chunk.words
+      .map((w) => {
+        const text = w.text.trim();
+        if (!text) return null;
+        return { start: w.start + offset, end: w.end + offset, text };
+      })
+      .filter((w): w is TranscriptWord => w !== null);
+
     for (const seg of chunk.segments) {
       const text = seg.text.trim();
       if (!text) continue;
-      all.push({ start: seg.start + offset, end: seg.end + offset, text });
-    }
-  }
 
-  all.sort((a, b) => a.start - b.start);
+      const start = seg.start + offset;
+      const end = seg.end + offset;
+
+      // A word belongs to a segment when it begins inside that segment's span.
+      // The upper bound is strict on purpose: a word starting exactly on a
+      // segment boundary is the first word of the *next* line, so it is counted
+      // there rather than trailing the previous one — which keeps the highlight
+      // attached to the line being read.
+      const owned = shiftedWords.filter((w) => w.start >= start - 0.01 && w.start < end);
+
+      items.push({
+        segment: { start, end, text },
+        offset,
+        words: owned,
+      });
+    }
+  });
+
+  items.sort((a, b) => a.segment.start - b.segment.start);
 
   const merged: TranscriptSegment[] = [];
-  for (const seg of all) {
+  for (const { segment, words } of items) {
     const prev = merged[merged.length - 1];
     // A cut can make the same line appear at the tail of one chunk and the head
     // of the next; skip a near-identical repeat rather than show it twice.
-    if (prev && prev.text === seg.text && Math.abs(prev.start - seg.start) < 1.5) {
+    if (prev && prev.text === segment.text && Math.abs(prev.start - segment.start) < 1.5) {
       continue;
     }
-    merged.push(seg);
+    merged.push(words.length > 0 ? { ...segment, words } : segment);
   }
 
   return merged;
@@ -165,7 +242,7 @@ async function probeAudio(
   url: string,
   signal?: AbortSignal,
 ): Promise<
-  | { ok: true; total: number; rangeSupported: boolean }
+  | { ok: true; total: number; rangeSupported: boolean; kind: AudioKind }
   | { ok: false; error: string }
 > {
   const controller = new AbortController();
@@ -173,27 +250,30 @@ async function probeAudio(
   const combined = mergeSignals(signal, controller.signal);
 
   try {
-    // A single-byte range doubles as a cheap capability probe: a 206 with a
-    // Content-Range header means the host supports the ranged fetches chunking
-    // needs, and hands us the total size in the process.
+    // Pull the first 128 bytes rather than a single byte: it costs nothing
+    // extra over the round trip and lets us sniff MP3-vs-MP4 magic bytes at
+    // the same time, which decides whether the file can be chunked.
     const response = await fetch(url, {
-      headers: { range: "bytes=0-0" },
+      headers: { range: "bytes=0-127" },
       signal: combined,
     });
 
+    const contentType = response.headers.get("content-type");
+
     if (response.status === 206) {
       const match = /\/(\d+)\s*$/.exec(response.headers.get("content-range") ?? "");
-      // Drain the one-byte body so the socket can be reused.
-      await response.arrayBuffer().catch(() => undefined);
+      const head = new Uint8Array(await response.arrayBuffer().catch(() => new ArrayBuffer(0)));
+      const kind = detectAudioKind(head, contentType);
       const total = match ? Number(match[1]) : 0;
-      if (total > 0) return { ok: true, total, rangeSupported: true };
-      return { ok: true, total: 0, rangeSupported: false };
+      if (total > 0) return { ok: true, total, rangeSupported: true, kind };
+      return { ok: true, total: 0, rangeSupported: false, kind };
     }
 
     if (response.ok) {
       const total = Number(response.headers.get("content-length") ?? 0);
-      await response.body?.cancel().catch(() => undefined);
-      return { ok: true, total, rangeSupported: false };
+      const head = new Uint8Array(await response.arrayBuffer().catch(() => new ArrayBuffer(0)));
+      const kind = detectAudioKind(head, contentType);
+      return { ok: true, total, rangeSupported: false, kind };
     }
 
     return { ok: false, error: "Couldn't download the episode audio." };
@@ -243,7 +323,8 @@ async function fetchChunk(
 }
 
 /**
- * Sends one audio blob to the provider and returns its (chunk-relative) segments.
+ * Sends one audio blob to the provider and returns its (chunk-relative) segments
+ * and word timings.
  *
  * The error is a discriminated result rather than a throw so the orchestrator
  * can tell a retryable rate-limit apart from a rejected key.
@@ -253,7 +334,7 @@ async function transcribeBlob(
   config: SttConfig,
   signal?: AbortSignal,
 ): Promise<
-  | { ok: true; text: string; segments: TranscriptSegment[] }
+  | { ok: true; text: string; segments: TranscriptSegment[]; words: TranscriptWord[] }
   | { ok: false; error: string }
 > {
   const form = new FormData();
@@ -262,6 +343,11 @@ async function transcribeBlob(
   // Verbose JSON returns per-segment timings, which is what makes a citation
   // clickable — without them an answer can only quote, not seek.
   form.append("response_format", "verbose_json");
+  // Word-level timestamps are the ground truth the caption fill tracks. Both
+  // segments and words are requested: segments drive the line layout and
+  // citations, words drive per-word highlighting and the chunk's true duration.
+  form.append("timestamp_granularities[]", "segment");
+  form.append("timestamp_granularities[]", "word");
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TRANSCRIBE_TIMEOUT_MS);
@@ -300,7 +386,11 @@ async function transcribeBlob(
       }))
       .filter((s) => s.text.length > 0);
 
-    return { ok: true, text, segments };
+    const words: TranscriptWord[] = (data.words ?? [])
+      .map((w) => ({ start: Number(w.start ?? 0), end: Number(w.end ?? 0), text: (w.word ?? "").trim() }))
+      .filter((w) => w.text.length > 0 && Number.isFinite(w.start) && Number.isFinite(w.end));
+
+    return { ok: true, text, segments, words };
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       return { ok: false, error: "Transcription timed out." };
@@ -316,7 +406,7 @@ export async function transcribeAudio(
   config: SttConfig,
   options: TranscribeOptions = {},
 ): Promise<TranscriptionResult> {
-  const { durationSeconds, signal } = options;
+  const { signal } = options;
 
   const probe = await probeAudio(audioUrl, signal);
   if (!probe.ok) return probe;
@@ -328,12 +418,19 @@ export async function transcribeAudio(
   // Small enough for one request, or the host won't let us range-fetch it. In
   // the latter case we can only try it whole, so bail if that would exceed the
   // provider cap rather than pulling a huge file into memory to be rejected.
-  const canChunk = probe.rangeSupported && probe.total > 0;
+  const canChunk = probe.rangeSupported && probe.total > 0 && probe.kind === "mp3";
   if (probe.total > 0 && probe.total <= PROVIDER_MAX_BYTES) {
     return transcribeWhole(audioUrl, config, signal);
   }
   if (!canChunk) {
     if (probe.total > PROVIDER_MAX_BYTES) {
+      // Non-MP3 audio can't be split on byte boundaries — MP4/M4A wraps its
+      // frames in atoms, so a raw byte slice isn't valid on its own. Say so
+      // plainly rather than let the provider return "not a media file" for
+      // every chunk, which reads as a credit or key problem.
+      if (probe.kind !== "mp3") {
+        return { ok: false, error: NON_MP3_TOO_LARGE_ERROR };
+      }
       return {
         ok: false,
         error:
@@ -345,7 +442,7 @@ export async function transcribeAudio(
     return transcribeWhole(audioUrl, config, signal);
   }
 
-  return transcribeChunked(audioUrl, config, probe.total, durationSeconds, signal);
+  return transcribeChunked(audioUrl, config, probe.total, signal);
 }
 
 /** The simple path: one download, one transcription. */
@@ -388,7 +485,6 @@ async function transcribeChunked(
   audioUrl: string,
   config: SttConfig,
   total: number,
-  durationSeconds: number | null | undefined,
   signal?: AbortSignal,
 ): Promise<TranscriptionResult> {
   const ranges = planChunks(total);
@@ -424,6 +520,7 @@ async function transcribeChunked(
           startByte: start,
           byteLength: end - start,
           segments: transcribed.segments,
+          words: transcribed.words,
         };
       } catch (err) {
         if (err instanceof Error && err.name === "AbortError") {
@@ -447,18 +544,7 @@ async function transcribeChunked(
     return { ok: false, error: "Transcription failed. Please try again." };
   }
 
-  const first = chunks[0];
-  const firstChunkDuration =
-    first.segments.length > 0 ? Math.max(...first.segments.map((s) => s.end)) : 0;
-
-  const secondsPerByte = calibrateSecondsPerByte({
-    total,
-    durationSeconds,
-    firstChunkBytes: first.byteLength,
-    firstChunkDuration,
-  });
-
-  const segments = mergeSegments(chunks, secondsPerByte);
+  const segments = mergeSegments(chunks);
   const text = segments.map((s) => s.text).join(" ").trim();
   if (!text) return { ok: false, error: "The transcription came back empty." };
 

@@ -68,6 +68,69 @@ describe("fillFraction", () => {
   });
 });
 
+describe("fillFraction (word-level)", () => {
+  // Two words of equal length, each +1 trailing space => each owns half the line.
+  // "hello" (0-1) ... gap ... "world" (2-3).
+  const words = [
+    { start: 0, end: 1, text: "hello" },
+    { start: 2, end: 3, text: "world" },
+  ];
+  const segment = { start: 0, end: 4, words };
+
+  it("sits at the leading edge of the first word as it begins", () => {
+    // Each word+space is 6 chars of 12 total, so "hello" owns the first 0.5.
+    expect(fillFraction(segment, 0)).toBeCloseTo(0);
+  });
+
+  it("eases across the first word's character slice while it is spoken", () => {
+    // Halfway through "hello": half of its 0.5 slice => 0.25.
+    expect(fillFraction(segment, 0.5)).toBeCloseTo(0.25);
+    // End of "hello": its whole slice => 0.5.
+    expect(fillFraction(segment, 1)).toBeCloseTo(0.5);
+  });
+
+  it("HOLDS during the gap between words instead of racing ahead", () => {
+    // Between t=1 (end of "hello") and t=2 (start of "world") no word is being
+    // spoken, so the fill must stay pinned at 0.5 — the crux of the fix.
+    expect(fillFraction(segment, 1.2)).toBeCloseTo(0.5);
+    expect(fillFraction(segment, 1.999)).toBeCloseTo(0.5);
+  });
+
+  it("steps to the next word's slice only when that word starts", () => {
+    // "world" begins at t=2; immediately it has spoken none of its own slice,
+    // so the fill is still at 0.5 (end of "hello").
+    expect(fillFraction(segment, 2)).toBeCloseTo(0.5);
+    // Halfway through "world": 0.5 + half of its 0.5 slice => 0.75.
+    expect(fillFraction(segment, 2.5)).toBeCloseTo(0.75);
+    // End of "world": full line => 1.
+    expect(fillFraction(segment, 3)).toBeCloseTo(1);
+  });
+
+  it("is full and stays full after the last word ends", () => {
+    expect(fillFraction(segment, 3.5)).toBe(1);
+    expect(fillFraction(segment, 999)).toBe(1);
+  });
+
+  it("is empty before the segment starts, even with words present", () => {
+    const early = { start: 10, end: 20, words: [{ start: 10, end: 11, text: "hi" }] };
+    expect(fillFraction(early, 9)).toBe(0);
+    expect(fillFraction(early, 10)).toBe(0);
+  });
+
+  it("treats an instantaneous word as fully spoken once it starts", () => {
+    const seg = {
+      start: 0,
+      end: 2,
+      words: [
+        { start: 0, end: 0, text: "boom" },
+        { start: 1, end: 2, text: "ok" },
+      ],
+    };
+    // "boom" (4 chars + space = 5) / 8 total = 0.625, spoken in full once reached.
+    expect(fillFraction(seg, 0.5)).toBeCloseTo(5 / 8);
+  });
+});
+
 describe("centreOffset", () => {
   // Ten 100px rows in a 300px viewport: 1000px of content, 700px of travel.
   const tops = Array.from({ length: 10 }, (_, i) => i * 100);

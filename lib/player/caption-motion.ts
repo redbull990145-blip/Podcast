@@ -54,25 +54,95 @@ export function lineEmphasis(index: number, active: number): LineEmphasis {
 }
 
 /**
- * How much of a line has been spoken, 0 to 1.
+ * How much of a line has been spoken, 0 to 1, as a fraction of the line's text.
  *
- * Interpolated linearly across the segment, because the transcripts we have
- * carry per-segment timings and not per-word ones — Whisper's `verbose_json`
- * gives sentence-level spans, and publisher VTT rarely does better. Over a
- * segment of a few seconds, linear is close enough that the fill lands on the
- * right word; it is an honest approximation, not a measurement.
+ * When the segment carries per-word timings (`segment.words`, from Whisper's
+ * word-level output) the fill tracks the actual spoken word: it steps to each
+ * word's leading edge as it begins, eases across it while it is being said, and
+ * — the part that matters — *holds* through a pause, because the next word
+ * hasn't started. Linear interpolation across the whole line has no concept of a
+ * pause and sweeps on regardless, which is exactly the "captions moving ahead of
+ * the voice" the word timings exist to fix.
  *
- * A zero-length or reversed segment fills instantly once reached rather than
- * dividing by zero.
+ * Progress is measured in characters, not seconds: the fill is a colour stop on
+ * the rendered text, so positioning it at the nth character puts the colour on
+ * the nth word rather than a second-based guess that ignores how long each word
+ * actually took to say.
+ *
+ * Without word timings (publisher VTT/JSON, or an older cached transcript) the
+ * fill falls back to a linear sweep across the segment — an honest approximation
+ * that is the best a line-level timestamp supports. A zero-length or reversed
+ * segment fills instantly once reached rather than dividing by zero.
  */
 export function fillFraction(
-  segment: Pick<TranscriptSegment, "start" | "end">,
+  segment: Pick<TranscriptSegment, "start" | "end" | "words">,
   currentTime: number,
 ): number {
   if (currentTime <= segment.start) return 0;
+
+  const words = segment.words;
+  if (words && words.length > 0) return wordFillFraction(words, currentTime);
+
   const span = segment.end - segment.start;
   if (!(span > 0)) return 1;
   return Math.min(1, (currentTime - segment.start) / span);
+}
+
+/**
+ * Per-word fill, expressed as a fraction of the line's total characters.
+ *
+ * Each word owns a slice of the line proportional to its visible length (the
+ * word plus the one space that follows it). The fill sits at the start of the
+ * current word until that word ends, then advances to the next — so a pause
+ * between words freezes the colour exactly where the speech stopped.
+ *
+ * Inside a word the sweep eases across that word's character slice, which is
+ * what keeps the highlight moving smoothly instead of snapping word to word.
+ */
+function wordFillFraction(
+  words: NonNullable<TranscriptSegment["words"]>,
+  currentTime: number,
+): number {
+  // Total visible length, counting one trailing space per word. A word's share
+  // of the line is (its length + 1) / totalChars, which is how far its leading
+  // and trailing edges sit as a fraction of the rendered text.
+  const lengths = words.map((w) => w.text.length + 1);
+  const totalChars = lengths.reduce((sum, n) => sum + n, 0);
+  if (totalChars <= 0) return 1;
+
+  // Walk in order; stop at the first word that has not yet begun. Everything
+  // before it is fully spoken, the current word is mid-flight, and anything
+  // after is unspoken.
+  let spokenChars = 0;
+  for (let i = 0; i < words.length; i += 1) {
+    const word = words[i];
+    const slice = lengths[i] / totalChars;
+
+    // Before this word starts: it and everything after is unspoken. The fill
+    // holds at the end of the previous word, which is where speech actually
+    // paused — no racing ahead through the gap.
+    if (currentTime < word.start) break;
+
+    const wordSpan = word.end - word.start;
+    // A zero-length word (or one the provider reported as instantaneous) counts
+    // as fully spoken the moment it starts.
+    const within = wordSpan > 0 ? (currentTime - word.start) / wordSpan : 1;
+
+    if (within >= 1) {
+      // This word is done; its whole slice is spoken, carry on to the next.
+      spokenChars += slice;
+      continue;
+    }
+
+    // Mid-word: the leading portion of the slice is spoken, eased across it.
+    return clamp01(spokenChars + slice * within);
+  }
+
+  return clamp01(spokenChars);
+}
+
+function clamp01(value: number): number {
+  return value < 0 ? 0 : value > 1 ? 1 : value;
 }
 
 /**

@@ -104,11 +104,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await transcribeAudio(episode.enclosureUrl, decision.stt, {
-      // Lets the chunker place split points on the timeline without guessing
-      // the bitrate. Unreliable feed durations fall back to per-chunk timing.
-      durationSeconds: episode.durationSeconds,
-    });
+    const result = await transcribeAudio(episode.enclosureUrl, decision.stt);
     if (!result.ok) return fail(result.error);
 
     const [row] = await db

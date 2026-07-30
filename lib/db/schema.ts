@@ -446,11 +446,27 @@ export type Chapter = {
   img?: string;
 };
 
+/**
+ * One spoken word with its precise timing, from Whisper's word-level output.
+ *
+ * Present only on AI transcripts: publisher VTT/JSON carries per-line spans at
+ * best, never per word. When `words` is absent the caption fill falls back to
+ * interpolating across the line (see lib/player/caption-motion.ts); when it is
+ * present the fill tracks the actual spoken word and holds still through pauses.
+ */
+export type TranscriptWord = {
+  start: number;
+  end: number;
+  text: string;
+};
+
 /** One transcript segment, used to make citations seekable. */
 export type TranscriptSegment = {
   start: number;
   end: number;
   text: string;
+  /** Per-word timings within this line, when the source provides them. */
+  words?: TranscriptWord[];
 };
 
 /** Power-user per-podcast playback overrides. */

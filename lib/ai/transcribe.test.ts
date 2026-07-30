@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  calibrateSecondsPerByte,
+  chunkDuration,
+  detectAudioKind,
   formatResetWindow,
   mergeSegments,
   planChunks,
@@ -41,105 +42,214 @@ describe("planChunks", () => {
   });
 });
 
-describe("calibrateSecondsPerByte", () => {
-  it("uses the feed duration when it is available", () => {
-    // 3600s over 60MB => 6e-5 s/byte.
-    expect(calibrateSecondsPerByte({ total: 60_000_000, durationSeconds: 3600 })).toBeCloseTo(
-      3600 / 60_000_000,
-    );
+describe("chunkDuration", () => {
+  it("is the end of the latest word, preferring the finer clock", () => {
+    const chunk = {
+      segments: [{ start: 0, end: 5, text: "a" }],
+      words: [
+        { start: 0, end: 1, text: "a" },
+        { start: 1, end: 6, text: "b" },
+      ],
+    };
+    expect(chunkDuration(chunk)).toBe(6);
   });
 
-  it("falls back to the first chunk's measured rate when no duration", () => {
-    const rate = calibrateSecondsPerByte({
-      total: 60_000_000,
-      durationSeconds: null,
-      firstChunkBytes: 20_000_000,
-      firstChunkDuration: 1200,
-    });
-    expect(rate).toBeCloseTo(1200 / 20_000_000);
+  it("falls back to segments when there are no words", () => {
+    const chunk = {
+      segments: [
+        { start: 0, end: 3, text: "one" },
+        { start: 3, end: 9, text: "two" },
+      ],
+      words: [],
+    };
+    expect(chunkDuration(chunk)).toBe(9);
   });
 
-  it("prefers a valid feed duration over first-chunk calibration", () => {
-    const rate = calibrateSecondsPerByte({
-      total: 60_000_000,
-      durationSeconds: 3600,
-      firstChunkBytes: 20_000_000,
-      firstChunkDuration: 999, // deliberately wrong; must be ignored
-    });
-    expect(rate).toBeCloseTo(3600 / 60_000_000);
-  });
-
-  it("falls back to a nominal bitrate when nothing else is known", () => {
-    const rate = calibrateSecondsPerByte({ total: 60_000_000 });
-    expect(rate).toBeCloseTo(1 / 16_000);
-  });
-
-  it("ignores a zero or negative duration", () => {
-    const rate = calibrateSecondsPerByte({ total: 100, durationSeconds: 0 });
-    expect(rate).toBeCloseTo(1 / 16_000);
+  it("is 0 for an empty chunk rather than -Infinity", () => {
+    expect(chunkDuration({ segments: [], words: [] })).toBe(0);
   });
 });
 
 describe("mergeSegments", () => {
-  it("offsets each chunk's timings by its byte position", () => {
-    // 1 second per 1000 bytes.
-    const merged = mergeSegments(
-      [
-        { startByte: 0, byteLength: 1000, segments: [{ start: 0, end: 2, text: "one" }] },
-        { startByte: 1000, byteLength: 1000, segments: [{ start: 0, end: 2, text: "two" }] },
-      ],
-      1 / 1000,
-    );
+  it("offsets each chunk by the measured durations of the chunks before it", () => {
+    // Two chunks: the first measures 2s, so the second starts at t=2 — regardless
+    // of byte position or bitrate, which is what kills the old drift.
+    const merged = mergeSegments([
+      {
+        startByte: 0,
+        byteLength: 1000,
+        segments: [{ start: 0, end: 2, text: "one" }],
+        words: [
+          { start: 0, end: 1, text: "on" },
+          { start: 1, end: 2, text: "e" },
+        ],
+      },
+      {
+        startByte: 1000,
+        byteLength: 1000,
+        segments: [{ start: 0, end: 2, text: "two" }],
+        words: [
+          { start: 0, end: 1, text: "tw" },
+          { start: 1, end: 2, text: "o" },
+        ],
+      },
+    ]);
 
-    expect(merged).toEqual([
+    expect(merged.map((s) => ({ start: s.start, end: s.end, text: s.text }))).toEqual([
       { start: 0, end: 2, text: "one" },
-      { start: 1, end: 3, text: "two" },
+      { start: 2, end: 4, text: "two" },
+    ]);
+    // Word timings are offset onto the global timeline too.
+    expect(merged[0].words).toEqual([
+      { start: 0, end: 1, text: "on" },
+      { start: 1, end: 2, text: "e" },
+    ]);
+    expect(merged[1].words).toEqual([
+      { start: 2, end: 3, text: "tw" },
+      { start: 3, end: 4, text: "o" },
     ]);
   });
 
-  it("orders segments across chunks by their global start", () => {
-    const merged = mergeSegments(
-      [
-        { startByte: 2000, byteLength: 1000, segments: [{ start: 0, end: 1, text: "late" }] },
-        { startByte: 0, byteLength: 1000, segments: [{ start: 0, end: 1, text: "early" }] },
-      ],
-      1 / 1000,
-    );
+  it("ignores byte offsets entirely — only measured durations place chunks", () => {
+    // Bytes that would imply wildly different starts under the old byte-rate
+    // model; the new model must not use them.
+    const merged = mergeSegments([
+      { startByte: 0, byteLength: 999999, segments: [{ start: 0, end: 1, text: "a" }], words: [] },
+      { startByte: 999999, byteLength: 1, segments: [{ start: 0, end: 1, text: "b" }], words: [] },
+    ]);
+    expect(merged.map((s) => s.start)).toEqual([0, 1]);
+  });
 
-    expect(merged.map((s) => s.text)).toEqual(["early", "late"]);
+  it("orders segments across chunks by their global start time", () => {
+    // Three chunks processed in array order. Chunk 0 measures 3s, chunk 1
+    // measures 1s (starts at 3), chunk 2 measures 2s (starts at 4).  After
+    // sorting by global start the order is chunk 0, 1, 2 — which happens to be
+    // the same as array order here because durations are monotonically placed.
+    const merged = mergeSegments([
+      { startByte: 0, byteLength: 1000, segments: [{ start: 0, end: 3, text: "alpha" }], words: [] },
+      { startByte: 3000, byteLength: 1000, segments: [{ start: 0, end: 1, text: "beta" }], words: [] },
+      { startByte: 6000, byteLength: 1000, segments: [{ start: 0, end: 2, text: "gamma" }], words: [] },
+    ]);
+
+    expect(merged.map((s) => ({ text: s.text, start: s.start }))).toEqual([
+      { text: "alpha", start: 0 },
+      { text: "beta", start: 3 },
+      { text: "gamma", start: 4 },
+    ]);
   });
 
   it("drops a duplicate line produced by an overlap at a cut point", () => {
-    const merged = mergeSegments(
-      [
-        { startByte: 0, byteLength: 1000, segments: [{ start: 0.9, end: 1, text: "boundary" }] },
-        { startByte: 1000, byteLength: 1000, segments: [{ start: 0, end: 0.2, text: "boundary" }] },
-      ],
-      1 / 1000,
-    );
+    const merged = mergeSegments([
+      {
+        startByte: 0,
+        byteLength: 1000,
+        segments: [{ start: 0.9, end: 1, text: "boundary" }],
+        words: [],
+      },
+      {
+        startByte: 1000,
+        byteLength: 1000,
+        segments: [{ start: 0, end: 0.2, text: "boundary" }],
+        words: [],
+      },
+    ]);
 
     // Both land near t=1.0s with identical text; only one should survive.
     expect(merged.filter((s) => s.text === "boundary")).toHaveLength(1);
   });
 
   it("keeps repeated words that are genuinely far apart", () => {
-    const merged = mergeSegments(
-      [
-        { startByte: 0, byteLength: 1000, segments: [{ start: 0, end: 1, text: "yeah" }] },
-        { startByte: 5000, byteLength: 1000, segments: [{ start: 0, end: 1, text: "yeah" }] },
-      ],
-      1 / 1000,
-    );
+    // The first chunk measures 3s of audio, so the second "yeah" starts at t=3
+    // — well past the 1.5s near-duplicate threshold.
+    const merged = mergeSegments([
+      { startByte: 0, byteLength: 1000, segments: [{ start: 0, end: 3, text: "yeah" }], words: [] },
+      {
+        startByte: 5000,
+        byteLength: 1000,
+        segments: [{ start: 0, end: 1, text: "yeah" }],
+        words: [],
+      },
+    ]);
 
     expect(merged.filter((s) => s.text === "yeah")).toHaveLength(2);
   });
 
   it("skips blank segments", () => {
-    const merged = mergeSegments(
-      [{ startByte: 0, byteLength: 1000, segments: [{ start: 0, end: 1, text: "   " }] }],
-      1 / 1000,
-    );
+    const merged = mergeSegments([
+      { startByte: 0, byteLength: 1000, segments: [{ start: 0, end: 1, text: "   " }], words: [] },
+    ]);
     expect(merged).toEqual([]);
+  });
+
+  it("attaches words to the segment whose span they start in", () => {
+    const merged = mergeSegments([
+      {
+        startByte: 0,
+        byteLength: 1000,
+        segments: [
+          { start: 0, end: 2, text: "first part" },
+          { start: 2, end: 4, text: "second part" },
+        ],
+        words: [
+          { start: 0, end: 1, text: "first" },
+          { start: 1, end: 2, text: "part" },
+          { start: 2, end: 3, text: "second" },
+          { start: 3, end: 4, text: "part" },
+        ],
+      },
+    ]);
+
+    expect(merged[0].words?.map((w) => w.text)).toEqual(["first", "part"]);
+    expect(merged[1].words?.map((w) => w.text)).toEqual(["second", "part"]);
+  });
+
+  it("omits the words field when a chunk carried none", () => {
+    const merged = mergeSegments([
+      { startByte: 0, byteLength: 1000, segments: [{ start: 0, end: 1, text: "ok" }], words: [] },
+    ]);
+    expect(merged[0].words).toBeUndefined();
+  });
+});
+
+describe("detectAudioKind", () => {
+  const bytes = (values: number[]) => new Uint8Array(values);
+  const zeros = (n: number) => new Uint8Array(n);
+
+  it("recognises an MP3 file that begins with an ID3v2 tag", () => {
+    const head = new Uint8Array([0x49, 0x44, 0x33, 0x04, 0, 0, 0, 0, 0, 0, ...zeros(20)]);
+    expect(detectAudioKind(head, "audio/mpeg")).toBe("mp3");
+  });
+
+  it("recognises a bare MP3 frame sync word", () => {
+    // 0xFF 0xFB — MPEG-1 Layer III, no CRC.
+    expect(detectAudioKind(bytes([0xff, 0xfb, 0x90, 0x64]), null)).toBe("mp3");
+  });
+
+  it("recognises an M4A file by its ftyp atom", () => {
+    // ISO base media: 4-byte size, then "ftyp".
+    const head = new Uint8Array([
+      0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70,
+      0x4d, 0x34, 0x41, 0x20, ...zeros(16),
+    ]);
+    expect(detectAudioKind(head, "audio/mp4")).toBe("mp4");
+  });
+
+  it("falls back to Content-Type when the bytes are unrecognisable", () => {
+    expect(detectAudioKind(zeros(4), "audio/mpeg")).toBe("mp3");
+    expect(detectAudioKind(zeros(4), "audio/mp4")).toBe("mp4");
+    expect(detectAudioKind(zeros(4), "audio/aac")).toBe("mp4");
+  });
+
+  it("returns 'other' when nothing identifies the file", () => {
+    expect(detectAudioKind(zeros(4), "application/octet-stream")).toBe("other");
+    expect(detectAudioKind(zeros(4), null)).toBe("other");
+  });
+
+  it("trusts magic bytes over a wrong Content-Type", () => {
+    // A misconfigured host that labels an MP3 as octet-stream still gets identified.
+    expect(detectAudioKind(bytes([0x49, 0x44, 0x33, 0x04]), "application/octet-stream")).toBe(
+      "mp3",
+    );
   });
 });
 
