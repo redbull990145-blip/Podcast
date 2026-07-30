@@ -1,7 +1,26 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
+import { Geist } from "next/font/google";
 import { MotionProvider } from "@/components/providers/motion-provider";
 import "./globals.css";
+
+/**
+ * Geist, used for the captions.
+ *
+ * Loaded through next/font rather than a <link> to Google: the files are
+ * fetched at build time and served from our own origin, so there is no
+ * third-party request at runtime, no extra DNS and TLS handshake before text
+ * can paint, and nothing for Google to log about who is reading what.
+ *
+ * The variable axis is pulled in whole rather than a list of static weights —
+ * one file covers 100 through 900, which is smaller than the two cuts the
+ * captions alone would otherwise need.
+ */
+const geist = Geist({
+  subsets: ["latin"],
+  variable: "--font-geist",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: {
@@ -56,7 +75,7 @@ const themeScript = `
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={geist.variable} suppressHydrationWarning>
       <head>
         <Script
           id="cadence-theme"

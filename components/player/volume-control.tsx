@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Volume1, Volume2, VolumeX } from "lucide-react";
 import { usePlayer } from "@/lib/player/store";
+import { Slider } from "@/components/ui/slider";
 import { press } from "@/lib/motion/gestures";
 import { popover } from "@/lib/motion/variants";
+import { VolumeIcon } from "./volume-icon";
 import { cn } from "@/lib/utils";
 
 /**
@@ -54,24 +55,6 @@ export function VolumeControl({
 
   const effective = muted ? 0 : volume;
   const percent = Math.round(effective * 100);
-  const Icon = effective === 0 ? VolumeX : effective < 0.5 ? Volume1 : Volume2;
-
-  const slider = (
-    <input
-      type="range"
-      min={0}
-      max={1}
-      step={0.01}
-      value={effective}
-      onChange={(e) => setVolume(Number(e.target.value))}
-      aria-label="Volume"
-      aria-valuetext={`${percent}%`}
-      className={cn(
-        "w-full cursor-pointer accent-[var(--accent)]",
-        layout === "inline" && "accent-white",
-      )}
-    />
-  );
 
   if (layout === "inline") {
     return (
@@ -82,9 +65,18 @@ export function VolumeControl({
           aria-label={muted ? "Unmute" : "Mute"}
           className="shrink-0 opacity-70 transition-opacity hover:opacity-100"
         >
-          <Icon className="size-4" />
+          <VolumeIcon level={effective} />
         </motion.button>
-        {slider}
+        <Slider
+          value={effective}
+          max={1}
+          step={0.01}
+          onInput={setVolume}
+          ariaLabel="Volume"
+          ariaValueText={`${percent}%`}
+          tone="light"
+          className="flex-1"
+        />
         <span className="w-8 shrink-0 text-right text-[11px] tabular-nums opacity-60">
           {percent}%
         </span>
@@ -116,7 +108,7 @@ export function VolumeControl({
           muted ? "text-accent" : "text-muted-foreground hover:text-foreground",
         )}
       >
-        <Icon className="size-4" />
+        <VolumeIcon level={effective} />
       </motion.button>
 
       {/*
@@ -136,11 +128,18 @@ export function VolumeControl({
               aria-label="Volume"
               className="block origin-bottom rounded-xl border border-border bg-surface p-3 shadow-[var(--shadow-lifted)]"
             >
-              <span className="flex items-baseline justify-between pb-2">
+              <span className="flex items-baseline justify-between pb-2.5">
                 <span className="text-xs font-medium text-muted-foreground">Volume</span>
                 <span className="text-xs font-semibold tabular-nums">{percent}%</span>
               </span>
-              {slider}
+              <Slider
+                value={effective}
+                max={1}
+                step={0.01}
+                onInput={setVolume}
+                ariaLabel="Volume"
+                ariaValueText={`${percent}%`}
+              />
             </motion.span>
           )}
         </AnimatePresence>

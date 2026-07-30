@@ -259,6 +259,22 @@
     --caption-unspoken: rgb(255 255 255 / 0.45);
   }
 
+  /*
+   * Captions are set in Geist Bold.
+   *
+   * The weight is on every line, not just the spoken one. Bolding only the
+   * active line would be the obvious way to emphasise it, but changing weight
+   * changes text metrics, which changes where the text wraps, which changes the
+   * row's height — and the transcript's positions come from a height table
+   * measured once. Every line would shift as the highlight passed it. Emphasis
+   * is carried by colour, scale and blur instead, none of which affect layout.
+   */
+  .caption-line__text {
+    font-family: var(--font-geist), var(--font-sans);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
   @supports (background-clip: text) or (-webkit-background-clip: text) {
     [data-caption-active] .caption-line__text {
       background-image: linear-gradient(

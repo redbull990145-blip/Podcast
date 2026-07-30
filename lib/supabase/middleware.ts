@@ -43,11 +43,20 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  // Do not run code between createServerClient and getUser — a stray await here
-  // is a common source of random logouts.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  /*
+   * Do not run code between createServerClient and this call — a stray await
+   * here is a common source of random logouts.
+   *
+   * `getClaims()` rather than `getUser()`: it still refreshes an expired token
+   * (which is this function's real job, and why the response object below has
+   * to be the one that reaches the browser), but it establishes identity by
+   * verifying the token's signature locally against the project's public key
+   * instead of asking the auth server. That removes one ~305ms round trip from
+   * every single request that matches the proxy — page loads, prefetches and
+   * all. See lib/supabase/server.ts for the trade-off this accepts.
+   */
+  const { data } = await supabase.auth.getClaims();
+  const user = data?.claims?.sub ? data.claims : null;
 
   const { pathname } = request.nextUrl;
   const isProtected = PROTECTED_PREFIXES.some((p) => pathname.startsWith(p));

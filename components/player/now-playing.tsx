@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Captions, ChevronDown, RotateCcw, RotateCw } from "lucide-react";
+import { Captions, ChevronDown } from "lucide-react";
 import { usePlayer } from "@/lib/player/store";
 import {
   extractArtworkPalette,
@@ -15,6 +15,7 @@ import { SPRING, TWEEN } from "@/lib/motion/config";
 import { press, pressPrimary } from "@/lib/motion/gestures";
 import { sheet } from "@/lib/motion/variants";
 import { Scrubber } from "./scrubber";
+import { SkipButton } from "./skip-button";
 import { SpeedControl } from "./speed-control";
 import { VolumeControl } from "./volume-control";
 import { SleepTimer } from "./sleep-timer";
@@ -44,8 +45,8 @@ function PositionBar() {
         currentTime={currentTime}
         duration={duration}
         onSeek={seek}
-        trackClassName="h-1.5 bg-white/20"
-        fillClassName="bg-white"
+        tone="light"
+        trackClassName="h-1.5"
       />
 
       <div className="mt-2 flex justify-between text-[11px] tabular-nums text-white/55">
@@ -255,17 +256,12 @@ export function NowPlaying() {
 
           {/* --- transport --- */}
           <div className="mt-4 flex items-center justify-center gap-6 sm:gap-8">
-            <motion.button
-              {...press}
+            <SkipButton
+              direction="back"
+              seconds={skipBackSeconds}
               onClick={skipBack}
-              aria-label={`Back ${skipBackSeconds} seconds`}
-              className="relative grid size-12 place-items-center rounded-full text-white/85 transition-colors hover:bg-white/15 hover:text-white"
-            >
-              <RotateCcw className="size-8" strokeWidth={1.5} />
-              <span className="absolute text-[9px] font-bold tabular-nums">
-                {skipBackSeconds}
-              </span>
-            </motion.button>
+              size="lg"
+            />
 
             <motion.button
               {...pressPrimary}
@@ -280,17 +276,12 @@ export function NowPlaying() {
               />
             </motion.button>
 
-            <motion.button
-              {...press}
+            <SkipButton
+              direction="forward"
+              seconds={skipForwardSeconds}
               onClick={skipForward}
-              aria-label={`Forward ${skipForwardSeconds} seconds`}
-              className="relative grid size-12 place-items-center rounded-full text-white/85 transition-colors hover:bg-white/15 hover:text-white"
-            >
-              <RotateCw className="size-8" strokeWidth={1.5} />
-              <span className="absolute text-[9px] font-bold tabular-nums">
-                {skipForwardSeconds}
-              </span>
-            </motion.button>
+              size="lg"
+            />
           </div>
 
           {/* --- secondary controls --- */}

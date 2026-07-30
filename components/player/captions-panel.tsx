@@ -22,6 +22,13 @@ import {
   isRowVisible,
   lineEmphasis,
 } from "@/lib/player/caption-motion";
+import {
+  inferCaptionOffset,
+  toPlaybackTime,
+  toTranscriptTime,
+  transcriptEndSeconds,
+} from "@/lib/player/caption-sync";
+import { CaptionSyncControl, useCaptionOffset } from "./caption-sync-control";
 import { measureRows, visibleRange, type RowMetrics } from "@/lib/player/virtual-list";
 import { SPRING, TWEEN } from "@/lib/motion/config";
 import { fade, popover } from "@/lib/motion/variants";
@@ -104,20 +111,40 @@ export function CaptionsPanel({ episodeId }: { episodeId: string }) {
   }
 
   return (
-    <VirtualTranscript segments={segments} onSeek={seek} source={data?.source ?? null} />
+    <VirtualTranscript
+      episodeId={episodeId}
+      segments={segments}
+      onSeek={seek}
+      source={data?.source ?? null}
+    />
   );
 }
 
 function VirtualTranscript({
+  episodeId,
   segments,
   onSeek,
   source,
 }: {
+  episodeId: string;
   segments: TranscriptSegment[];
   onSeek: (seconds: number) => void;
   source: string | null;
 }) {
   const reduceMotion = useReducedMotion() ?? false;
+
+  /**
+   * How far the captions have to be shifted to match this download.
+   *
+   * `duration` is the decoded length of the file actually being played, which
+   * includes any advertising stitched in on the way; the transcript's own end
+   * is the length of the clean master. The difference is the shift, and the
+   * listener can correct it (see caption-sync-control.tsx).
+   */
+  const duration = usePlayer((s) => s.duration);
+  const { nudge, adjust, reset } = useCaptionOffset(episodeId);
+  const autoOffset = inferCaptionOffset(duration, transcriptEndSeconds(segments));
+  const offset = autoOffset + nudge;
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLOListElement>(null);
@@ -131,7 +158,7 @@ function VirtualTranscript({
   const [following, setFollowing] = useState(true);
   const viewportHeight = viewport.height;
 
-  const activeIndex = useActiveSegment(segments);
+  const activeIndex = useActiveSegment(segments, offset);
 
   /**
    * Which transcript `metrics` describes. Comparing identity rather than
@@ -306,7 +333,7 @@ function VirtualTranscript({
   }, []);
 
   // --- karaoke fill --------------------------------------------------------
-  useKaraokeFill(segments, activeIndex, range.start, reduceMotion);
+  useKaraokeFill(segments, activeIndex, range.start, reduceMotion, offset);
 
   const positioned = measuring ? null : metrics;
   const rows = positioned ? segments.slice(range.start, range.end) : segments;
@@ -314,8 +341,17 @@ function VirtualTranscript({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center justify-between px-1 pb-2 text-[11px] uppercase tracking-wide opacity-50">
-        <span>{source === "publisher" ? "Publisher transcript" : "AI transcript"}</span>
+      <div className="flex items-center justify-between gap-2 px-1 pb-2 text-[11px] uppercase tracking-wide">
+        <span className="truncate opacity-50">
+          {source === "publisher" ? "Publisher transcript" : "AI transcript"}
+        </span>
+
+        <CaptionSyncControl
+          auto={autoOffset}
+          nudge={nudge}
+          onAdjust={adjust}
+          onReset={reset}
+        />
 
         <AnimatePresence>
           {!following && (
@@ -348,7 +384,12 @@ function VirtualTranscript({
         // One delegated listener instead of a closure per line.
         onClick={(event) => {
           const target = (event.target as HTMLElement).closest("[data-start]");
-          if (target) onSeek(Number(target.getAttribute("data-start")));
+          // Seek in playback time, which is transcript time plus whatever was
+          // stitched in ahead of it — otherwise clicking a line lands early by
+          // exactly the amount the captions were out by.
+          if (target) {
+            onSeek(toPlaybackTime(Number(target.getAttribute("data-start")), offset));
+          }
         }}
       >
         <motion.ol
@@ -439,6 +480,7 @@ function useKaraokeFill(
   activeIndex: number,
   rangeStart: number,
   reduceMotion: boolean,
+  offset: number,
 ) {
   const isPlaying = usePlayer((s) => s.isPlaying);
   // Constant while playing, so this never causes a render mid-playback; while
@@ -457,10 +499,11 @@ function useKaraokeFill(
       // loaded — an element with no source reports 0 forever, which would peg
       // the fill at empty rather than falling back to the store.
       const audio = getAudio();
-      const time =
+      const playback =
         audio && audio.currentSrc
           ? audio.currentTime
           : usePlayer.getState().currentTime;
+      const time = toTranscriptTime(playback, offset);
       const percent = reduceMotion ? 100 : fillFraction(segment, time) * 100;
       node.style.setProperty("--caption-fill", `${percent.toFixed(2)}%`);
     };
@@ -473,7 +516,7 @@ function useKaraokeFill(
       raf = requestAnimationFrame(tick);
     });
     return () => cancelAnimationFrame(raf);
-  }, [segments, activeIndex, rangeStart, isPlaying, pausedTime, reduceMotion]);
+  }, [segments, activeIndex, rangeStart, isPlaying, pausedTime, reduceMotion, offset]);
 }
 
 /**
@@ -483,7 +526,10 @@ function useKaraokeFill(
  * costs nothing unless it changes the line. The search resumes from the
  * previous index, making playback a constant-time check.
  */
-function useActiveSegment(segments: TranscriptSegment[] | null): number {
+function useActiveSegment(
+  segments: TranscriptSegment[] | null,
+  offset: number,
+): number {
   const [activeIndex, setActiveIndex] = useState(-1);
 
   useEffect(() => {
@@ -494,7 +540,11 @@ function useActiveSegment(segments: TranscriptSegment[] | null): number {
 
     let previous = -1;
     const update = (currentTime: number) => {
-      const next = activeSegmentIndex(segments, currentTime, previous);
+      const next = activeSegmentIndex(
+        segments,
+        toTranscriptTime(currentTime, offset),
+        previous,
+      );
       if (next !== previous) {
         previous = next;
         setActiveIndex(next);
@@ -503,7 +553,7 @@ function useActiveSegment(segments: TranscriptSegment[] | null): number {
 
     update(usePlayer.getState().currentTime);
     return usePlayer.subscribe((state) => update(state.currentTime));
-  }, [segments]);
+  }, [segments, offset]);
 
   return activeIndex;
 }

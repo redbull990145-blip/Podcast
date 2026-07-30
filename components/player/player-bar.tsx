@@ -3,13 +3,14 @@
 import Image from "next/image";
 import { useEffect } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ChevronUp, RotateCcw, RotateCw, X } from "lucide-react";
+import { ChevronUp, X } from "lucide-react";
 import { usePlayer } from "@/lib/player/store";
 import { SPRING, TWEEN } from "@/lib/motion/config";
 import { press, pressPrimary } from "@/lib/motion/gestures";
 import { SpeedControl } from "./speed-control";
 import { VolumeControl } from "./volume-control";
 import { Scrubber } from "./scrubber";
+import { SkipButton } from "./skip-button";
 import { TransportIcon } from "./transport-icon";
 import { formatDuration } from "@/lib/utils";
 
@@ -176,18 +177,13 @@ export function PlayerBar() {
             </motion.button>
 
             <div className="flex items-center gap-1 sm:gap-2">
-              <motion.button
-                {...press}
-                onClick={skipBack}
-                aria-label={`Back ${skipBackSeconds} seconds`}
-                title={`Back ${skipBackSeconds}s`}
-                className="relative hidden size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground sm:grid"
-              >
-                <RotateCcw className="size-5" strokeWidth={1.75} />
-                <span className="absolute text-[8px] font-bold tabular-nums">
-                  {skipBackSeconds}
-                </span>
-              </motion.button>
+              <span className="hidden sm:block">
+                <SkipButton
+                  direction="back"
+                  seconds={skipBackSeconds}
+                  onClick={skipBack}
+                />
+              </span>
 
               <motion.button
                 {...pressPrimary}
@@ -202,18 +198,11 @@ export function PlayerBar() {
                 />
               </motion.button>
 
-              <motion.button
-                {...press}
+              <SkipButton
+                direction="forward"
+                seconds={skipForwardSeconds}
                 onClick={skipForward}
-                aria-label={`Forward ${skipForwardSeconds} seconds`}
-                title={`Forward ${skipForwardSeconds}s`}
-                className="relative grid size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
-              >
-                <RotateCw className="size-5" strokeWidth={1.75} />
-                <span className="absolute text-[8px] font-bold tabular-nums">
-                  {skipForwardSeconds}
-                </span>
-              </motion.button>
+              />
             </div>
 
             <div className="hidden items-center gap-3 sm:flex">
