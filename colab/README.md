@@ -57,30 +57,40 @@ upload, `verbose_json`-shaped response with segments and word-level
 timestamps), so no other code needed to change — Colab is just another
 `SttConfig` with a different `baseUrl`.
 
-## The 100-second rule
+## How it works: URL in, poll for result
 
-A Cloudflare quick tunnel gives up on any request the origin hasn't answered
-within **about 100 seconds** and returns a `524`. Nothing on either end can
-raise that — it's the free tier's proxy timeout.
+The app **never uploads audio** to the local server. It POSTs the episode's
+URL to `/jobs`, gets a job id back immediately, and polls `/jobs/{id}` until
+the notebook reports `done`.
 
-So episodes are **not** sent whole to the local server. They're split into
-~4MB pieces (roughly 4 minutes of audio at 128kbps, ~17 minutes at 32kbps),
-transcribed one at a time, and stitched back onto a single timeline by the
-same `mergeSegments` used for oversized Groq uploads. Each piece is well
-inside the window; the job as a whole gets 15 minutes.
+That indirection is what makes it fast. The obvious design — download the
+episode here, upload it to Colab — moves every byte twice over the slowest
+link involved, and a Cloudflare quick tunnel abandons any request unanswered
+after **about 100 seconds**, so a long episode had to go up in dozens of
+small pieces. That was slow *and* it hammered the podcast host with a range
+request per piece until one was refused. Colab fetching the file once, itself,
+from Google's network beats both legs of that round trip.
 
-This is why the notebook defaults to `medium` rather than `large-v3` —
-roughly twice the speed, ample for captions, and it keeps every chunk
-comfortably clear of the cutoff.
+Polling keeps every HTTP request short, so the 100-second limit stops
+mattering at all.
 
-Only one transcription runs on the GPU at a time — a second request queues
-rather than risking VRAM exhaustion. `/health` stays responsive throughout
-(the handler is a sync `def`, so FastAPI runs it off the event loop), which
-is what lets the app tell "busy" apart from "down".
+Speed comes from three things:
 
-Tunables in `.env.local`, if you change the model: `COLAB_TIMEOUT_MS`
-(per-chunk ceiling) and `COLAB_JOB_DEADLINE_MS` (whole-job ceiling). Chunk
-size lives in `colabSttConfig()` in [`lib/ai/config.ts`](../lib/ai/config.ts).
+- **No audio proxying** — the biggest win by far.
+- **Batched inference** (`BatchedInferencePipeline`), roughly 3x faster than
+  sequential decoding at identical quality.
+- **`medium` rather than `large-v3`**, about twice the speed and ample for
+  captions.
+
+A three-hour episode lands in a few minutes rather than a quarter of an hour.
+
+Only one transcription runs on the GPU at a time — a second job queues rather
+than risking VRAM exhaustion. `/health` and `/jobs/{id}` stay responsive
+throughout, because the work happens on a background thread.
+
+Tunables in `.env.local`: `COLAB_TIMEOUT_MS` (per-request ceiling),
+`COLAB_JOB_DEADLINE_MS` (how long to keep polling), `COLAB_POLL_INTERVAL_MS`.
+Model and `BATCH_SIZE` live in cell 2 of the notebook.
 
 ## Troubleshooting
 
@@ -123,11 +133,12 @@ those need an operator-funded LLM call whoever produced the transcript.)
 
 Edit `MODEL_SIZE` in cell 2 of the notebook. `medium` is the default and the
 right choice for most work. `large-v3` is the closest match to Groq's
-`whisper-large-v3-turbo` if you're specifically evaluating transcript
-quality — but it's about half the speed, so drop `chunkTargetBytes` in
-`colabSttConfig()` to compensate, or chunks may start hitting the tunnel's
-100-second cutoff. `small` is fastest, for when you're iterating on something
-other than the transcript itself.
+`whisper-large-v3-turbo` if you're specifically evaluating transcript quality,
+at roughly half the speed. `small` is faster still, for when you're iterating
+on something other than the transcript itself.
+
+`BATCH_SIZE` (also cell 2) trades VRAM for speed — 8 is comfortable on a
+free-tier T4. Drop it to 4 if you hit out-of-memory errors.
 
 ## Optional: a shared secret
 

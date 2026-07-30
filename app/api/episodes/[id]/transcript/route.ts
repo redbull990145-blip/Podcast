@@ -4,6 +4,8 @@ import { getUser } from "@/lib/supabase/server";
 import { db } from "@/lib/db/client";
 import { episodes, transcripts, type TranscriptSegment } from "@/lib/db/schema";
 import { fetchTranscript } from "@/lib/rss/transcript";
+import { colabSttConfig } from "@/lib/ai/config";
+import { estimateSeconds } from "@/lib/player/transcribe-stages";
 
 export const runtime = "nodejs";
 
@@ -40,12 +42,26 @@ export async function GET(
 
   const episode = await db.query.episodes.findFirst({
     where: eq(episodes.id, id),
-    columns: { id: true, transcriptUrl: true },
+    columns: { id: true, transcriptUrl: true, durationSeconds: true },
   });
 
   if (!episode) {
     return NextResponse.json({ error: "Unknown episode." }, { status: 404 });
   }
+
+  /**
+   * How long generating captions is likely to take, in seconds.
+   *
+   * Computed here rather than in the browser because only the server knows
+   * both halves: the episode's real duration (the player only has whatever is
+   * currently loaded, which may be a different episode or nothing at all) and
+   * whether a developer's own GPU will serve this instead of a hosted
+   * provider — an order-of-magnitude difference in speed.
+   */
+  const estimatedSeconds = estimateSeconds(
+    episode.durationSeconds ?? 0,
+    colabSttConfig() ? "local" : "hosted",
+  );
 
   if (!episode.transcriptUrl) {
     // A transcript with no timings can't drive captions, but it does mean the
@@ -55,12 +71,18 @@ export async function GET(
       segments: null,
       source: null,
       canGenerate: !cached,
+      estimatedSeconds,
     });
   }
 
   const fetched = await fetchTranscript(episode.transcriptUrl);
   if (!fetched) {
-    return NextResponse.json({ segments: null, source: null, canGenerate: !cached });
+    return NextResponse.json({
+      segments: null,
+      source: null,
+      canGenerate: !cached,
+      estimatedSeconds,
+    });
   }
 
   await db

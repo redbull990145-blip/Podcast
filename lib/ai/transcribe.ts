@@ -521,11 +521,169 @@ export async function transcribeWithFallback(
       : { ok: false, error: LOCAL_SERVER_UNREACHABLE_ERROR };
   }
 
-  const result = await transcribeAudio(audioUrl, colab, options);
+  const result = await transcribeViaLocalServer(audioUrl, colab, options.signal);
   if (result.ok || !fallback) return result;
 
   console.warn(`Local transcription failed (${result.error}), retrying with ${fallback.provider}.`);
   return transcribeAudio(audioUrl, fallback, options);
+}
+
+/** How often to ask the local server whether it has finished. */
+const LOCAL_POLL_INTERVAL_MS = 3_000;
+
+type LocalJobStatus = {
+  status?: "queued" | "downloading" | "transcribing" | "done" | "error";
+  error?: string;
+  text?: string;
+  segments?: { start?: number; end?: number; text?: string }[];
+  words?: { word?: string; start?: number; end?: number }[];
+};
+
+/**
+ * Runs an episode through a local Whisper server by handing over its URL.
+ *
+ * Deliberately unlike every other path in this file, which downloads the audio
+ * here and forwards the bytes. A developer's server sits behind a tunnel that
+ * abandons any request unanswered after about a hundred seconds, and pushing a
+ * whole episode through it — in pieces small enough to beat that clock — meant
+ * moving every byte twice, over the slowest link involved, while issuing one
+ * range request per piece to a podcast host that eventually refused them.
+ *
+ * Sending the URL sidesteps all of it: the server fetches the file once, from
+ * a datacentre, and this polls a job id until it is done. No upload, no
+ * chunking, no per-request time limit to design around.
+ *
+ * Only local servers can be used this way — a hosted provider takes bytes, not
+ * URLs, and would have no business fetching a URL we handed it.
+ */
+async function transcribeViaLocalServer(
+  audioUrl: string,
+  config: SttConfig,
+  signal?: AbortSignal,
+): Promise<TranscriptionResult> {
+  const auth: Record<string, string> = config.apiKey
+    ? { authorization: `Bearer ${config.apiKey}` }
+    : {};
+  const deadline = Date.now() + (config.jobDeadlineMs ?? JOB_DEADLINE_MS);
+
+  let jobId: string;
+  try {
+    const response = await fetchJson(
+      `${config.baseUrl}/jobs`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", ...auth },
+        body: JSON.stringify({ url: audioUrl }),
+      },
+      config.requestTimeoutMs ?? TRANSCRIBE_TIMEOUT_MS,
+      signal,
+    );
+    const created = response as { job_id?: string };
+    if (!created.job_id) return { ok: false, error: LOCAL_SERVER_UNREACHABLE_ERROR };
+    jobId = created.job_id;
+  } catch {
+    return { ok: false, error: LOCAL_SERVER_UNREACHABLE_ERROR };
+  }
+
+  // Consecutive poll failures, so one dropped request doesn't abandon a job
+  // that is running perfectly well — tunnels hiccup.
+  let misses = 0;
+
+  for (;;) {
+    if (Date.now() > deadline) {
+      return {
+        ok: false,
+        error:
+          "The local Whisper server is taking longer than expected. Check the Colab notebook's output — it prints progress for each stage.",
+      };
+    }
+
+    await sleep(config.pollIntervalMs ?? LOCAL_POLL_INTERVAL_MS, signal);
+
+    let job: LocalJobStatus;
+    try {
+      job = (await fetchJson(
+        `${config.baseUrl}/jobs/${jobId}`,
+        { headers: auth },
+        config.requestTimeoutMs ?? TRANSCRIBE_TIMEOUT_MS,
+        signal,
+      )) as LocalJobStatus;
+      misses = 0;
+    } catch {
+      misses += 1;
+      if (misses >= 5) return { ok: false, error: LOCAL_SERVER_UNREACHABLE_ERROR };
+      continue;
+    }
+
+    if (job.status === "error") {
+      return { ok: false, error: job.error || "The local Whisper server failed to transcribe." };
+    }
+    if (job.status !== "done") continue;
+
+    const segments: TranscriptSegment[] = (job.segments ?? [])
+      .map((s) => ({
+        start: Number(s.start ?? 0),
+        end: Number(s.end ?? 0),
+        text: (s.text ?? "").trim(),
+      }))
+      .filter((s) => s.text.length > 0);
+
+    const words: TranscriptWord[] = (job.words ?? [])
+      .map((w) => ({
+        start: Number(w.start ?? 0),
+        end: Number(w.end ?? 0),
+        text: (w.word ?? "").trim(),
+      }))
+      .filter((w) => w.text.length > 0 && Number.isFinite(w.start) && Number.isFinite(w.end));
+
+    const text = (job.text ?? "").trim() || segments.map((s) => s.text).join(" ").trim();
+    if (!text) return { ok: false, error: "The transcription came back empty." };
+
+    // One "chunk" covering the whole episode: this reuses mergeSegments purely
+    // to attach each word to the line it falls inside, which is what the
+    // caption fill reads. There is nothing to offset — a single chunk starts
+    // at zero — so the timings pass through untouched.
+    return {
+      ok: true,
+      text,
+      segments: mergeSegments([{ segments, words }]),
+      model: `${config.provider}/${config.model}`,
+    };
+  }
+}
+
+/** Fetches JSON with a timeout. Throws on transport or status failure. */
+async function fetchJson(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const combined = mergeSignals(signal, controller.signal);
+
+  try {
+    const response = await fetch(url, { ...init, signal: combined });
+    if (!response.ok) throw new Error(`status ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(new DOMException("Aborted", "AbortError"));
+      },
+      { once: true },
+    );
+  });
 }
 
 /** True when this result came from a locally-run model rather than a paid API. */

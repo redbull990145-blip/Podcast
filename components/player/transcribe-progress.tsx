@@ -2,11 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import {
-  estimateSeconds,
-  progressAt,
-  stageAt,
-} from "@/lib/player/transcribe-stages";
+import { progressAt, stageAt } from "@/lib/player/transcribe-stages";
 import { TWEEN } from "@/lib/motion/config";
 
 /**
@@ -18,7 +14,20 @@ import { TWEEN } from "@/lib/motion/config";
  * episode's own duration. It is labelled as an estimate, and it deliberately
  * stops short of full until the work really finishes.
  */
-export function TranscribeProgress({ durationSeconds }: { durationSeconds: number }) {
+/**
+ * "45s" / "12 minutes".
+ *
+ * A long job counted in seconds ("about 847s left") reads as a machine
+ * talking to itself; minutes are what someone deciding whether to wait
+ * actually wants.
+ */
+function formatRemaining(seconds: number): string {
+  if (seconds < 90) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  return minutes === 1 ? "a minute" : `${minutes} minutes`;
+}
+
+export function TranscribeProgress({ estimatedSeconds }: { estimatedSeconds: number }) {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
@@ -29,10 +38,9 @@ export function TranscribeProgress({ durationSeconds }: { durationSeconds: numbe
     return () => clearInterval(interval);
   }, []);
 
-  const estimate = estimateSeconds(durationSeconds);
-  const progress = progressAt(elapsed, estimate);
+  const progress = progressAt(elapsed, estimatedSeconds);
   const percent = Math.round(progress * 100);
-  const remaining = Math.max(0, Math.round(estimate - elapsed));
+  const remaining = Math.max(0, Math.round(estimatedSeconds - elapsed));
   const stage = stageAt(progress);
 
   return (
@@ -75,7 +83,7 @@ export function TranscribeProgress({ durationSeconds }: { durationSeconds: numbe
 
         <p className="mt-2 text-xs tabular-nums opacity-55">
           {remaining > 0
-            ? `About ${remaining}s left — you can keep listening`
+            ? `About ${formatRemaining(remaining)} left — you can keep listening`
             : "Taking a little longer than usual — still going"}
         </p>
 

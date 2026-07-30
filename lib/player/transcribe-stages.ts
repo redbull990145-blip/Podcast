@@ -27,15 +27,45 @@ export const STAGES: Stage[] = [
 ];
 
 /**
+ * How fast the server that will do the work actually is.
+ *
+ * These differ by an order of magnitude, which is far too much for one
+ * estimate to cover: a bar paced for a hosted provider races to its asymptote
+ * in the first minute of a job that takes fifteen, and then sits there looking
+ * broken while everything is in fact fine.
+ */
+export type TranscriptionRate = "hosted" | "local";
+
+/**
  * Rough wall-clock estimate for transcribing an episode, in seconds.
  *
- * Measured against the real pipeline: a chunk of roughly twenty minutes of
- * audio takes a few seconds on an LPU-backed provider, and chunks run four at
- * a time, so throughput is far faster than real time. The floor covers the
- * fixed cost of the round trips for very short episodes.
+ * "hosted" is measured against the real pipeline: a chunk of roughly twenty
+ * minutes of audio takes a few seconds on an LPU-backed provider, and chunks
+ * run four at a time, so throughput is far faster than real time.
+ *
+ * "local" is a developer's own GPU (see colab/README.md), which is nothing
+ * like that. whisper-medium on a free-tier T4 runs at roughly twenty times
+ * real time, and chunks are sent one or two at a time to stay inside the
+ * tunnel's per-request limit — so a three-hour episode is a genuine
+ * ten-to-fifteen minutes, and no cap applies, because there is no ceiling on
+ * how long a long episode legitimately takes.
+ *
+ * The floor covers the fixed cost of the round trips for very short episodes.
  */
-export function estimateSeconds(episodeSeconds: number): number {
-  if (!Number.isFinite(episodeSeconds) || episodeSeconds <= 0) return 45;
+export function estimateSeconds(
+  episodeSeconds: number,
+  rate: TranscriptionRate = "hosted",
+): number {
+  const unknown = !Number.isFinite(episodeSeconds) || episodeSeconds <= 0;
+
+  if (rate === "local") {
+    // Unknown duration: assume something long rather than something short —
+    // overshooting reads as "nearly done, hang on", undershooting as "stuck".
+    if (unknown) return 600;
+    return Math.max(30, episodeSeconds * 0.09 + 25);
+  }
+
+  if (unknown) return 45;
   return Math.min(120, Math.max(12, episodeSeconds * 0.02 + 8));
 }
 

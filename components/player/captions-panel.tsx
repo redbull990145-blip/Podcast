@@ -39,6 +39,12 @@ type TranscriptResponse = {
   segments: TranscriptSegment[] | null;
   source: string | null;
   canGenerate?: boolean;
+  /**
+   * Server's guess at how long generating would take. It knows both the
+   * episode's real duration and which provider will serve — neither of which
+   * the browser can see.
+   */
+  estimatedSeconds?: number;
 };
 
 /** Momentum for a wheel or trackpad flick — stiffer and more damped than the follow spring. */
@@ -105,6 +111,7 @@ export function CaptionsPanel({ episodeId }: { episodeId: string }) {
       <NoCaptions
         episodeId={episodeId}
         canGenerate={data?.canGenerate !== false}
+        estimatedSeconds={data?.estimatedSeconds}
         onGenerated={() => void refetch()}
       />
     );
@@ -561,13 +568,14 @@ function useActiveSegment(
 function NoCaptions({
   episodeId,
   canGenerate,
+  estimatedSeconds,
   onGenerated,
 }: {
   episodeId: string;
   canGenerate: boolean;
+  estimatedSeconds?: number;
   onGenerated: () => void;
 }) {
-  const duration = usePlayer((s) => s.duration);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -593,7 +601,8 @@ function NoCaptions({
     }
   }
 
-  if (generating) return <TranscribeProgress durationSeconds={duration} />;
+  // Fall back only if the server didn't say; it almost always does.
+  if (generating) return <TranscribeProgress estimatedSeconds={estimatedSeconds ?? 60} />;
 
   return (
     <motion.div
