@@ -14,7 +14,7 @@
 export type AiTier = "default" | "byok";
 
 export type LlmProvider = "openrouter" | "deepseek" | "openai" | "anthropic";
-export type SttProvider = "groq" | "openai";
+export type SttProvider = "groq" | "openai" | "colab";
 
 export type LlmConfig = {
   provider: LlmProvider;
@@ -36,6 +36,15 @@ export type SttConfig = {
   baseUrl: string;
   model: string;
   apiKey: string;
+  /**
+   * Overrides the 25MB-per-request cap assumed for hosted providers.
+   *
+   * That cap is Groq's own limit, not a property of the wire format — a model
+   * running on hardware you control has no such ceiling, so a local endpoint
+   * sets this much higher and the existing whole-file-vs-chunk branch in
+   * transcribe.ts naturally never chunks for it.
+   */
+  maxUploadBytes?: number;
 };
 
 /**
@@ -86,7 +95,11 @@ const LLM_ENDPOINTS: Record<LlmProvider, { baseUrl: string; defaultModel: string
   },
 };
 
-const STT_ENDPOINTS: Record<SttProvider, { baseUrl: string; defaultModel: string }> = {
+/** A hosted STT provider with a fixed endpoint. Excludes "colab", whose URL is
+ * a per-developer env var rather than anything fixed in code. */
+export type HostedSttProvider = Exclude<SttProvider, "colab">;
+
+const STT_ENDPOINTS: Record<HostedSttProvider, { baseUrl: string; defaultModel: string }> = {
   // Groq runs Whisper on LPUs — far faster than real time, and has a free tier,
   // which is what makes operator-funded transcription viable at all.
   groq: {
@@ -144,6 +157,36 @@ export function defaultSttConfig(): SttConfig | null {
   };
 }
 
+/**
+ * Resolves a local Whisper server for development, or null when none is set.
+ *
+ * This is not a tier a user opts into — it is a transport preference read
+ * straight from the environment, meant for a developer running their own
+ * model (e.g. faster-whisper in a Colab notebook, tunnelled with cloudflared)
+ * instead of spending the shared Groq quota while iterating. The tunnel URL
+ * is ephemeral — it changes every time the notebook restarts — which is why
+ * this is a plain env var edited in .env.local rather than anything stored
+ * or exposed in the UI.
+ *
+ * COLAB_SHARED_SECRET is optional: without it the notebook is expected to
+ * accept requests unauthenticated, trusting the tunnel URL's unguessable
+ * randomness as the only barrier. Set it on both sides for a real check.
+ */
+export function colabSttConfig(): SttConfig | null {
+  const baseUrl = process.env.COLAB_WHISPER_URL?.replace(/\/+$/, "");
+  if (!baseUrl) return null;
+
+  return {
+    provider: "colab",
+    baseUrl,
+    model: process.env.COLAB_WHISPER_MODEL || "whisper",
+    apiKey: process.env.COLAB_SHARED_SECRET ?? "",
+    // Generous rather than unbounded: still a guard against a runaway file,
+    // just not the artificial 25MB Groq imposes on hosted requests.
+    maxUploadBytes: 2 * 1024 * 1024 * 1024,
+  };
+}
+
 /** Builds an LLM config from a user's own key. */
 export function byokLlmConfig(provider: LlmProvider, apiKey: string): LlmConfig {
   const endpoint = LLM_ENDPOINTS[provider];
@@ -159,7 +202,7 @@ export function byokLlmConfig(provider: LlmProvider, apiKey: string): LlmConfig 
 }
 
 /** Builds a speech-to-text config from a user's own key. */
-export function byokSttConfig(provider: SttProvider, apiKey: string): SttConfig {
+export function byokSttConfig(provider: HostedSttProvider, apiKey: string): SttConfig {
   const endpoint = STT_ENDPOINTS[provider];
   return { provider, baseUrl: endpoint.baseUrl, model: endpoint.defaultModel, apiKey };
 }

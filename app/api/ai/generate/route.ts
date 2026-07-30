@@ -4,7 +4,7 @@ import { getUser } from "@/lib/supabase/server";
 import { db } from "@/lib/db/client";
 import { aiJobs, episodes, summaries, transcripts } from "@/lib/db/schema";
 import { recordUsage, resolveTier } from "@/lib/ai/quota";
-import { transcribeAudio } from "@/lib/ai/transcribe";
+import { transcribeWithFallback } from "@/lib/ai/transcribe";
 import { generateChapters, generateShowNotes } from "@/lib/ai/llm";
 
 export const runtime = "nodejs";
@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await transcribeAudio(episode.enclosureUrl, decision.stt);
+    const result = await transcribeWithFallback(episode.enclosureUrl, decision.stt);
     if (!result.ok) return fail(result.error);
 
     const [row] = await db

@@ -1,4 +1,4 @@
-import type { SttConfig } from "./config";
+import { colabSttConfig, type SttConfig } from "./config";
 import type { TranscriptSegment, TranscriptWord } from "@/lib/db/schema";
 import { prepareChunk } from "./mp3";
 import {
@@ -67,6 +67,16 @@ const MOOV_SCAN_HOPS = 8;
  * — the index is held whole in memory to plan the split.
  */
 const MAX_MOOV_BYTES = 32 * 1024 * 1024;
+
+/**
+ * How long to wait for a dev Whisper server to answer a health check.
+ *
+ * Short on purpose: the two failure modes worth distinguishing are "answered,
+ * so wait for the real transcription" and "notebook isn't running right now",
+ * and the second should fall back to Groq in a couple of seconds, not after
+ * the connection eventually times out on its own.
+ */
+const COLAB_HEALTH_TIMEOUT_MS = 4_000;
 
 export type TranscriptionResult =
   | { ok: true; text: string; segments: TranscriptSegment[]; model: string }
@@ -413,6 +423,7 @@ export async function transcribeAudio(
   options: TranscribeOptions = {},
 ): Promise<TranscriptionResult> {
   const { signal } = options;
+  const maxUploadBytes = config.maxUploadBytes ?? PROVIDER_MAX_BYTES;
 
   const probe = await probeAudio(audioUrl, signal);
   if (!probe.ok) return probe;
@@ -422,14 +433,14 @@ export async function transcribeAudio(
   }
 
   // Small enough to send in one request — always the simplest thing that works.
-  if (probe.total > 0 && probe.total <= PROVIDER_MAX_BYTES) {
+  if (probe.total > 0 && probe.total <= maxUploadBytes) {
     return transcribeWhole(audioUrl, config, signal);
   }
 
   // Splitting needs both a known size and a host that honours byte ranges.
   const canChunk = probe.rangeSupported && probe.total > 0;
   if (!canChunk) {
-    if (probe.total > PROVIDER_MAX_BYTES) {
+    if (probe.total > maxUploadBytes) {
       return { ok: false, error: UNSPLITTABLE_ERROR };
     }
     // Unknown size and no range support: attempt it whole and let the size
@@ -453,6 +464,64 @@ export async function transcribeAudio(
   return transcribeMp3Chunked(audioUrl, config, probe.total, signal);
 }
 
+/**
+ * Transcribes with a developer's local Whisper server first, falling back to
+ * `fallback` (the tier the caller already resolved — Groq, or the user's own
+ * key) when it isn't available or fails.
+ *
+ * This is the entry point routes should call instead of `transcribeAudio`
+ * directly. When `COLAB_WHISPER_URL` isn't set, `colabSttConfig()` returns
+ * null and this is exactly equivalent to calling `transcribeAudio` with
+ * `fallback` — nobody who hasn't opted in pays for the health check.
+ *
+ * A cheap `/health` probe runs before spending any time on the actual
+ * episode: a Colab notebook that isn't running should fail in a couple of
+ * seconds, not after downloading fifty megabytes toward a server that was
+ * never going to answer.
+ */
+export async function transcribeWithFallback(
+  audioUrl: string,
+  fallback: SttConfig,
+  options: TranscribeOptions = {},
+): Promise<TranscriptionResult> {
+  const colab = colabSttConfig();
+  if (!colab) return transcribeAudio(audioUrl, fallback, options);
+
+  if (!(await isReachable(colab.baseUrl, colab.apiKey, options.signal))) {
+    console.warn(`Colab Whisper server unreachable at ${colab.baseUrl}, using ${fallback.provider}.`);
+    return transcribeAudio(audioUrl, fallback, options);
+  }
+
+  const result = await transcribeAudio(audioUrl, colab, options);
+  if (result.ok) return result;
+
+  console.warn(`Colab transcription failed (${result.error}), retrying with ${fallback.provider}.`);
+  return transcribeAudio(audioUrl, fallback, options);
+}
+
+/** Whether a local Whisper server is up and accepting requests right now. */
+async function isReachable(
+  baseUrl: string,
+  sharedSecret: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), COLAB_HEALTH_TIMEOUT_MS);
+  const combined = mergeSignals(signal, controller.signal);
+
+  try {
+    const response = await fetch(`${baseUrl}/health`, {
+      headers: sharedSecret ? { authorization: `Bearer ${sharedSecret}` } : {},
+      signal: combined,
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 /** The simple path: one download, one transcription. */
 async function transcribeWhole(
   audioUrl: string,
@@ -471,7 +540,7 @@ async function transcribeWhole(
     return { ok: false, error: "Couldn't download the episode audio." };
   }
 
-  if (audio.size > PROVIDER_MAX_BYTES) {
+  if (audio.size > (config.maxUploadBytes ?? PROVIDER_MAX_BYTES)) {
     // Content-length lied (or was absent) and the real file is over the cap.
     return { ok: false, error: TOO_LONG_ERROR };
   }

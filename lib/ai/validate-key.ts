@@ -13,8 +13,14 @@ export type Provider = LlmProvider | SttProvider;
 
 const VALIDATION_TIMEOUT_MS = 8_000;
 
-/** The cheapest authenticated endpoint each provider offers. */
-const PROBES: Record<Provider, { url: string; headers: (key: string) => HeadersInit }> = {
+/**
+ * The cheapest authenticated endpoint each provider offers.
+ *
+ * Partial rather than exhaustive: "colab" is a dev-only transport preference
+ * read from an env var, never a key a user pastes in here, so it has nothing
+ * to validate against.
+ */
+const PROBES: Partial<Record<Provider, { url: string; headers: (key: string) => HeadersInit }>> = {
   openrouter: {
     url: "https://openrouter.ai/api/v1/key",
     headers: (key) => ({ authorization: `Bearer ${key}` }),

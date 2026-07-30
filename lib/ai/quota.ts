@@ -9,10 +9,10 @@ import {
   defaultLlmConfig,
   defaultSttConfig,
   type AiTier,
+  type HostedSttProvider,
   type LlmConfig,
   type LlmProvider,
   type SttConfig,
-  type SttProvider,
 } from "./config";
 
 /**
@@ -94,7 +94,7 @@ export async function resolveTier(
       tier: "byok",
       llm: byokLlmConfig(userLlm.provider as LlmProvider, userLlm.key),
       stt: userStt
-        ? byokSttConfig(userStt.provider as SttProvider, userStt.key)
+        ? byokSttConfig(userStt.provider as HostedSttProvider, userStt.key)
         : defaultSttConfig(),
     };
   }
