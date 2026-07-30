@@ -36,6 +36,41 @@ export function PageShell({
   );
 }
 
+/**
+ * Placeholder block used by route loading states.
+ *
+ * Every page here is server-rendered per request, so a navigation cannot show
+ * anything until the server answers. A skeleton lets Next paint the new route
+ * immediately — and, because a route with a loading boundary has a
+ * prefetchable static shell, the transition starts before the click resolves.
+ */
+export function Skeleton({ className }: { className?: string }) {
+  return (
+    <div
+      aria-hidden
+      className={cn("animate-pulse rounded-lg bg-surface-raised", className)}
+    />
+  );
+}
+
+/** Rows of shimmering placeholders, shaped like an episode list. */
+export function EpisodeListSkeleton({ rows = 6 }: { rows?: number }) {
+  return (
+    <ul className="mt-2 space-y-3">
+      {Array.from({ length: rows }, (_, i) => (
+        <li key={i} className="flex items-start gap-3 px-3 py-3.5">
+          <Skeleton className="size-10 shrink-0 rounded-full" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-2/5" />
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function EmptyState({
   Icon,
   title,

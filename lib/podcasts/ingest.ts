@@ -255,6 +255,46 @@ export async function listEpisodes(podcastId: string, limit = 50, offset = 0) {
   });
 }
 
+/**
+ * Records a show we only know from a catalogue search, without fetching its feed.
+ *
+ * Dismissing a recommendation has to point at a `podcasts` row, but the show
+ * may never have been opened here — and pulling a whole feed just to remember
+ * "not interested" would be absurd. This writes the little the catalogue gave
+ * us and leaves `lastFetchedAt` null, so the first real visit still ingests it
+ * properly rather than treating the stub as fresh.
+ */
+export async function ensureCatalogPodcast(input: {
+  feedUrl: string;
+  title: string;
+  author?: string | null;
+  artworkUrl?: string | null;
+  categories?: string[];
+  itunesId?: number | null;
+  podcastindexId?: number | null;
+}): Promise<Podcast> {
+  const [row] = await db
+    .insert(podcasts)
+    .values({
+      feedUrl: input.feedUrl,
+      title: input.title,
+      author: input.author ?? null,
+      artworkUrl: input.artworkUrl ?? null,
+      categories: input.categories ?? [],
+      itunesId: input.itunesId ?? null,
+      podcastindexId: input.podcastindexId ?? null,
+    })
+    .onConflictDoUpdate({
+      target: podcasts.feedUrl,
+      // Nothing to update — the existing row is always at least as good as a
+      // stub — but Postgres needs an action to return the conflicting row.
+      set: { feedUrl: sql`excluded.feed_url` },
+    })
+    .returning();
+
+  return row;
+}
+
 /** Used by the subscribe flow to confirm a show exists before linking to it. */
 export async function findPodcastByFeedUrl(feedUrl: string) {
   return db.query.podcasts.findFirst({ where: eq(podcasts.feedUrl, feedUrl) });

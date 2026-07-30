@@ -4,6 +4,9 @@ import { PageHeader, PageShell } from "@/components/ui/page";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { OpmlPanel } from "@/components/settings/opml-panel";
 import { ApiKeysPanel } from "@/components/settings/api-keys-panel";
+import { PowerModeToggle } from "@/components/power-mode/power-mode-toggle";
+import { ShortcutsButton } from "@/components/power-mode/shortcuts-button";
+import { AudioEnhancementsPanel } from "@/components/settings/audio-enhancements-panel";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -71,12 +74,27 @@ export default async function SettingsPage() {
 
       <section className="mt-8">
         <h2 className="pt-4 text-xs font-semibold uppercase tracking-wider text-subtle-foreground">
-          Coming next
+          Interface
         </h2>
         <Row
           title="Power user mode"
-          description="Reveals keyboard shortcuts, bulk actions, per-show playback rules and advanced filters. Free — it only controls how much UI is on screen."
-        />
+          description="Reveals keyboard shortcuts, episode filters and the audio enhancements. Free — it only controls how much is on screen."
+        >
+          <PowerModeToggle />
+        </Row>
+        <Row
+          title="Keyboard shortcuts"
+          description="Press ? at any time to see the full list."
+        >
+          <ShortcutsButton />
+        </Row>
+      </section>
+
+      <section className="mt-8">
+        <h2 className="pt-4 text-xs font-semibold uppercase tracking-wider text-subtle-foreground">
+          Audio
+        </h2>
+        <AudioEnhancementsPanel />
       </section>
     </PageShell>
   );

@@ -13,10 +13,16 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Everything except static assets, image files and the service worker —
-     * those never need an auth refresh, and running on them would burn
-     * free-tier invocations for nothing.
+     * Everything except static assets, image files, the service worker — none
+     * of which need an auth refresh — and API routes.
+     *
+     * API routes are excluded because every one of them already calls
+     * getUser() itself, and a Route Handler can write cookies, so it refreshes
+     * an expired token perfectly well on its own. Running the proxy over them
+     * too just added a second round-trip to Supabase's auth server on every
+     * request — including the playback-position write that fires every ten
+     * seconds while something is playing.
      */
-    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)",
+    "/((?!api/|_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)",
   ],
 };

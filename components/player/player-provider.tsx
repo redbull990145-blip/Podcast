@@ -28,6 +28,11 @@ export function PlayerProvider() {
   const retriedRef = useRef<string | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // The element is replaced when playback moves between plain and CORS mode
+  // for the audio enhancements; re-subscribe when that happens, or the new
+  // element would drive nothing.
+  const audioEpoch = usePlayer((s) => s.audioEpoch);
+
   // --- element events -> store -------------------------------------------
   useEffect(() => {
     const audio = getAudio();
@@ -125,7 +130,7 @@ export function PlayerProvider() {
       audio.removeEventListener("error", onError);
       audio.removeEventListener("ended", onEnded);
     };
-  }, []);
+  }, [audioEpoch]);
 
   // --- periodic position sync --------------------------------------------
   useEffect(() => {

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
@@ -39,11 +40,18 @@ export async function createClient() {
  * Always uses getUser() rather than getSession(): getSession() reads the cookie
  * without verifying it against the auth server, so it must not be trusted for
  * authorization decisions on the server.
+ *
+ * Wrapped in React's `cache` so the verification round-trip happens once per
+ * request instead of once per caller. The authenticated layout checks the user
+ * and then so does every page inside it — without this, each navigation paid
+ * for two sequential calls to Supabase's auth server before any of our own
+ * queries could start. The cache is per-request, so this never leaks one
+ * person's session into another's.
  */
-export async function getUser() {
+export const getUser = cache(async () => {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   return user;
-}
+});

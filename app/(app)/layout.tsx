@@ -7,6 +7,8 @@ import { MobileNav } from "@/components/nav/mobile-nav";
 import { PlayerProvider } from "@/components/player/player-provider";
 import { PlayerBar } from "@/components/player/player-bar";
 import { NowPlayingHost } from "@/components/player/now-playing-host";
+import { PrefsHydrator } from "@/components/power-mode/power-mode-toggle";
+import { KeyboardShortcuts } from "@/components/power-mode/keyboard-shortcuts";
 
 /**
  * Authenticated shell.
@@ -40,6 +42,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <MobileNav />
           {/* Headless: owns the audio element, position sync and OS controls. */}
           <PlayerProvider />
+          {/* Headless: restores stored UI preferences, owns the shortcut layer. */}
+          <PrefsHydrator />
+          <KeyboardShortcuts />
         </div>
       </QueryProvider>
     </ThemeProvider>

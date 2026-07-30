@@ -8,7 +8,7 @@ import { db } from "@/lib/db/client";
 import { playbackState, podcasts } from "@/lib/db/schema";
 import { listEpisodes } from "@/lib/podcasts/ingest";
 import { PageShell } from "@/components/ui/page";
-import { EpisodeRow } from "@/components/episodes/episode-row";
+import { EpisodeList } from "@/components/episodes/episode-list";
 import { SubscribeButton } from "@/components/podcasts/subscribe-button";
 import { stripHtml } from "@/lib/utils";
 
@@ -144,24 +144,21 @@ export default async function PodcastPage({
             No episodes found in this feed yet.
           </p>
         ) : (
-          <ul className="mt-2 divide-y divide-border/60">
-            {episodes.map((episode) => (
-              <EpisodeRow
-                key={episode.id}
-                // Descriptions are RSS HTML. Stripping it here means it happens
-                // once on the server instead of fifty times in the browser, and
-                // the markup never ships to the client at all.
-                episode={{ ...episode, description: stripHtml(episode.description) }}
-                podcast={{
-                  id: podcast.id,
-                  title: podcast.title,
-                  artworkUrl: podcast.artworkUrl,
-                  categories: podcast.categories,
-                }}
-                progress={progressByEpisode.get(episode.id)}
-              />
-            ))}
-          </ul>
+          <EpisodeList
+            items={episodes.map((episode) => ({
+              // Descriptions are RSS HTML. Stripping it here means it happens
+              // once on the server instead of fifty times in the browser, and
+              // the markup never ships to the client at all.
+              episode: { ...episode, description: stripHtml(episode.description) },
+              progress: progressByEpisode.get(episode.id),
+            }))}
+            podcast={{
+              id: podcast.id,
+              title: podcast.title,
+              artworkUrl: podcast.artworkUrl,
+              categories: podcast.categories,
+            }}
+          />
         )}
       </section>
     </PageShell>

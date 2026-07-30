@@ -2,6 +2,9 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
+    // A stable id keeps an installed app attached to this entry even if
+    // start_url ever changes.
+    id: "/",
     name: "Cadence — podcasts, properly",
     short_name: "Cadence",
     description:
@@ -20,7 +23,11 @@ export default function manifest(): MetadataRoute.Manifest {
         purpose: "any",
       },
       {
-        src: "/icon.svg",
+        // A separate file, not the same one reused: a maskable icon is
+        // cropped to a platform-chosen shape, so it needs a full-bleed
+        // background and its artwork kept inside the safe zone. Pointing
+        // `maskable` at the rounded-corner icon leaves transparent wedges.
+        src: "/icon-maskable.svg",
         sizes: "any",
         type: "image/svg+xml",
         purpose: "maskable",

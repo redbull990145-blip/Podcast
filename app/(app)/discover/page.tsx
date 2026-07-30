@@ -6,6 +6,7 @@ import { db } from "@/lib/db/client";
 import { subscriptions } from "@/lib/db/schema";
 import { PageHeader, PageShell } from "@/components/ui/page";
 import { DiscoverPanel } from "@/components/podcasts/discover-panel";
+import { RecommendationsPanel } from "@/components/podcasts/recommendations-panel";
 
 export const metadata: Metadata = { title: "Discover" };
 
@@ -27,8 +28,9 @@ export default async function DiscoverPage() {
         description="Searches Apple's catalogue and the independent Podcast Index at once."
       />
 
-      <div className="mt-8">
+      <div className="mt-8 space-y-10">
         <DiscoverPanel subscribedFeedUrls={rows.map((r) => r.podcast.feedUrl)} />
+        <RecommendationsPanel />
       </div>
     </PageShell>
   );
