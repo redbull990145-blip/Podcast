@@ -45,6 +45,20 @@ export type SttConfig = {
    * transcribe.ts naturally never chunks for it.
    */
   maxUploadBytes?: number;
+  /**
+   * How long one transcription request may take before being abandoned.
+   *
+   * The default suits a hosted provider answering faster than real time. A
+   * self-hosted model does not: a consumer GPU running whisper-large is
+   * perhaps ten times real time, so even a single chunk is tens of seconds.
+   */
+  requestTimeoutMs?: number;
+  /** How much audio to put in one chunk. Defaults to the hosted-provider size. */
+  chunkTargetBytes?: number;
+  /** How many chunks may be in flight at once. Defaults to the hosted value. */
+  concurrency?: number;
+  /** How long the whole multi-chunk job may run. Defaults to the hosted value. */
+  jobDeadlineMs?: number;
 };
 
 /**
@@ -181,9 +195,39 @@ export function colabSttConfig(): SttConfig | null {
     baseUrl,
     model: process.env.COLAB_WHISPER_MODEL || "whisper",
     apiKey: process.env.COLAB_SHARED_SECRET ?? "",
-    // Generous rather than unbounded: still a guard against a runaway file,
-    // just not the artificial 25MB Groq imposes on hosted requests.
-    maxUploadBytes: 2 * 1024 * 1024 * 1024,
+    /*
+     * These numbers are set by the *tunnel*, not the model.
+     *
+     * A Cloudflare quick tunnel gives up on a request the origin hasn't
+     * answered within about 100 seconds and returns a 524, and nothing on
+     * either end can raise that. So the constraint here is the opposite of a
+     * hosted provider's: not "how many bytes fit in one request" but "how
+     * much audio can be transcribed inside a hundred seconds".
+     *
+     * The notebook defaults to whisper "medium", around twenty times real
+     * time on a T4. Four megabytes therefore stays well inside the window
+     * across the bitrates podcasts actually use: ~4 minutes of audio at
+     * 128kbps, and still only ~17 minutes at a thrifty 32kbps mono, which is
+     * under a minute of GPU work either way. Chunks are stitched back onto
+     * one timeline by mergeSegments, exactly as for an oversized Groq upload.
+     *
+     * Raise these together if you switch the notebook to a faster model;
+     * lower them if you switch to large-v3, which is about half the speed.
+     */
+    maxUploadBytes: 5 * 1024 * 1024,
+    chunkTargetBytes: 4 * 1024 * 1024,
+    /*
+     * One at a time. The notebook serialises GPU work behind a lock anyway,
+     * so extra parallelism buys nothing — and worse, a queued request burns
+     * its 100-second tunnel budget waiting rather than working.
+     */
+    concurrency: 1,
+    // Comfortably above the ~100s the tunnel allows, so a stuck request is
+    // still bounded, without pre-empting Cloudflare's own answer.
+    requestTimeoutMs: Number(process.env.COLAB_TIMEOUT_MS ?? 3 * 60_000),
+    // Sequential chunks over a whole episode take minutes; the hosted 48s
+    // budget assumes four-way parallelism against a faster-than-real-time API.
+    jobDeadlineMs: Number(process.env.COLAB_JOB_DEADLINE_MS ?? 15 * 60_000),
   };
 }
 

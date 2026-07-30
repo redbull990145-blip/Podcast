@@ -57,6 +57,59 @@ upload, `verbose_json`-shaped response with segments and word-level
 timestamps), so no other code needed to change — Colab is just another
 `SttConfig` with a different `baseUrl`.
 
+## The 100-second rule
+
+A Cloudflare quick tunnel gives up on any request the origin hasn't answered
+within **about 100 seconds** and returns a `524`. Nothing on either end can
+raise that — it's the free tier's proxy timeout.
+
+So episodes are **not** sent whole to the local server. They're split into
+~4MB pieces (roughly 4 minutes of audio at 128kbps, ~17 minutes at 32kbps),
+transcribed one at a time, and stitched back onto a single timeline by the
+same `mergeSegments` used for oversized Groq uploads. Each piece is well
+inside the window; the job as a whole gets 15 minutes.
+
+This is why the notebook defaults to `medium` rather than `large-v3` —
+roughly twice the speed, ample for captions, and it keeps every chunk
+comfortably clear of the cutoff.
+
+Only one transcription runs on the GPU at a time — a second request queues
+rather than risking VRAM exhaustion. `/health` stays responsive throughout
+(the handler is a sync `def`, so FastAPI runs it off the event loop), which
+is what lets the app tell "busy" apart from "down".
+
+Tunables in `.env.local`, if you change the model: `COLAB_TIMEOUT_MS`
+(per-chunk ceiling) and `COLAB_JOB_DEADLINE_MS` (whole-job ceiling). Chunk
+size lives in `colabSttConfig()` in [`lib/ai/config.ts`](../lib/ai/config.ts).
+
+## Troubleshooting
+
+**"Your local Whisper server didn't respond"** — the app's health check
+failed. In order of likelihood:
+
+1. The tunnel URL changed (it does on every restart) and `.env.local` still
+   has the old one. Re-copy it and restart `npm run dev`.
+2. The notebook's cell 3 stopped, or Colab disconnected the runtime.
+3. The runtime is still running an older version of the server code. Restart
+   the runtime and re-run all three cells.
+
+You can check the tunnel independently:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" https://your-tunnel.trycloudflare.com/health
+```
+
+`200` means the server is fine and the problem is on the app side (usually a
+stale URL in `.env.local`, or not having restarted the dev server).
+
+**Captions blocked by "You've used all 5 free AI generations"** — shouldn't
+happen with a local server configured: the daily quota meters operator spend,
+and local compute costs the operator nothing, so caption generation bypasses
+it entirely. If you see this, `COLAB_WHISPER_URL` isn't reaching the server
+process — check it's in `.env.local` and that you restarted `npm run dev`
+after adding it. (Show notes and chapters *do* still consume quota, since
+those need an operator-funded LLM call whoever produced the transcript.)
+
 ## Why this is dev-only
 
 - The tunnel URL is ephemeral and manual (you paste a new one in every
@@ -68,10 +121,13 @@ timestamps), so no other code needed to change — Colab is just another
 
 ## Adjusting the model
 
-Edit `MODEL_SIZE` in cell 2 of the notebook. `large-v3` is the closest match
-to Groq's `whisper-large-v3-turbo` and comfortably fits a free-tier T4;
-`medium` or `small` transcribe faster at some accuracy cost if you're
-iterating on something other than transcript quality itself.
+Edit `MODEL_SIZE` in cell 2 of the notebook. `medium` is the default and the
+right choice for most work. `large-v3` is the closest match to Groq's
+`whisper-large-v3-turbo` if you're specifically evaluating transcript
+quality — but it's about half the speed, so drop `chunkTargetBytes` in
+`colabSttConfig()` to compensate, or chunks may start hitting the tunnel's
+100-second cutoff. `small` is fastest, for when you're iterating on something
+other than the transcript itself.
 
 ## Optional: a shared secret
 

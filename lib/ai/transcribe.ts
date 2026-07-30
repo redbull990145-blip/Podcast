@@ -54,6 +54,11 @@ const JOB_DEADLINE_MS = 48_000;
 
 const PROBE_TIMEOUT_MS = 20_000;
 const CHUNK_FETCH_TIMEOUT_MS = 45_000;
+/**
+ * Default ceiling on one transcription request, sized for a hosted provider
+ * that answers faster than real time. A self-hosted model overrides it via
+ * `SttConfig.requestTimeoutMs` — see colabSttConfig.
+ */
 const TRANSCRIBE_TIMEOUT_MS = 60_000;
 
 /** How much to read at a time while hunting for an MP4's `moov` index. */
@@ -107,6 +112,12 @@ const UNSPLITTABLE_ERROR =
 
 const MP4_UNREADABLE_ERROR =
   "This episode's audio is in a format we couldn't read well enough to split up for transcription.";
+
+const NO_TRANSCRIPTION_PROVIDER_ERROR =
+  "No transcription provider is available for this request.";
+
+const LOCAL_SERVER_UNREACHABLE_ERROR =
+  "Your local Whisper server didn't respond. Check the Colab notebook is still running, and that COLAB_WHISPER_URL matches the URL its last cell printed — the tunnel gets a new address every restart.";
 
 /**
  * Which audio container this file uses.
@@ -366,7 +377,10 @@ async function transcribeBlob(
   form.append("timestamp_granularities[]", "word");
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), TRANSCRIBE_TIMEOUT_MS);
+  const timeout = setTimeout(
+    () => controller.abort(),
+    config.requestTimeoutMs ?? TRANSCRIBE_TIMEOUT_MS,
+  );
   const combined = mergeSignals(signal, controller.signal);
 
   try {
@@ -478,25 +492,45 @@ export async function transcribeAudio(
  * episode: a Colab notebook that isn't running should fail in a couple of
  * seconds, not after downloading fifty megabytes toward a server that was
  * never going to answer.
+ *
+ * A null `fallback` means local-only. The caller uses that to say "this
+ * request is allowed to run *because* it costs nothing" — someone past their
+ * daily allowance, say — where quietly falling back to an operator-funded
+ * provider is the one thing that must not happen.
  */
 export async function transcribeWithFallback(
   audioUrl: string,
-  fallback: SttConfig,
+  fallback: SttConfig | null,
   options: TranscribeOptions = {},
 ): Promise<TranscriptionResult> {
   const colab = colabSttConfig();
-  if (!colab) return transcribeAudio(audioUrl, fallback, options);
+
+  if (!colab) {
+    return fallback
+      ? transcribeAudio(audioUrl, fallback, options)
+      : { ok: false, error: NO_TRANSCRIPTION_PROVIDER_ERROR };
+  }
 
   if (!(await isReachable(colab.baseUrl, colab.apiKey, options.signal))) {
-    console.warn(`Colab Whisper server unreachable at ${colab.baseUrl}, using ${fallback.provider}.`);
-    return transcribeAudio(audioUrl, fallback, options);
+    console.warn(
+      `Local Whisper server unreachable at ${colab.baseUrl}; ` +
+        (fallback ? `using ${fallback.provider}.` : "no fallback permitted."),
+    );
+    return fallback
+      ? transcribeAudio(audioUrl, fallback, options)
+      : { ok: false, error: LOCAL_SERVER_UNREACHABLE_ERROR };
   }
 
   const result = await transcribeAudio(audioUrl, colab, options);
-  if (result.ok) return result;
+  if (result.ok || !fallback) return result;
 
-  console.warn(`Colab transcription failed (${result.error}), retrying with ${fallback.provider}.`);
+  console.warn(`Local transcription failed (${result.error}), retrying with ${fallback.provider}.`);
   return transcribeAudio(audioUrl, fallback, options);
+}
+
+/** True when this result came from a locally-run model rather than a paid API. */
+export function servedLocally(result: TranscriptionResult): boolean {
+  return result.ok && result.model.startsWith("colab/");
 }
 
 /** Whether a local Whisper server is up and accepting requests right now. */
@@ -576,7 +610,7 @@ async function transcribeChunks(
 
   let nextIndex = 0;
   let failure: string | null = null;
-  const deadline = Date.now() + JOB_DEADLINE_MS;
+  const deadline = Date.now() + (config.jobDeadlineMs ?? JOB_DEADLINE_MS);
 
   async function worker() {
     for (;;) {
@@ -611,7 +645,8 @@ async function transcribeChunks(
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(TRANSCRIBE_CONCURRENCY, count) }, worker));
+  const concurrency = Math.max(1, config.concurrency ?? TRANSCRIBE_CONCURRENCY);
+  await Promise.all(Array.from({ length: Math.min(concurrency, count) }, worker));
 
   if (failure) return { ok: false, error: failure };
 
@@ -634,7 +669,7 @@ async function transcribeMp3Chunked(
   total: number,
   signal?: AbortSignal,
 ): Promise<TranscriptionResult> {
-  const ranges = planChunks(total);
+  const ranges = planChunks(total, config.chunkTargetBytes ?? CHUNK_TARGET_BYTES);
 
   return transcribeChunks(
     ranges.length,
@@ -667,7 +702,10 @@ async function transcribeMp4Chunked(
   const track = parseAudioTrack(moov);
   if (!track) return { ok: false, error: MP4_UNREADABLE_ERROR };
 
-  const groups = planSampleGroups(track.samples, CHUNK_TARGET_BYTES);
+  const groups = planSampleGroups(
+    track.samples,
+    config.chunkTargetBytes ?? CHUNK_TARGET_BYTES,
+  );
   if (groups.length === 0) return { ok: false, error: MP4_UNREADABLE_ERROR };
 
   return transcribeChunks(

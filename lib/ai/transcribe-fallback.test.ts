@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { transcribeWithFallback } from "./transcribe";
-import type { SttConfig } from "./config";
+import { servedLocally, transcribeWithFallback } from "./transcribe";
+import { colabSttConfig, type SttConfig } from "./config";
 
 /**
  * transcribeWithFallback is the one piece of the Colab integration with real
@@ -157,6 +157,102 @@ describe("transcribeWithFallback", () => {
     // back at this level rather than caching the download across providers.
     const audioFetches = fetchMock.mock.calls.filter(([url]) => url === AUDIO_URL);
     expect(audioFetches).toHaveLength(4);
+  });
+
+  // A null fallback is how the caller says "this is allowed to run precisely
+  // because it costs nothing" — someone past their daily allowance. Silently
+  // reaching for a paid provider there would defeat the whole point.
+  describe("local-only (null fallback)", () => {
+    it("uses the local server and never touches a paid provider", async () => {
+      vi.stubEnv("COLAB_WHISPER_URL", "http://colab.example");
+
+      fetchMock.mockImplementation((url: string) => {
+        if (url.includes("/health")) return Promise.resolve(jsonResponse({ ok: true }));
+        if (url === AUDIO_URL) return Promise.resolve(audioResponse());
+        if (url.includes("colab.example")) return Promise.resolve(jsonResponse(TRANSCRIPTION_BODY));
+        throw new Error(`unexpected fetch: ${url}`);
+      });
+
+      const result = await transcribeWithFallback(AUDIO_URL, null);
+
+      expect(result.ok).toBe(true);
+      expect(servedLocally(result)).toBe(true);
+    });
+
+    it("fails with actionable advice rather than paying, when the server is down", async () => {
+      vi.stubEnv("COLAB_WHISPER_URL", "http://colab.example");
+
+      fetchMock.mockImplementation((url: string) => {
+        if (url.includes("/health")) return Promise.resolve(new Response(null, { status: 502 }));
+        throw new Error(`unexpected fetch: ${url}`);
+      });
+
+      const result = await transcribeWithFallback(AUDIO_URL, null);
+
+      expect(result.ok).toBe(false);
+      // The tunnel URL changing on every restart is the likeliest cause, so
+      // the message says so instead of just "failed".
+      expect(!result.ok && result.error).toContain("COLAB_WHISPER_URL");
+    });
+
+    it("does not retry against a paid provider when the local run fails", async () => {
+      vi.stubEnv("COLAB_WHISPER_URL", "http://colab.example");
+
+      fetchMock.mockImplementation((url: string) => {
+        if (url.includes("/health")) return Promise.resolve(jsonResponse({ ok: true }));
+        if (url === AUDIO_URL) return Promise.resolve(audioResponse());
+        if (url.includes("colab.example")) {
+          return Promise.resolve(jsonResponse({ error: "boom" }, { status: 500 }));
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      });
+
+      const result = await transcribeWithFallback(AUDIO_URL, null);
+
+      expect(result.ok).toBe(false);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("groq.example"))).toBe(
+        false,
+      );
+    });
+
+    it("reports plainly when there is no provider at all", async () => {
+      vi.stubEnv("COLAB_WHISPER_URL", "");
+
+      const result = await transcribeWithFallback(AUDIO_URL, null);
+
+      expect(result.ok).toBe(false);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
+  // A Cloudflare quick tunnel returns 524 for anything the origin hasn't
+  // answered in ~100s, and neither end can raise that. So the local config is
+  // shaped around time-per-request, not bytes-per-request like a hosted API.
+  it("shapes local requests around the tunnel's request timeout", () => {
+    vi.stubEnv("COLAB_WHISPER_URL", "http://colab.example");
+    const local = colabSttConfig();
+
+    // Small enough that even thrifty low-bitrate audio transcribes inside
+    // the tunnel's window.
+    expect(local?.chunkTargetBytes).toBeLessThanOrEqual(6 * 1024 * 1024);
+    expect(local?.chunkTargetBytes).toBeLessThan(local!.maxUploadBytes!);
+
+    // Sequential: the notebook serialises GPU work anyway, and a queued
+    // request would spend its tunnel budget waiting instead of working.
+    expect(local?.concurrency).toBe(1);
+
+    // ...but the job as a whole gets long enough for an episode's worth of
+    // those chunks, run one after another.
+    expect(local?.jobDeadlineMs).toBeGreaterThan(10 * 60_000);
+  });
+
+  describe("servedLocally", () => {
+    it("distinguishes a locally-produced transcript from a paid one", () => {
+      const base = { ok: true as const, text: "x", segments: [] };
+      expect(servedLocally({ ...base, model: "colab/whisper" })).toBe(true);
+      expect(servedLocally({ ...base, model: "groq/whisper-large-v3-turbo" })).toBe(false);
+      expect(servedLocally({ ok: false, error: "nope" })).toBe(false);
+    });
   });
 
   it("sends the shared secret on the health check when one is configured", async () => {

@@ -4,7 +4,8 @@ import { getUser } from "@/lib/supabase/server";
 import { db } from "@/lib/db/client";
 import { aiJobs, episodes, summaries, transcripts } from "@/lib/db/schema";
 import { recordUsage, resolveTier } from "@/lib/ai/quota";
-import { transcribeWithFallback } from "@/lib/ai/transcribe";
+import { colabSttConfig } from "@/lib/ai/config";
+import { servedLocally, transcribeWithFallback } from "@/lib/ai/transcribe";
 import { generateChapters, generateShowNotes } from "@/lib/ai/llm";
 
 export const runtime = "nodejs";
@@ -60,12 +61,29 @@ export async function POST(request: NextRequest) {
   if (cached) return NextResponse.json({ ...cached, cached: true });
 
   const decision = await resolveTier(user.id, "jobs");
-  if (!decision.allowed) {
+
+  /**
+   * The daily quota exists to cap what the *operator* spends, so work that
+   * costs the operator nothing has no business being metered by it.
+   *
+   * A developer running their own Whisper server (see colab/README.md) can
+   * therefore still generate captions past the limit — but only captions:
+   * show notes and chapters additionally need an operator-funded LLM call,
+   * which the allowance does have to cover however the transcript was made.
+   */
+  const hasLocalStt = colabSttConfig() !== null;
+  const localOnly = !decision.allowed && kind === "transcript" && hasLocalStt;
+
+  if (!decision.allowed && !localOnly) {
     return NextResponse.json(
       { error: decision.reason, quotaExhausted: true, used: decision.used, limit: decision.limit },
       { status: 429 },
     );
   }
+
+  // Non-null exactly when the request is running on quota rather than purely
+  // on local compute. Anything operator-funded below has to go through this.
+  const funded = decision.allowed ? decision : null;
 
   const [job] = await db
     .insert(aiJobs)
@@ -79,7 +97,7 @@ export async function POST(request: NextRequest) {
             ? "transcribe"
             : "summarize",
       status: "transcribing",
-      tier: decision.tier,
+      tier: funded?.tier ?? "local",
     })
     .returning();
 
@@ -96,16 +114,25 @@ export async function POST(request: NextRequest) {
     where: eq(transcripts.episodeId, episodeId),
   });
 
+  // Tracks who actually did the work, so a transcript produced on the
+  // developer's own hardware doesn't burn anyone's allowance below.
+  let transcribedLocally = false;
+
   if (!transcript) {
-    if (!decision.stt) {
+    // Null when the quota is spent: local-only, because falling back to a
+    // paid provider is precisely what an exhausted allowance rules out.
+    const fallbackStt = funded?.stt ?? null;
+
+    if (!fallbackStt && !hasLocalStt) {
       return fail(
         "Transcription isn't configured on this server. Add an OpenAI or Groq key in Settings to transcribe episodes yourself.",
         503,
       );
     }
 
-    const result = await transcribeWithFallback(episode.enclosureUrl, decision.stt);
+    const result = await transcribeWithFallback(episode.enclosureUrl, fallbackStt);
     if (!result.ok) return fail(result.error);
+    transcribedLocally = servedLocally(result);
 
     const [row] = await db
       .insert(transcripts)
@@ -136,8 +163,21 @@ export async function POST(request: NextRequest) {
   // call the caller never asked for.
   if (kind === "transcript") {
     await finish(job.id);
-    if (decision.tier === "default") await recordUsage(user.id, "jobs");
+    // Charged only when an operator-funded provider actually did the work.
+    if (funded?.tier === "default" && !transcribedLocally) {
+      await recordUsage(user.id, "jobs");
+    }
     return NextResponse.json({ segments, source: transcript.source });
+  }
+
+  // Everything past here makes an operator-funded LLM call. Unreachable
+  // without quota — only transcript jobs can get this far on local compute —
+  // but stated rather than assumed.
+  if (!funded) {
+    return fail(
+      "Generating show notes and chapters still needs your daily AI allowance, which is used up for today.",
+      429,
+    );
   }
 
   await db
@@ -148,7 +188,7 @@ export async function POST(request: NextRequest) {
   // --- generation ---------------------------------------------------------
 
   if (kind === "chapters") {
-    const result = await generateChapters(decision.llm, episode.title, segments);
+    const result = await generateChapters(funded.llm, episode.title, segments);
     if (!result.ok) return fail(result.error);
 
     await db
@@ -157,13 +197,13 @@ export async function POST(request: NextRequest) {
       .where(eq(episodes.id, episodeId));
 
     await finish(job.id);
-    if (decision.tier === "default") await recordUsage(user.id, "jobs");
+    if (funded.tier === "default") await recordUsage(user.id, "jobs");
 
     return NextResponse.json({ chapters: result.chapters, source: "ai_generated" });
   }
 
   const result = await generateShowNotes(
-    decision.llm,
+    funded.llm,
     episode.title,
     episode.podcast.title,
     transcript.text,
@@ -176,20 +216,20 @@ export async function POST(request: NextRequest) {
       episodeId,
       kind: "show_notes",
       text: result.text,
-      model: `${decision.llm.provider}/${decision.llm.model}`,
+      model: `${funded.llm.provider}/${funded.llm.model}`,
     })
     .onConflictDoUpdate({
       target: [summaries.episodeId, summaries.kind],
-      set: { text: result.text, model: `${decision.llm.provider}/${decision.llm.model}` },
+      set: { text: result.text, model: `${funded.llm.provider}/${funded.llm.model}` },
     });
 
   await finish(job.id);
-  if (decision.tier === "default") await recordUsage(user.id, "jobs");
+  if (funded.tier === "default") await recordUsage(user.id, "jobs");
 
   return NextResponse.json({
     text: result.text,
-    model: `${decision.llm.provider}/${decision.llm.model}`,
-    tier: decision.tier,
+    model: `${funded.llm.provider}/${funded.llm.model}`,
+    tier: funded.tier,
   });
 }
 
