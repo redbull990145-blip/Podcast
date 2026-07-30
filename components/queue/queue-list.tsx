@@ -10,10 +10,12 @@ import {
   type DropResult,
 } from "@hello-pangea/dnd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { motion } from "motion/react";
 import { GripVertical, ListMusic, Loader2, Play, X } from "lucide-react";
 import { usePlayer, type PlayableEpisode } from "@/lib/player/store";
 import { useRealtimeSync } from "@/lib/sync/use-realtime-sync";
 import { EmptyState } from "@/components/ui/page";
+import { press } from "@/lib/motion/gestures";
 import { cn, formatDurationLong } from "@/lib/utils";
 
 type QueueRow = {
@@ -127,6 +129,13 @@ export function QueueList({ userId }: { userId: string }) {
             {items.map((item, index) => (
               <Draggable key={item.id} draggableId={item.id} index={index}>
                 {(draggable, snapshot) => (
+                  /*
+                    Deliberately a plain <li>. @hello-pangea/dnd drives this
+                    element's `transform` directly while dragging, and a Motion
+                    component would be writing the same property from its own
+                    animation loop — whichever wrote last would win, frame by
+                    frame. The interactive parts inside it animate instead.
+                  */
                   <li
                     ref={draggable.innerRef}
                     {...draggable.draggableProps}
@@ -154,13 +163,14 @@ export function QueueList({ userId }: { userId: string }) {
 
                     <QueueRowContent item={item} />
 
-                    <button
+                    <motion.button
+                      {...press}
                       onClick={() => remove.mutate(item.id)}
                       aria-label={`Remove ${item.episode.title} from queue`}
                       className="grid size-8 shrink-0 place-items-center rounded-lg text-subtle-foreground transition-colors hover:bg-surface-hover hover:text-danger"
                     >
                       <X className="size-4" />
-                    </button>
+                    </motion.button>
                   </li>
                 )}
               </Draggable>
@@ -196,7 +206,8 @@ function QueueRowContent({ item }: { item: QueueRow }) {
 
   return (
     <>
-      <button
+      <motion.button
+        {...press}
         onClick={play}
         aria-label={`Play ${episode.title}`}
         className="relative shrink-0"
@@ -218,7 +229,7 @@ function QueueRowContent({ item }: { item: QueueRow }) {
         <span className="absolute inset-0 grid place-items-center rounded-lg bg-black/50 opacity-0 transition-opacity hover:opacity-100">
           <Play className="size-4 fill-white text-white" />
         </span>
-      </button>
+      </motion.button>
 
       <div className="min-w-0 flex-1">
         <Link

@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { X } from "lucide-react";
 import { SHORTCUTS, usePrefs } from "@/lib/prefs/store";
 import { usePlayer, MAX_RATE, MIN_RATE } from "@/lib/player/store";
+import { press } from "@/lib/motion/gestures";
+import { backdrop, dialog } from "@/lib/motion/variants";
 
 /**
  * Power-mode keyboard control.
@@ -99,19 +102,28 @@ function ShortcutsDialog() {
   const powerMode = usePrefs((s) => s.powerMode);
   const setShortcutsOpen = usePrefs((s) => s.setShortcutsOpen);
 
-  if (!open) return null;
-
   const shortcuts = SHORTCUTS.filter((s) => powerMode || !s.powerOnly);
 
   return (
-    <div
+    <AnimatePresence>
+      {open && (
+    <motion.div
+      variants={backdrop}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
       role="dialog"
       aria-modal="true"
       aria-label="Keyboard shortcuts"
       className="fixed inset-0 z-[70] grid place-items-center bg-black/50 p-4 backdrop-blur-sm"
       onClick={() => setShortcutsOpen(false)}
     >
-      <div
+      {/*
+        The panel scales in slightly ahead of the backdrop settling, so the
+        dialog reads as arriving rather than the screen simply darkening.
+      */}
+      <motion.div
+        variants={dialog}
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-[var(--shadow-lifted)]"
       >
@@ -122,13 +134,14 @@ function ShortcutsDialog() {
               These work anywhere except inside a text field.
             </p>
           </div>
-          <button
+          <motion.button
+            {...press}
             onClick={() => setShortcutsOpen(false)}
             aria-label="Close"
             className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
           >
             <X className="size-4" />
-          </button>
+          </motion.button>
         </div>
 
         <dl className="mt-5 space-y-2">
@@ -150,7 +163,9 @@ function ShortcutsDialog() {
             control and filters.
           </p>
         )}
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

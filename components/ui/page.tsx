@@ -48,7 +48,7 @@ export function Skeleton({ className }: { className?: string }) {
   return (
     <div
       aria-hidden
-      className={cn("animate-pulse rounded-lg bg-surface-raised", className)}
+      className={cn("skeleton rounded-lg bg-surface-raised", className)}
     />
   );
 }

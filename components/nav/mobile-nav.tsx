@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { motion } from "motion/react";
+import { SPRING } from "@/lib/motion/config";
 import { MOBILE_NAV_ITEMS } from "./nav-items";
 import { cn } from "@/lib/utils";
 
@@ -20,11 +22,31 @@ export function MobileNav() {
                 href={href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium transition-colors",
+                  "relative flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium transition-colors",
                   active ? "text-accent" : "text-muted-foreground",
                 )}
               >
-                <Icon className="size-5" strokeWidth={active ? 2.25 : 1.75} />
+                {/* Slides between tabs rather than reappearing under each one. */}
+                {active && (
+                  <motion.span
+                    layoutId="mobile-nav-active"
+                    aria-hidden
+                    transition={SPRING.pop}
+                    className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-accent"
+                  />
+                )}
+
+                {/*
+                  The icon lifts a whisker when its tab becomes current. On a
+                  phone-sized target it is the only element with room to carry a
+                  state change without the label having to move.
+                */}
+                <motion.span
+                  animate={{ scale: active ? 1.08 : 1, y: active ? -1 : 0 }}
+                  transition={SPRING.pop}
+                >
+                  <Icon className="size-5" strokeWidth={active ? 2.25 : 1.75} />
+                </motion.span>
                 {label}
               </Link>
             </li>

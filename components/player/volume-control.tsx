@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { Volume1, Volume2, VolumeX } from "lucide-react";
 import { usePlayer } from "@/lib/player/store";
+import { press } from "@/lib/motion/gestures";
+import { popover } from "@/lib/motion/variants";
 import { cn } from "@/lib/utils";
 
 /**
@@ -73,13 +76,14 @@ export function VolumeControl({
   if (layout === "inline") {
     return (
       <div className={cn("flex items-center gap-3", className)}>
-        <button
+        <motion.button
+          {...press}
           onClick={toggleMute}
           aria-label={muted ? "Unmute" : "Mute"}
           className="shrink-0 opacity-70 transition-opacity hover:opacity-100"
         >
           <Icon className="size-4" />
-        </button>
+        </motion.button>
         {slider}
         <span className="w-8 shrink-0 text-right text-[11px] tabular-nums opacity-60">
           {percent}%
@@ -102,7 +106,8 @@ export function VolumeControl({
         closeTimer.current = setTimeout(() => setOpen(false), 200);
       }}
     >
-      <button
+      <motion.button
+        {...press}
         onClick={toggleMute}
         aria-label={muted ? "Unmute" : "Mute"}
         aria-expanded={open}
@@ -112,21 +117,34 @@ export function VolumeControl({
         )}
       >
         <Icon className="size-4" />
-      </button>
+      </motion.button>
 
-      {open && (
-        <div
-          role="group"
-          aria-label="Volume"
-          className="absolute bottom-full left-1/2 z-50 mb-2 w-40 -translate-x-1/2 rounded-xl border border-border bg-surface p-3 shadow-[var(--shadow-lifted)]"
-        >
-          <div className="flex items-baseline justify-between pb-2">
-            <span className="text-xs font-medium text-muted-foreground">Volume</span>
-            <span className="text-xs font-semibold tabular-nums">{percent}%</span>
-          </div>
-          {slider}
-        </div>
-      )}
+      {/*
+        The outer span owns the centring translate and the inner motion element
+        owns the animation. Both on one element would mean Motion's inline
+        transform silently replacing the `-translate-x-1/2` class.
+      */}
+      <span className="absolute bottom-full left-1/2 z-50 mb-2 block w-40 -translate-x-1/2">
+        <AnimatePresence>
+          {open && (
+            <motion.span
+              variants={popover}
+              initial="hidden"
+              animate="visible"
+              exit="exit"
+              role="group"
+              aria-label="Volume"
+              className="block origin-bottom rounded-xl border border-border bg-surface p-3 shadow-[var(--shadow-lifted)]"
+            >
+              <span className="flex items-baseline justify-between pb-2">
+                <span className="text-xs font-medium text-muted-foreground">Volume</span>
+                <span className="text-xs font-semibold tabular-nums">{percent}%</span>
+              </span>
+              {slider}
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </span>
     </div>
   );
 }

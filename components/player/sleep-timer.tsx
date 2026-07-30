@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { Moon } from "lucide-react";
 import { usePlayer } from "@/lib/player/store";
+import { press, pressSubtle } from "@/lib/motion/gestures";
+import { popover } from "@/lib/motion/variants";
 import { cn } from "@/lib/utils";
 
 const PRESETS = [5, 10, 15, 30, 45, 60];
@@ -65,7 +68,8 @@ export function SleepTimer({ tone = "light" }: { tone?: "light" | "surface" }) {
 
   return (
     <div ref={ref} className="relative">
-      <button
+      <motion.button
+        {...press}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -80,62 +84,74 @@ export function SleepTimer({ tone = "light" }: { tone?: "light" | "surface" }) {
       >
         <Moon className="size-4" />
         {active && countdown}
-      </button>
+      </motion.button>
 
-      {open && (
-        <div
-          role="dialog"
-          aria-label="Sleep timer"
-          className={cn(
-            "absolute bottom-full left-1/2 z-50 mb-2 w-52 -translate-x-1/2 rounded-xl p-3 shadow-[var(--shadow-lifted)]",
-            tone === "light"
-              ? "bg-neutral-900/95 text-white backdrop-blur-xl"
-              : "border border-border bg-surface",
-          )}
-        >
-          <p className="pb-2 text-xs font-medium opacity-60">Stop playing after</p>
+      {/* Outer element carries the centring translate; inner one animates. */}
+      <div className="absolute bottom-full left-1/2 z-50 mb-2 w-52 -translate-x-1/2">
+        <AnimatePresence>
+          {open && (
+            <motion.div
+              variants={popover}
+              initial="hidden"
+              animate="visible"
+              exit="exit"
+              role="dialog"
+              aria-label="Sleep timer"
+              className={cn(
+                "origin-bottom rounded-xl p-3 shadow-[var(--shadow-lifted)]",
+                tone === "light"
+                  ? "bg-neutral-900/95 text-white backdrop-blur-xl"
+                  : "border border-border bg-surface",
+              )}
+            >
+              <p className="pb-2 text-xs font-medium opacity-60">Stop playing after</p>
 
-          <div className="grid grid-cols-3 gap-1.5">
-            {PRESETS.map((minutes) => (
-              <button
-                key={minutes}
-                onClick={() => choose(minutes)}
+              <div className="grid grid-cols-3 gap-1.5">
+                {PRESETS.map((minutes) => (
+                  <motion.button
+                    {...pressSubtle}
+                    key={minutes}
+                    onClick={() => choose(minutes)}
+                    className={cn(
+                      "rounded-lg py-1.5 text-xs font-medium tabular-nums transition-colors",
+                      tone === "light"
+                        ? "bg-white/10 hover:bg-white/20"
+                        : "bg-surface-raised hover:bg-surface-hover",
+                    )}
+                  >
+                    {minutes}m
+                  </motion.button>
+                ))}
+              </div>
+
+              <motion.button
+                {...pressSubtle}
+                onClick={() => choose("episode")}
                 className={cn(
-                  "rounded-lg py-1.5 text-xs font-medium tabular-nums transition-colors",
-                  tone === "light"
-                    ? "bg-white/10 hover:bg-white/20"
-                    : "bg-surface-raised hover:bg-surface-hover",
+                  "mt-1.5 w-full rounded-lg py-1.5 text-xs font-medium transition-colors",
+                  sleepTimer === "episode"
+                    ? "bg-accent text-accent-foreground"
+                    : tone === "light"
+                      ? "bg-white/10 hover:bg-white/20"
+                      : "bg-surface-raised hover:bg-surface-hover",
                 )}
               >
-                {minutes}m
-              </button>
-            ))}
-          </div>
+                End of episode
+              </motion.button>
 
-          <button
-            onClick={() => choose("episode")}
-            className={cn(
-              "mt-1.5 w-full rounded-lg py-1.5 text-xs font-medium transition-colors",
-              sleepTimer === "episode"
-                ? "bg-accent text-accent-foreground"
-                : tone === "light"
-                  ? "bg-white/10 hover:bg-white/20"
-                  : "bg-surface-raised hover:bg-surface-hover",
-            )}
-          >
-            End of episode
-          </button>
-
-          {active && (
-            <button
-              onClick={() => choose(null)}
-              className="mt-1.5 w-full rounded-lg py-1.5 text-xs font-medium opacity-70 transition-opacity hover:opacity-100"
-            >
-              Cancel timer
-            </button>
+              {active && (
+                <motion.button
+                  {...pressSubtle}
+                  onClick={() => choose(null)}
+                  className="mt-1.5 w-full rounded-lg py-1.5 text-xs font-medium opacity-70 transition-opacity hover:opacity-100"
+                >
+                  Cancel timer
+                </motion.button>
+              )}
+            </motion.div>
           )}
-        </div>
-      )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }

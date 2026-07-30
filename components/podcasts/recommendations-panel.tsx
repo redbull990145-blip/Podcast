@@ -4,9 +4,13 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { AnimatePresence, motion } from "motion/react";
 import { Check, Compass, Loader2, Plus, Rss, Sparkles, X } from "lucide-react";
 import type { Recommendation } from "@/lib/recommender/score-candidates";
 import { Button } from "@/components/ui/button";
+import { TWEEN } from "@/lib/motion/config";
+import { liftCard } from "@/lib/motion/gestures";
+import { listContainer, listItem } from "@/lib/motion/variants";
 import { stripHtml } from "@/lib/utils";
 
 type Response = {
@@ -74,11 +78,16 @@ export function RecommendationsPanel() {
         </span>
       </div>
 
-      <ul className="mt-4 grid gap-3 sm:grid-cols-2">
+      <motion.ul
+        variants={listContainer}
+        initial="hidden"
+        animate="visible"
+        className="mt-4 grid gap-3 sm:grid-cols-2"
+      >
         {data.recommendations.map((rec) => (
           <RecommendationCard key={rec.feedUrl} rec={rec} />
         ))}
-      </ul>
+      </motion.ul>
 
       <p className="mt-4 text-[11px] leading-relaxed text-subtle-foreground">
         Ranked on this device from your own listening history — no external
@@ -147,10 +156,24 @@ function RecommendationCard({ rec }: { rec: Recommendation }) {
     }
   }
 
-  if (dismissed) return null;
-
   return (
-    <li className="flex gap-3 rounded-xl border border-border bg-surface p-3 transition-colors hover:border-border-strong">
+    /*
+      The card animates its own dismissal, so AnimatePresence has to sit inside
+      it — a component cannot outlive the moment it decides to render nothing.
+      AnimatePresence emits no element of its own, so the <li> stays a direct
+      child of the grid either way.
+    */
+    <AnimatePresence>
+      {!dismissed && (
+    <motion.li
+      layout
+      variants={listItem}
+      // "Not for me" leaves sideways and shrinks — visibly discarded, rather
+      // than fading out like something that merely timed out.
+      exit={{ opacity: 0, x: -24, scale: 0.96, transition: TWEEN.normal }}
+      {...liftCard}
+      className="flex gap-3 rounded-xl border border-border bg-surface p-3 transition-colors hover:border-border-strong"
+    >
       {rec.artworkUrl ? (
         <Image
           src={rec.artworkUrl}
@@ -223,6 +246,8 @@ function RecommendationCard({ rec }: { rec: Recommendation }) {
           </Button>
         </div>
       </div>
-    </li>
+    </motion.li>
+      )}
+    </AnimatePresence>
   );
 }

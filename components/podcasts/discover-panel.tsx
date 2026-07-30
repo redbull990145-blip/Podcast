@@ -4,10 +4,13 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { motion } from "motion/react";
 import { Check, Loader2, Plus, Rss, Search } from "lucide-react";
 import type { PodcastSearchResult } from "@/lib/podcasts/search";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { liftCard } from "@/lib/motion/gestures";
+import { listContainer, listItem } from "@/lib/motion/variants";
 import { cn, stripHtml } from "@/lib/utils";
 
 /**
@@ -69,7 +72,15 @@ export function DiscoverPanel({
         )}
 
         {data && data.results.length > 0 && (
-          <ul className="mt-6 grid gap-3 sm:grid-cols-2">
+          <motion.ul
+            variants={listContainer}
+            initial="hidden"
+            animate="visible"
+            // Results are keyed on the query, so a new search re-runs the
+            // stagger instead of silently swapping the contents of the old one.
+            key={debounced}
+            className="mt-6 grid gap-3 sm:grid-cols-2"
+          >
             {data.results.map((result) => (
               <SearchResultCard
                 key={result.feedUrl}
@@ -77,7 +88,7 @@ export function DiscoverPanel({
                 alreadySubscribed={subscribed.has(result.feedUrl)}
               />
             ))}
-          </ul>
+          </motion.ul>
         )}
       </div>
 
@@ -127,7 +138,11 @@ function SearchResultCard({
   }
 
   return (
-    <li className="flex gap-3 rounded-xl border border-border bg-surface p-3 transition-colors hover:border-border-strong">
+    <motion.li
+      variants={listItem}
+      {...liftCard}
+      className="flex gap-3 rounded-xl border border-border bg-surface p-3 transition-colors hover:border-border-strong"
+    >
       {result.artworkUrl ? (
         <Image
           src={result.artworkUrl}
@@ -184,7 +199,7 @@ function SearchResultCard({
         </div>
         {message && <p className="mt-1.5 text-xs text-danger">{message}</p>}
       </div>
-    </li>
+    </motion.li>
   );
 }
 

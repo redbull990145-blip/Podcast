@@ -1,7 +1,9 @@
 "use client";
 
+import { motion } from "motion/react";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useTheme, type Theme } from "./theme-provider";
+import { SPRING } from "@/lib/motion/config";
 import { cn } from "@/lib/utils";
 
 const OPTIONS: { value: Theme; label: string; Icon: typeof Sun }[] = [
@@ -23,22 +25,33 @@ export function ThemeToggle() {
       {OPTIONS.map(({ value, label, Icon }) => {
         const active = theme === value;
         return (
-          <button
+          <motion.button
             key={value}
             role="radio"
             aria-checked={active}
             aria-label={label}
             title={label}
             onClick={() => setTheme(value)}
+            whileTap={{ scale: 0.9 }}
+            transition={SPRING.snappy}
             className={cn(
-              "grid size-7 place-items-center rounded-full transition-colors",
+              "relative grid size-7 place-items-center rounded-full transition-colors",
               active
-                ? "bg-accent text-accent-foreground"
+                ? "text-accent-foreground"
                 : "text-muted-foreground hover:bg-surface-hover hover:text-foreground",
             )}
           >
+            {/* The selected disc slides across the three options. */}
+            {active && (
+              <motion.span
+                layoutId="theme-selected"
+                aria-hidden
+                transition={SPRING.pop}
+                className="absolute inset-0 -z-10 rounded-full bg-accent"
+              />
+            )}
             <Icon className="size-3.5" strokeWidth={2} />
-          </button>
+          </motion.button>
         );
       })}
     </div>

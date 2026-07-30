@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   estimateSeconds,
   progressAt,
   stageAt,
 } from "@/lib/player/transcribe-stages";
+import { TWEEN } from "@/lib/motion/config";
 
 /**
  * Progress while captions are being generated.
@@ -31,11 +33,27 @@ export function TranscribeProgress({ durationSeconds }: { durationSeconds: numbe
   const progress = progressAt(elapsed, estimate);
   const percent = Math.round(progress * 100);
   const remaining = Math.max(0, Math.round(estimate - elapsed));
+  const stage = stageAt(progress);
 
   return (
     <div className="grid flex-1 place-items-center px-6">
       <div className="w-full max-w-sm text-center">
-        <p className="text-sm font-medium">{stageAt(progress)}</p>
+        {/* The stage name crossfades as the job moves on, so the change is
+            noticed by someone who isn't staring at it. */}
+        <div className="grid text-sm font-medium">
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.p
+              key={stage}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={TWEEN.fast}
+              className="col-start-1 row-start-1"
+            >
+              {stage}
+            </motion.p>
+          </AnimatePresence>
+        </div>
 
         <div
           role="progressbar"
@@ -45,9 +63,13 @@ export function TranscribeProgress({ durationSeconds }: { durationSeconds: numbe
           aria-label="Generating captions"
           className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-white/15"
         >
-          <div
-            className="h-full rounded-full bg-white transition-[width] duration-300 ease-[var(--ease-out)]"
-            style={{ width: `${percent}%` }}
+          {/* scaleX, so a bar that ticks every 200ms for a minute never runs a
+              layout pass to do it. */}
+          <motion.div
+            className="h-full w-full origin-left rounded-full bg-white"
+            initial={{ scaleX: 0 }}
+            animate={{ scaleX: progress }}
+            transition={TWEEN.slow}
           />
         </div>
 

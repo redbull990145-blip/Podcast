@@ -2,10 +2,14 @@
 
 import { memo } from "react";
 import Link from "next/link";
-import { CheckCircle2, Loader2, Pause, Play } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { CheckCircle2 } from "lucide-react";
 import { usePlayer, type PlayableEpisode } from "@/lib/player/store";
 import { QueueButton } from "@/components/queue/queue-button";
 import { DownloadButton } from "@/components/downloads/download-button";
+import { TransportIcon } from "@/components/player/transport-icon";
+import { SPRING, TWEEN } from "@/lib/motion/config";
+import { press } from "@/lib/motion/gestures";
 import { cn, formatDurationLong, formatRelativeDate } from "@/lib/utils";
 
 export type EpisodeRowData = {
@@ -82,26 +86,25 @@ export const EpisodeRow = memo(function EpisodeRow({
       )}
     >
       <div className="flex items-start gap-3">
-        <button
+        <motion.button
+          {...press}
           onClick={handlePlay}
           aria-label={
             isCurrent && isPlaying ? `Pause ${episode.title}` : `Play ${episode.title}`
           }
           className={cn(
-            "mt-0.5 grid size-10 shrink-0 place-items-center rounded-full border transition-all active:scale-95",
+            "mt-0.5 grid size-10 shrink-0 place-items-center rounded-full border transition-colors",
             isCurrent
               ? "border-accent bg-accent text-accent-foreground"
               : "border-border text-foreground hover:border-accent hover:text-accent",
           )}
         >
-          {isCurrent && isBuffering ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : isCurrent && isPlaying ? (
-            <Pause className="size-4 fill-current" />
-          ) : (
-            <Play className="size-4 translate-x-px fill-current" />
-          )}
-        </button>
+          <TransportIcon
+            isPlaying={isCurrent && isPlaying}
+            isBuffering={isCurrent && isBuffering}
+            className="size-4"
+          />
+        </motion.button>
 
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
@@ -115,15 +118,21 @@ export const EpisodeRow = memo(function EpisodeRow({
               {episode.title}
             </Link>
             <span className="flex shrink-0 items-center gap-1">
-              {progress?.played && (
-                <span
-                  title="Played"
-                  className="mt-0.5 text-success"
-                  aria-label="Played"
-                >
-                  <CheckCircle2 className="size-4" />
-                </span>
-              )}
+              <AnimatePresence>
+                {progress?.played && (
+                  <motion.span
+                    title="Played"
+                    className="mt-0.5 text-success"
+                    aria-label="Played"
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0, opacity: 0 }}
+                    transition={SPRING.pop}
+                  >
+                    <CheckCircle2 className="size-4" />
+                  </motion.span>
+                )}
+              </AnimatePresence>
               <QueueButton episodeId={episode.id} />
               <DownloadButton
                 episode={{
@@ -168,7 +177,17 @@ export const EpisodeRow = memo(function EpisodeRow({
               aria-valuemax={100}
               aria-label="Listening progress"
             >
-              <div className="h-full bg-accent" style={{ width: `${percent}%` }} />
+              {/*
+                scaleX rather than width. A show page renders fifty of these,
+                and the playing row's bar updates several times a second — as a
+                width that is fifty candidates for layout on every tick.
+              */}
+              <motion.div
+                className="h-full w-full origin-left bg-accent"
+                initial={{ scaleX: 0 }}
+                animate={{ scaleX: percent / 100 }}
+                transition={TWEEN.slow}
+              />
             </div>
           )}
         </div>

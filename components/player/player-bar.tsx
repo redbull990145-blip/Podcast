@@ -2,12 +2,50 @@
 
 import Image from "next/image";
 import { useEffect } from "react";
-import { ChevronUp, Loader2, Pause, Play, RotateCcw, RotateCw, X } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { ChevronUp, RotateCcw, RotateCw, X } from "lucide-react";
 import { usePlayer } from "@/lib/player/store";
+import { SPRING, TWEEN } from "@/lib/motion/config";
+import { press, pressPrimary } from "@/lib/motion/gestures";
 import { SpeedControl } from "./speed-control";
 import { VolumeControl } from "./volume-control";
 import { Scrubber } from "./scrubber";
+import { TransportIcon } from "./transport-icon";
 import { formatDuration } from "@/lib/utils";
+
+/*
+ * Position is read in these two leaves rather than in PlayerBar itself.
+ *
+ * It changes about four times a second for as long as anything is playing, and
+ * subscribing to it at the top would re-render the artwork, the title, all
+ * three transport buttons and both popovers on every tick — for a number that
+ * only two elements display.
+ */
+function BarScrubber() {
+  const currentTime = usePlayer((s) => s.currentTime);
+  const duration = usePlayer((s) => s.duration);
+  const seek = usePlayer((s) => s.seek);
+  return (
+    <Scrubber
+      currentTime={currentTime}
+      duration={duration}
+      onSeek={seek}
+      trackClassName="rounded-none"
+    />
+  );
+}
+
+function BarTimings() {
+  const currentTime = usePlayer((s) => s.currentTime);
+  const duration = usePlayer((s) => s.duration);
+  return (
+    <span className="text-xs tabular-nums text-muted-foreground">
+      {formatDuration(currentTime)}
+      <span className="mx-1 text-subtle-foreground">/</span>
+      {formatDuration(duration)}
+    </span>
+  );
+}
 
 /**
  * Persistent player, docked above the mobile tab bar and along the bottom on
@@ -18,14 +56,11 @@ export function PlayerBar() {
   const episode = usePlayer((s) => s.episode);
   const isPlaying = usePlayer((s) => s.isPlaying);
   const isBuffering = usePlayer((s) => s.isBuffering);
-  const currentTime = usePlayer((s) => s.currentTime);
-  const duration = usePlayer((s) => s.duration);
   const error = usePlayer((s) => s.error);
   const skipForwardSeconds = usePlayer((s) => s.skipForwardSeconds);
   const skipBackSeconds = usePlayer((s) => s.skipBackSeconds);
 
   const toggle = usePlayer((s) => s.toggle);
-  const seek = usePlayer((s) => s.seek);
   const skipForward = usePlayer((s) => s.skipForward);
   const skipBack = usePlayer((s) => s.skipBack);
   const stop = usePlayer((s) => s.stop);
@@ -57,121 +92,149 @@ export function PlayerBar() {
     return () => window.removeEventListener("keydown", onKey);
   }, [episode, toggle, skipForward, skipBack]);
 
-  if (!episode) return null;
-
   return (
-    <div className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-40 border-t border-border bg-surface/95 backdrop-blur-xl lg:bottom-0">
-      {error && (
-        <p role="alert" className="bg-danger/10 px-4 py-2 text-center text-xs text-danger">
-          {error}
-        </p>
-      )}
-
-      {/* Scrubber sits flush along the top edge, full width, easy to hit. */}
-      <Scrubber
-        currentTime={currentTime}
-        duration={duration}
-        onSeek={seek}
-        trackClassName="rounded-none"
-      />
-
-      <div className="mx-auto flex max-w-6xl items-center gap-3 px-3 py-2.5 sm:gap-4 sm:px-5">
-        {/*
-          Artwork and titles are one target that opens Now Playing, the way every
-          native player behaves. Deep links to the episode and show pages live
-          inside Now Playing rather than competing for the same few pixels here.
-        */}
-        <button
-          onClick={() => setExpanded(true)}
-          aria-label={`Open Now Playing for ${episode.title}`}
-          className="group flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left transition-opacity hover:opacity-80 sm:gap-4"
+    <AnimatePresence>
+      {episode && (
+        <motion.div
+          key="player-bar"
+          // The bar rises into place the first time something is played and
+          // drops away when the player is closed, instead of simply existing.
+          //
+          // Arriving gets the spring; leaving gets a tween. A spring's tail is
+          // asymptotic, so the same curve run backwards measured 600ms before
+          // the element could unmount — long after it had visually gone. When
+          // someone closes the player they want it gone, not eased away.
+          initial={{ y: "110%" }}
+          animate={{ y: 0, transition: SPRING.sheet }}
+          exit={{ y: "110%", transition: { duration: 0.24, ease: [0.4, 0, 1, 1] } }}
+          className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-40 border-t border-border bg-surface/95 backdrop-blur-xl lg:bottom-0"
         >
-          <span className="relative shrink-0">
-            {episode.artworkUrl ? (
-              <Image
-                src={episode.artworkUrl}
-                alt=""
-                width={96}
-                height={96}
-                sizes="48px"
-                className="size-10 rounded-lg object-cover sm:size-12"
-              />
-            ) : (
-              <span className="block size-10 rounded-lg bg-accent-subtle sm:size-12" />
+          {/*
+            Height is animated here, which the rest of the app avoids — but an
+            error banner appearing has to push the bar's own content down, and
+            there is no transform that moves a sibling. It happens at most once
+            per failure, on two elements, so the layout pass is affordable.
+          */}
+          <AnimatePresence initial={false}>
+            {error && (
+              <motion.p
+                role="alert"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={TWEEN.normal}
+                className="overflow-hidden bg-danger/10 px-4 py-2 text-center text-xs text-danger"
+              >
+                {error}
+              </motion.p>
             )}
-            <span className="absolute inset-0 grid place-items-center rounded-lg bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
-              <ChevronUp className="size-5 text-white" />
-            </span>
-          </span>
+          </AnimatePresence>
 
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium">{episode.title}</span>
-            <span className="block truncate text-xs text-muted-foreground">
-              {episode.podcastTitle}
-            </span>
-          </span>
-        </button>
+          {/* Scrubber sits flush along the top edge, full width, easy to hit. */}
+          <BarScrubber />
 
-        <div className="flex items-center gap-1 sm:gap-2">
-          <button
-            onClick={skipBack}
-            aria-label={`Back ${skipBackSeconds} seconds`}
-            title={`Back ${skipBackSeconds}s`}
-            className="relative hidden size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground sm:grid"
-          >
-            <RotateCcw className="size-5" strokeWidth={1.75} />
-            <span className="absolute text-[8px] font-bold tabular-nums">
-              {skipBackSeconds}
-            </span>
-          </button>
+          <div className="mx-auto flex max-w-6xl items-center gap-3 px-3 py-2.5 sm:gap-4 sm:px-5">
+            {/*
+              Artwork and titles are one target that opens Now Playing, the way
+              every native player behaves. Deep links to the episode and show
+              pages live inside Now Playing rather than competing for the same
+              few pixels here.
+            */}
+            <motion.button
+              whileTap={{ scale: 0.985 }}
+              transition={SPRING.snappy}
+              onClick={() => setExpanded(true)}
+              aria-label={`Open Now Playing for ${episode.title}`}
+              className="group flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left sm:gap-4"
+            >
+              <span className="relative shrink-0">
+                {episode.artworkUrl ? (
+                  <Image
+                    src={episode.artworkUrl}
+                    alt=""
+                    width={96}
+                    height={96}
+                    sizes="48px"
+                    className="size-10 rounded-lg object-cover sm:size-12"
+                  />
+                ) : (
+                  <span className="block size-10 rounded-lg bg-accent-subtle sm:size-12" />
+                )}
+                <span className="absolute inset-0 grid place-items-center rounded-lg bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
+                  <ChevronUp className="size-5 text-white" />
+                </span>
+              </span>
 
-          <button
-            onClick={toggle}
-            aria-label={isPlaying ? "Pause" : "Play"}
-            className="grid size-10 place-items-center rounded-full bg-accent text-accent-foreground transition-transform active:scale-95"
-          >
-            {isBuffering ? (
-              <Loader2 className="size-5 animate-spin" />
-            ) : isPlaying ? (
-              <Pause className="size-5 fill-current" />
-            ) : (
-              <Play className="size-5 translate-x-px fill-current" />
-            )}
-          </button>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">
+                  {episode.title}
+                </span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {episode.podcastTitle}
+                </span>
+              </span>
+            </motion.button>
 
-          <button
-            onClick={skipForward}
-            aria-label={`Forward ${skipForwardSeconds} seconds`}
-            title={`Forward ${skipForwardSeconds}s`}
-            className="relative grid size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
-          >
-            <RotateCw className="size-5" strokeWidth={1.75} />
-            <span className="absolute text-[8px] font-bold tabular-nums">
-              {skipForwardSeconds}
-            </span>
-          </button>
-        </div>
+            <div className="flex items-center gap-1 sm:gap-2">
+              <motion.button
+                {...press}
+                onClick={skipBack}
+                aria-label={`Back ${skipBackSeconds} seconds`}
+                title={`Back ${skipBackSeconds}s`}
+                className="relative hidden size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground sm:grid"
+              >
+                <RotateCcw className="size-5" strokeWidth={1.75} />
+                <span className="absolute text-[8px] font-bold tabular-nums">
+                  {skipBackSeconds}
+                </span>
+              </motion.button>
 
-        <div className="hidden items-center gap-3 sm:flex">
-          <span className="text-xs tabular-nums text-muted-foreground">
-            {formatDuration(currentTime)}
-            <span className="mx-1 text-subtle-foreground">/</span>
-            {formatDuration(duration)}
-          </span>
+              <motion.button
+                {...pressPrimary}
+                onClick={toggle}
+                aria-label={isPlaying ? "Pause" : "Play"}
+                className="grid size-10 place-items-center rounded-full bg-accent text-accent-foreground"
+              >
+                <TransportIcon
+                  isPlaying={isPlaying}
+                  isBuffering={isBuffering}
+                  className="size-5"
+                />
+              </motion.button>
 
-          <SpeedControl />
+              <motion.button
+                {...press}
+                onClick={skipForward}
+                aria-label={`Forward ${skipForwardSeconds} seconds`}
+                title={`Forward ${skipForwardSeconds}s`}
+                className="relative grid size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
+              >
+                <RotateCw className="size-5" strokeWidth={1.75} />
+                <span className="absolute text-[8px] font-bold tabular-nums">
+                  {skipForwardSeconds}
+                </span>
+              </motion.button>
+            </div>
 
-          <VolumeControl />
+            <div className="hidden items-center gap-3 sm:flex">
+              <BarTimings />
 
-          <button
-            onClick={stop}
-            aria-label="Close player"
-            className="grid size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
-      </div>
-    </div>
+              <SpeedControl />
+
+              <VolumeControl />
+
+              <motion.button
+                {...press}
+                onClick={stop}
+                aria-label="Close player"
+                className="grid size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
+              >
+                <X className="size-4" />
+              </motion.button>
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

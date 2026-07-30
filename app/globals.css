@@ -180,8 +180,111 @@
   }
 }
 
+@layer components {
+  /*
+   * Loading placeholders.
+   *
+   * A sheen travelling across the block rather than the whole block pulsing.
+   * Pulsing opacity says "something is here and it is blinking"; a sweep says
+   * "something is on its way", which is the actual message. It is one
+   * background-position animation, and it stays in CSS rather than moving to
+   * Motion because a skeleton must render before any JavaScript has run.
+   */
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklab, var(--foreground) 7%, transparent),
+      transparent
+    );
+    animation: skeleton-sweep 1.6s var(--ease-in-out) infinite;
+  }
+
+  @keyframes skeleton-sweep {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  /*
+   * Karaoke fill on the caption being spoken.
+   *
+   * The colour sweep is a gradient clipped to the glyphs, with the stop driven
+   * by a custom property that the player writes once a frame. Doing it this way
+   * means the only thing changing per frame is one paint on one text node —
+   * no React, no layout, and no second copy of the text stacked on top.
+   *
+   * The inner span is inline. An inline box broken across lines paints its
+   * background as though it were never broken (`box-decoration-break: slice`,
+   * the initial value), so the sweep runs to the end of the first line before
+   * starting the second, instead of both filling together.
+   */
+  /*
+   * Softens the top and bottom edges of the transcript.
+   *
+   * Without it, lines are cut off mid-word by a hard boundary and the panel
+   * reads as broken rather than scrolled. Fading them out says "this continues"
+   * — and it is what makes the lines appear to come from somewhere rather than
+   * blink into existence at the edge. Static, so it costs one paint.
+   */
+  .caption-viewport {
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 5%,
+      #000 92%,
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 5%,
+      #000 92%,
+      transparent 100%
+    );
+  }
+
+  .caption-line {
+    --caption-fill: 0%;
+    --caption-spoken: rgb(255 255 255);
+    --caption-unspoken: rgb(255 255 255 / 0.45);
+  }
+
+  @supports (background-clip: text) or (-webkit-background-clip: text) {
+    [data-caption-active] .caption-line__text {
+      background-image: linear-gradient(
+        90deg,
+        var(--caption-spoken) var(--caption-fill),
+        /* A hair of softness on the leading edge; a hard stop reads as a bug. */
+          var(--caption-unspoken) calc(var(--caption-fill) + 1.5%)
+      );
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      -webkit-text-fill-color: transparent;
+    }
+  }
+}
+
 @layer utilities {
-  /* Respect users who ask for less motion — playback UI animates a lot. */
+  /*
+   * Respect users who ask for less motion — playback UI animates a lot.
+   *
+   * This covers CSS transitions and keyframes. Motion-driven animations are
+   * handled separately by <MotionConfig reducedMotion="user">, which strips
+   * transform and layout animation while leaving opacity intact, and by the
+   * transcript reading useReducedMotion() directly so it jumps between lines
+   * instead of gliding.
+   */
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,

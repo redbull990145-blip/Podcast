@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
+import { MotionProvider } from "@/components/providers/motion-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -72,7 +73,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         correct, not a Band-Aid over an actual bug in our markup.
       */}
       <body className="min-h-dvh antialiased" suppressHydrationWarning>
-        {children}
+        <MotionProvider>{children}</MotionProvider>
       </body>
     </html>
   );

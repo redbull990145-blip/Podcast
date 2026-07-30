@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect } from "react";
+import { motion } from "motion/react";
 import { usePrefs } from "@/lib/prefs/store";
+import { SPRING } from "@/lib/motion/config";
 import { cn } from "@/lib/utils";
 
 /** Reads the stored preferences once the client is up. Mounted in the app shell. */
@@ -27,13 +29,15 @@ export function PowerModeToggle() {
   const setPowerMode = usePrefs((s) => s.setPowerMode);
 
   return (
-    <button
+    <motion.button
       role="switch"
       aria-checked={powerMode}
       // Until localStorage has been read the rendered state is a guess, so
       // don't let it be toggled from the wrong starting point.
       disabled={!hydrated}
       onClick={() => setPowerMode(!powerMode)}
+      whileTap={hydrated ? { scale: 0.95 } : undefined}
+      transition={SPRING.snappy}
       className={cn(
         "relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 ease-[var(--ease-out)] disabled:opacity-50",
         powerMode ? "bg-accent" : "bg-border-strong",
@@ -44,15 +48,20 @@ export function PowerModeToggle() {
         `left-1` matters: an absolutely positioned element with no inset
         anchors itself to where it would have sat in flow, which for the second
         child here is past the label, so the knob rendered outside the pill.
+
+        The knob is the one place in the app that gets a visible overshoot. A
+        physical switch has a detent — it arrives with a little more energy than
+        it needs and settles — and reproducing that is most of why a toggle
+        feels satisfying rather than merely functional.
       */}
-      <span
+      <motion.span
         aria-hidden
-        className={cn(
-          "absolute left-1 top-1 size-5 rounded-full bg-white shadow transition-transform duration-200 ease-[var(--ease-spring)]",
-          powerMode ? "translate-x-5" : "translate-x-0",
-        )}
+        initial={false}
+        animate={{ x: powerMode ? 20 : 0 }}
+        transition={{ type: "spring", stiffness: 700, damping: 26, mass: 0.7 }}
+        className="absolute left-1 top-1 size-5 rounded-full bg-white shadow"
       />
-    </button>
+    </motion.button>
   );
 }
 

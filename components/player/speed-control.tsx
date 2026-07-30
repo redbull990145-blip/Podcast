@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { MAX_RATE, MIN_RATE, RATE_STEP, usePlayer } from "@/lib/player/store";
+import { press, pressSubtle } from "@/lib/motion/gestures";
+import { popover } from "@/lib/motion/variants";
 import { cn } from "@/lib/utils";
 
 /** One-tap speeds. The slider covers everything between. */
@@ -46,7 +49,8 @@ export function SpeedControl({
 
   return (
     <div ref={ref} className="relative">
-      <button
+      <motion.button
+        {...press}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -59,17 +63,24 @@ export function SpeedControl({
         )}
       >
         {label}
-      </button>
+      </motion.button>
 
-      {open && (
-        <div
+      <AnimatePresence>
+        {open && (
+        <motion.div
+          variants={popover}
+          initial="hidden"
+          animate="visible"
+          exit="exit"
           role="dialog"
           aria-label="Playback speed"
           className={cn(
+            // Growing from the corner nearest the button reads as the control
+            // unfolding rather than a panel appearing over it.
             "absolute bottom-full z-50 mb-2 w-60 rounded-xl p-3 shadow-[var(--shadow-lifted)]",
             tone === "light"
-              ? "left-0 bg-neutral-900/95 text-white backdrop-blur-xl"
-              : "right-0 border border-border bg-surface",
+              ? "left-0 origin-bottom-left bg-neutral-900/95 text-white backdrop-blur-xl"
+              : "right-0 origin-bottom-right border border-border bg-surface",
           )}
         >
           <div className="flex items-center justify-between">
@@ -110,7 +121,8 @@ export function SpeedControl({
 
           <div className="mt-3 grid grid-cols-3 gap-1.5">
             {PRESETS.map((preset) => (
-              <button
+              <motion.button
+                {...pressSubtle}
                 key={preset}
                 onClick={() => setRate(preset)}
                 className={cn(
@@ -123,7 +135,7 @@ export function SpeedControl({
                 )}
               >
                 {preset}×
-              </button>
+              </motion.button>
             ))}
           </div>
 
@@ -135,8 +147,9 @@ export function SpeedControl({
           >
             Pitch stays natural at every speed.
           </p>
-        </div>
-      )}
+        </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
