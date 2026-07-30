@@ -39,6 +39,26 @@
 
   --shadow-soft: 0 1px 2px oklch(0.2 0.02 265 / 0.04), 0 4px 16px oklch(0.2 0.02 265 / 0.06);
   --shadow-lifted: 0 2px 4px oklch(0.2 0.02 265 / 0.06), 0 12px 32px oklch(0.2 0.02 265 / 0.1);
+
+  /*
+   * Motion.
+   *
+   * What makes native players feel smooth is not longer animations — it is the
+   * curve. A linear or symmetric ease reads as mechanical because nothing
+   * physical moves that way. These are asymmetric: quick to leave, slow to
+   * settle, which is what the platform toolkits produce.
+   *
+   * --ease-spring overshoots very slightly, the way a real spring does. Use it
+   * for things that move (knobs, sheets); use --ease-out for things that fade
+   * or recolour, where an overshoot would just look like a mistake.
+   */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --duration-fast: 140ms;
+  --duration-normal: 220ms;
+  --duration-slow: 380ms;
 }
 
 .dark {
@@ -100,6 +120,10 @@
   --font-mono:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
     monospace;
+
+  --ease-out: var(--ease-out);
+  --ease-in-out: var(--ease-in-out);
+  --ease-spring: var(--ease-spring);
 }
 
 @layer base {
@@ -119,6 +143,25 @@
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
+
+  /*
+   * Every transition that doesn't ask for its own curve gets the good one.
+   * Tailwind's `transition-*` utilities default to a symmetric ease, which is
+   * the single biggest reason a web UI feels less settled than a native one.
+   */
+  *,
+  *::before,
+  *::after {
+    transition-timing-function: var(--ease-out);
+  }
+
+  /*
+   * `content-visibility: auto` was tried on transcript lines and measured
+   * worse, not better — with variable-height rows the browser's guessed
+   * intrinsic size is wrong, so every scroll triggers re-layout and
+   * scroll-anchoring corrections. The transcript is fast because it renders
+   * once and the highlight is applied imperatively; see captions-panel.tsx.
+   */
 
   /* Visible, consistent focus ring — keyboard navigation is a first-class path
      in this app, not an afterthought bolted on for the power-user mode. */

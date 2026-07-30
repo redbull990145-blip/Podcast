@@ -3,7 +3,8 @@ import { and, eq } from "drizzle-orm";
 import { getUser } from "@/lib/supabase/server";
 import { db } from "@/lib/db/client";
 import { userApiKeys } from "@/lib/db/schema";
-import { encryptApiKey, keyHint } from "@/lib/crypto/api-keys";
+import { assertEncryptionConfigured, encryptApiKey, keyHint } from "@/lib/crypto/api-keys";
+import { validateApiKey, type Provider } from "@/lib/ai/validate-key";
 
 export const runtime = "nodejs";
 
@@ -50,6 +51,29 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "That doesn't look like an API key." }, {
       status: 400,
     });
+  }
+
+  // Ask the provider before storing. A rejected key discovered here is one
+  // sentence to fix; discovered later it looks like the app is broken.
+  const validation = await validateApiKey(provider as Provider, apiKey);
+  if (validation.ok === false) {
+    return NextResponse.json({ error: validation.error }, { status: 400 });
+  }
+
+  // The encryption secret is an operator setting, so check it before writing
+  // and say precisely what is missing — "misconfigured" sends people hunting
+  // through their own account for a problem that is on this side.
+  try {
+    assertEncryptionConfigured();
+  } catch (err) {
+    console.error("API key encryption is not configured", err);
+    return NextResponse.json(
+      {
+        error:
+          "This server can't store keys yet: API_KEY_ENCRYPTION_SECRET is missing or invalid in its environment. Everything else still works on the free tier.",
+      },
+      { status: 503 },
+    );
   }
 
   try {

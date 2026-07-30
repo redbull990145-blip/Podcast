@@ -35,16 +35,21 @@ export function PowerModeToggle() {
       disabled={!hydrated}
       onClick={() => setPowerMode(!powerMode)}
       className={cn(
-        "relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-50",
+        "relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 ease-[var(--ease-out)] disabled:opacity-50",
         powerMode ? "bg-accent" : "bg-border-strong",
       )}
     >
       <span className="sr-only">Power user mode</span>
+      {/*
+        `left-1` matters: an absolutely positioned element with no inset
+        anchors itself to where it would have sat in flow, which for the second
+        child here is past the label, so the knob rendered outside the pill.
+      */}
       <span
         aria-hidden
         className={cn(
-          "absolute top-1 size-5 rounded-full bg-white shadow transition-transform",
-          powerMode ? "translate-x-6" : "translate-x-1",
+          "absolute left-1 top-1 size-5 rounded-full bg-white shadow transition-transform duration-200 ease-[var(--ease-spring)]",
+          powerMode ? "translate-x-5" : "translate-x-0",
         )}
       />
     </button>

@@ -1,7 +1,7 @@
 "use client";
 
 import { Info } from "lucide-react";
-import { usePlayer } from "@/lib/player/store";
+import { SKIP_CHOICES, usePlayer } from "@/lib/player/store";
 import { usePrefs } from "@/lib/prefs/store";
 import { cn } from "@/lib/utils";
 
@@ -20,20 +20,56 @@ export function AudioEnhancementsPanel() {
   const setSkipSilence = usePlayer((s) => s.setSkipSilence);
   const setVolumeBoost = usePlayer((s) => s.setVolumeBoost);
 
+  const skipForward = usePlayer((s) => s.skipForwardSeconds);
+  const skipBack = usePlayer((s) => s.skipBackSeconds);
+  const setSkipSeconds = usePlayer((s) => s.setSkipSeconds);
+
+  // Skip intervals are not an advanced feature — they are the two buttons
+  // everyone uses — so they stay visible whether or not power mode is on.
+  const skipRows = (
+    <>
+      <Row
+        title="Skip back"
+        description="How far the back button jumps."
+      >
+        <SkipChoice
+          value={skipBack}
+          onChange={(s) => setSkipSeconds("back", s)}
+          label="Skip back seconds"
+        />
+      </Row>
+      <Row
+        title="Skip forward"
+        description="How far the forward button jumps. Matches skip back by default, so the two undo each other."
+      >
+        <SkipChoice
+          value={skipForward}
+          onChange={(s) => setSkipSeconds("forward", s)}
+          label="Skip forward seconds"
+        />
+      </Row>
+    </>
+  );
+
   if (!powerMode) {
     return (
-      <div className="flex items-start gap-2.5 border-b border-border py-5 text-sm text-muted-foreground last:border-0">
-        <Info className="mt-0.5 size-4 shrink-0" />
-        <p className="leading-relaxed">
-          Skip silence and volume boost live behind Power user mode — turn it on
-          above to configure them.
-        </p>
+      <div>
+        {skipRows}
+        <div className="flex items-start gap-2.5 py-5 text-sm text-muted-foreground">
+          <Info className="mt-0.5 size-4 shrink-0" />
+          <p className="leading-relaxed">
+            Skip silence and volume boost live behind Power user mode — turn it
+            on above to configure them.
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
     <div>
+      {skipRows}
+
       <Row
         title="Skip silence"
         description="Accelerates through pauses and gaps instead of cutting them, so speech never sounds clipped."
@@ -100,6 +136,41 @@ function Row({
   );
 }
 
+/** Segmented control for a skip interval. */
+function SkipChoice({
+  value,
+  onChange,
+  label,
+}: {
+  value: number;
+  onChange: (seconds: number) => void;
+  label: string;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      className="flex gap-1 rounded-full bg-surface-raised p-1"
+    >
+      {SKIP_CHOICES.map((seconds) => (
+        <button
+          key={seconds}
+          onClick={() => onChange(seconds)}
+          aria-pressed={value === seconds}
+          className={cn(
+            "rounded-full px-2.5 py-1 text-xs font-medium tabular-nums transition-colors duration-200 ease-[var(--ease-out)]",
+            value === seconds
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {seconds}s
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Switch({
   checked,
   onChange,
@@ -115,7 +186,7 @@ function Switch({
       aria-checked={checked}
       onClick={() => onChange(!checked)}
       className={cn(
-        "relative h-7 w-12 shrink-0 rounded-full transition-colors",
+        "relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 ease-[var(--ease-out)]",
         checked ? "bg-accent" : "bg-border-strong",
       )}
     >
@@ -123,8 +194,8 @@ function Switch({
       <span
         aria-hidden
         className={cn(
-          "absolute top-1 size-5 rounded-full bg-white shadow transition-transform",
-          checked ? "translate-x-6" : "translate-x-1",
+          "absolute left-1 top-1 size-5 rounded-full bg-white shadow transition-transform duration-200 ease-[var(--ease-spring)]",
+          checked ? "translate-x-5" : "translate-x-0",
         )}
       />
     </button>

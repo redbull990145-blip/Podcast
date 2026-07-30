@@ -97,6 +97,7 @@ type PlayerActions = {
   setCaptionsOpen: (open: boolean) => void;
   /** Minutes from now, "episode" to stop at the end of this one, or null. */
   setSleepTimer: (value: number | "episode" | null) => void;
+  setSkipSeconds: (direction: "forward" | "back", seconds: number) => void;
   setSkipSilence: (enabled: boolean) => void;
   setVolumeBoost: (multiplier: number) => void;
   /**
@@ -176,6 +177,16 @@ function clampRate(rate: number) {
 
 const STORAGE_KEY = "cadence-player-prefs";
 
+/** Skip intervals offered in Settings. */
+export const SKIP_CHOICES = [5, 10, 15, 30, 45, 60] as const;
+
+function clampSkip(value: unknown, fallback: number): number {
+  const seconds = Number(value);
+  return SKIP_CHOICES.includes(seconds as (typeof SKIP_CHOICES)[number])
+    ? seconds
+    : fallback;
+}
+
 function loadPrefs(): Pick<
   PlayerState,
   | "playbackRate"
@@ -188,7 +199,10 @@ function loadPrefs(): Pick<
   const fallback = {
     playbackRate: 1,
     volume: 1,
-    skipForwardSeconds: 30,
+    // Symmetric by default. Asymmetric skips (30 forward, 15 back) are an
+    // ad-skipping convention; for following a conversation, having the two
+    // buttons undo each other is what people actually expect.
+    skipForwardSeconds: 15,
     skipBackSeconds: 15,
     skipSilence: false,
     volumeBoost: 1,
@@ -201,8 +215,8 @@ function loadPrefs(): Pick<
     return {
       playbackRate: clampRate(Number(parsed.playbackRate) || 1),
       volume: Math.min(1, Math.max(0, Number(parsed.volume ?? 1))),
-      skipForwardSeconds: Number(parsed.skipForwardSeconds) || 30,
-      skipBackSeconds: Number(parsed.skipBackSeconds) || 15,
+      skipForwardSeconds: clampSkip(parsed.skipForwardSeconds, 15),
+      skipBackSeconds: clampSkip(parsed.skipBackSeconds, 15),
       skipSilence: parsed.skipSilence === true,
       volumeBoost: Math.min(3, Math.max(1, Number(parsed.volumeBoost) || 1)),
     };
@@ -407,6 +421,16 @@ export const usePlayer = create<PlayerState & PlayerActions>((set, get) => ({
       sleepTimer:
         typeof value === "number" ? Date.now() + value * 60_000 : value,
     });
+  },
+
+  setSkipSeconds(direction, seconds) {
+    const value = clampSkip(seconds, direction === "forward" ? 15 : 15);
+    set(
+      direction === "forward"
+        ? { skipForwardSeconds: value }
+        : { skipBackSeconds: value },
+    );
+    savePrefs(get());
   },
 
   setSkipSilence(skipSilence) {

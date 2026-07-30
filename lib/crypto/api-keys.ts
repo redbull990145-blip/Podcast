@@ -33,6 +33,15 @@ function getKey(): Buffer {
   return key;
 }
 
+/**
+ * Throws with a specific message when the encryption secret is missing or the
+ * wrong size, so callers can report an operator problem as an operator problem
+ * rather than blaming the user's key.
+ */
+export function assertEncryptionConfigured(): void {
+  getKey();
+}
+
 /** Returns base64 of iv || authTag || ciphertext. */
 export function encryptApiKey(plaintext: string): string {
   // A fresh random IV per encryption is mandatory for GCM: reusing one with the
