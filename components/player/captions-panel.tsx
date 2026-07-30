@@ -16,6 +16,7 @@ import type { TranscriptSegment } from "@/lib/db/schema";
 import { getAudio, usePlayer } from "@/lib/player/store";
 import { activeSegmentIndex } from "@/lib/player/captions";
 import {
+  captionWords,
   centreOffset,
   clampOffset,
   fillFraction,
@@ -150,7 +151,11 @@ function VirtualTranscript({
    */
   const duration = usePlayer((s) => s.duration);
   const { nudge, adjust, reset } = useCaptionOffset(episodeId);
-  const autoOffset = inferCaptionOffset(duration, transcriptEndSeconds(segments));
+  // Deliberately the settled duration, never the live one — see the hook.
+  const autoOffset = inferCaptionOffset(
+    useSettledDuration(duration),
+    transcriptEndSeconds(segments),
+  );
   const offset = autoOffset + nudge;
 
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -434,8 +439,29 @@ function VirtualTranscript({
                   broken, which is what makes the fill sweep line one and then
                   line two rather than both at once.
                 */}
-                <span className="text-sm leading-relaxed">
-                  <span className="caption-line__text">{segment.text}</span>
+                {/*
+                  One element per word, each carrying the slice of the line it
+                  occupies. The line publishes a single progress number and
+                  every word derives its own fill from it in CSS, which is what
+                  keeps the colour inside the word being spoken instead of
+                  sweeping the whole sentence. Painting is still one custom
+                  property write per frame, not one per word.
+                */}
+                <span className="caption-line__text text-base leading-relaxed">
+                  {captionWords(segment).map((word, wordIndex) => (
+                    <span
+                      key={wordIndex}
+                      className="caption-word"
+                      style={
+                        {
+                          "--w-from": word.from,
+                          "--w-to": word.to,
+                        } as React.CSSProperties
+                      }
+                    >
+                      {word.text}{" "}
+                    </span>
+                  ))}
                 </span>
               </button>
             );
@@ -511,8 +537,10 @@ function useKaraokeFill(
           ? audio.currentTime
           : usePlayer.getState().currentTime;
       const time = toTranscriptTime(playback, offset);
-      const percent = reduceMotion ? 100 : fillFraction(segment, time) * 100;
-      node.style.setProperty("--caption-fill", `${percent.toFixed(2)}%`);
+      // A plain number, not a percentage: each word turns it into its own
+      // local fill in CSS, which needs to divide by the word's own width.
+      const progress = reduceMotion ? 1 : fillFraction(segment, time);
+      node.style.setProperty("--caption-fill", progress.toFixed(4));
     };
 
     paint();
@@ -524,6 +552,47 @@ function useKaraokeFill(
     });
     return () => cancelAnimationFrame(raf);
   }, [segments, activeIndex, rangeStart, isPlaying, pausedTime, reduceMotion, offset]);
+}
+
+/**
+ * How long `duration` must hold still before it is trusted to shift captions.
+ *
+ * Long enough to outlast the revisions a browser makes while it buffers, short
+ * enough that a real pre-roll is corrected before anyone has read many lines.
+ */
+const DURATION_SETTLE_MS = 2_000;
+
+/**
+ * The audio's length, once the browser has stopped changing its mind about it.
+ *
+ * `audio.duration` is not a constant for MP3. Without a Xing header a browser
+ * cannot know the length of a variable-bitrate file until it has fetched all of
+ * it, so it estimates from the bitrate seen so far and revises the figure as
+ * more arrives — and resuming seeks straight into the middle of the file, which
+ * is exactly when that estimate is furthest off.
+ *
+ * The caption offset is derived from that length, so feeding it the live value
+ * makes the whole transcript jump partway through an episode: same audio, same
+ * transcript, a different guess at the gap between them. Measured here at
+ * 3523.2s early against 3514.5s of transcript, it produced a +8s shift that
+ * later collapsed to none.
+ *
+ * Waiting for the number to hold still costs a couple of seconds of unshifted
+ * captions at the start — which is the right default anyway, since AI
+ * transcripts are timed against the served audio and need no shift at all.
+ */
+function useSettledDuration(duration: number): number {
+  const [settled, setSettled] = useState(0);
+
+  useEffect(() => {
+    if (!(duration > 0)) return;
+    // The cleanup restarts this on every revision, so it only fires once the
+    // figure has held still — which is the whole point.
+    const timer = setTimeout(() => setSettled(duration), DURATION_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [duration]);
+
+  return settled;
 }
 
 /**

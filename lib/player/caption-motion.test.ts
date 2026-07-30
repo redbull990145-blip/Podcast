@@ -3,6 +3,7 @@ import {
   EMPHASIS_RANGE,
   centreOffset,
   clampOffset,
+  captionWords,
   fillFraction,
   isRowVisible,
   lineEmphasis,
@@ -40,15 +41,84 @@ describe("lineEmphasis", () => {
   });
 });
 
+describe("captionWords", () => {
+  it("positions each word by how much of the rendered line it occupies", () => {
+    // "a" (1+1) + "bb" (2+1) + "ccc" (3+1) = 9 characters of line.
+    const words = captionWords({ start: 0, end: 9, text: "a bb ccc" });
+    expect(words.map((w) => w.text)).toEqual(["a", "bb", "ccc"]);
+    expect(words[0].from).toBeCloseTo(0);
+    expect(words[0].to).toBeCloseTo(2 / 9);
+    expect(words[1].from).toBeCloseTo(2 / 9);
+    expect(words[1].to).toBeCloseTo(5 / 9);
+    expect(words[2].to).toBeCloseTo(1);
+  });
+
+  it("covers the line end to end with no gaps between words", () => {
+    const words = captionWords({ start: 0, end: 5, text: "one two three four" });
+    expect(words[0].from).toBe(0);
+    expect(words[words.length - 1].to).toBeCloseTo(1);
+    for (let i = 1; i < words.length; i += 1) {
+      expect(words[i].from).toBeCloseTo(words[i - 1].to);
+    }
+  });
+
+  it("uses real per-word timings when they line up with the rendered words", () => {
+    const words = captionWords({
+      start: 0,
+      end: 4,
+      text: "hello world",
+      words: [
+        { start: 0, end: 1, text: "hello" },
+        { start: 3, end: 4, text: "world" },
+      ],
+    });
+    expect(words.map((w) => [w.start, w.end])).toEqual([
+      [0, 1],
+      [3, 4],
+    ]);
+  });
+
+  it("shares the line's own span out when there are no word timings", () => {
+    // No timings at all — the common case for a publisher transcript.
+    const words = captionWords({ start: 0, end: 9, text: "a bb ccc" });
+    expect(words[0].start).toBeCloseTo(0);
+    expect(words[0].end).toBeCloseTo(2);
+    expect(words[1].end).toBeCloseTo(5);
+    expect(words[2].end).toBeCloseTo(9);
+  });
+
+  it("ignores word timings that don't match the rendered words", () => {
+    // Three words on screen but two timings: pairing them by index would put
+    // the highlight on the wrong word, so the proportional guess is safer.
+    const words = captionWords({
+      start: 0,
+      end: 9,
+      text: "a bb ccc",
+      words: [
+        { start: 0, end: 1, text: "a" },
+        { start: 1, end: 2, text: "bb" },
+      ],
+    });
+    expect(words[2].end).toBeCloseTo(9);
+  });
+
+  it("returns nothing for an empty or missing line", () => {
+    expect(captionWords({ start: 0, end: 1, text: "   " })).toEqual([]);
+    expect(
+      captionWords({ start: 0, end: 1 } as Parameters<typeof captionWords>[0]),
+    ).toEqual([]);
+  });
+});
+
 describe("fillFraction", () => {
-  const segment = { start: 10, end: 14 };
+  const segment = { start: 10, end: 14, text: "aaa bbb ccc ddd" };
 
   it("is empty before the line starts", () => {
     expect(fillFraction(segment, 9.9)).toBe(0);
     expect(fillFraction(segment, 10)).toBe(0);
   });
 
-  it("interpolates across the segment", () => {
+  it("advances through the line as it is spoken", () => {
     expect(fillFraction(segment, 11)).toBeCloseTo(0.25);
     expect(fillFraction(segment, 12)).toBeCloseTo(0.5);
   });
@@ -59,51 +129,59 @@ describe("fillFraction", () => {
   });
 
   it("fills instantly for a zero-length segment rather than dividing by zero", () => {
-    expect(fillFraction({ start: 10, end: 10 }, 10.5)).toBe(1);
-    expect(fillFraction({ start: 10, end: 10 }, 9)).toBe(0);
+    expect(fillFraction({ start: 10, end: 10, text: "hi there" }, 10.5)).toBe(1);
+    expect(fillFraction({ start: 10, end: 10, text: "hi there" }, 9)).toBe(0);
   });
 
   it("survives a reversed segment from a malformed transcript", () => {
-    expect(fillFraction({ start: 10, end: 4 }, 11)).toBe(1);
+    expect(fillFraction({ start: 10, end: 4, text: "hi there" }, 11)).toBe(1);
   });
 });
 
 describe("fillFraction (word-level)", () => {
   // Two words of equal length, each +1 trailing space => each owns half the line.
   // "hello" (0-1) ... gap ... "world" (2-3).
-  const words = [
-    { start: 0, end: 1, text: "hello" },
-    { start: 2, end: 3, text: "world" },
-  ];
-  const segment = { start: 0, end: 4, words };
+  const segment = {
+    start: 0,
+    end: 4,
+    text: "hello world",
+    words: [
+      { start: 0, end: 1, text: "hello" },
+      { start: 2, end: 3, text: "world" },
+    ],
+  };
 
   it("sits at the leading edge of the first word as it begins", () => {
-    // Each word+space is 6 chars of 12 total, so "hello" owns the first 0.5.
     expect(fillFraction(segment, 0)).toBeCloseTo(0);
   });
 
-  it("eases across the first word's character slice while it is spoken", () => {
-    // Halfway through "hello": half of its 0.5 slice => 0.25.
+  it("eases across the first word's slice while it is spoken", () => {
     expect(fillFraction(segment, 0.5)).toBeCloseTo(0.25);
-    // End of "hello": its whole slice => 0.5.
     expect(fillFraction(segment, 1)).toBeCloseTo(0.5);
   });
 
   it("HOLDS during the gap between words instead of racing ahead", () => {
-    // Between t=1 (end of "hello") and t=2 (start of "world") no word is being
-    // spoken, so the fill must stay pinned at 0.5 — the crux of the fix.
+    // Between t=1 (end of "hello") and t=2 (start of "world") nothing is being
+    // said, so the fill must stay pinned at the end of "hello".
     expect(fillFraction(segment, 1.2)).toBeCloseTo(0.5);
     expect(fillFraction(segment, 1.999)).toBeCloseTo(0.5);
   });
 
   it("steps to the next word's slice only when that word starts", () => {
-    // "world" begins at t=2; immediately it has spoken none of its own slice,
-    // so the fill is still at 0.5 (end of "hello").
     expect(fillFraction(segment, 2)).toBeCloseTo(0.5);
-    // Halfway through "world": 0.5 + half of its 0.5 slice => 0.75.
     expect(fillFraction(segment, 2.5)).toBeCloseTo(0.75);
-    // End of "world": full line => 1.
     expect(fillFraction(segment, 3)).toBeCloseTo(1);
+  });
+
+  it("never leaves the word being spoken", () => {
+    // The point of the whole exercise: while a word is mid-utterance the fill
+    // stays inside that word's own slice and cannot bleed onto the next one.
+    const words = captionWords(segment);
+    for (let t = 0; t <= 1; t += 0.05) {
+      const fill = fillFraction(segment, t);
+      expect(fill).toBeGreaterThanOrEqual(words[0].from);
+      expect(fill).toBeLessThanOrEqual(words[0].to + 1e-9);
+    }
   });
 
   it("is full and stays full after the last word ends", () => {
@@ -112,7 +190,12 @@ describe("fillFraction (word-level)", () => {
   });
 
   it("is empty before the segment starts, even with words present", () => {
-    const early = { start: 10, end: 20, words: [{ start: 10, end: 11, text: "hi" }] };
+    const early = {
+      start: 10,
+      end: 20,
+      text: "hi",
+      words: [{ start: 10, end: 11, text: "hi" }],
+    };
     expect(fillFraction(early, 9)).toBe(0);
     expect(fillFraction(early, 10)).toBe(0);
   });
@@ -121,12 +204,13 @@ describe("fillFraction (word-level)", () => {
     const seg = {
       start: 0,
       end: 2,
+      text: "boom ok",
       words: [
         { start: 0, end: 0, text: "boom" },
         { start: 1, end: 2, text: "ok" },
       ],
     };
-    // "boom" (4 chars + space = 5) / 8 total = 0.625, spoken in full once reached.
+    // "boom" (4 chars + space = 5) of 8 total, spoken in full once reached.
     expect(fillFraction(seg, 0.5)).toBeCloseTo(5 / 8);
   });
 });

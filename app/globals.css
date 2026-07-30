@@ -254,7 +254,8 @@
   }
 
   .caption-line {
-    --caption-fill: 0%;
+    /* Position along the line's text, 0 to 1. Written once per frame. */
+    --caption-fill: 0;
     --caption-spoken: rgb(255 255 255);
     --caption-unspoken: rgb(255 255 255 / 0.45);
   }
@@ -275,13 +276,31 @@
     letter-spacing: -0.01em;
   }
 
+  /*
+   * Karaoke fill, one word at a time.
+   *
+   * The line publishes a single number and every word converts it into its own
+   * local progress: how far the fill has travelled *through this word*, clamped
+   * so a word that has not been reached is untouched and one already spoken is
+   * fully lit. That clamp is the whole trick — it is what confines the colour
+   * to the word being spoken, where a single gradient across the line washed
+   * over the entire sentence while one word was still being said.
+   *
+   * Because each word paints its own box, the softness on the leading edge is
+   * a share of a word rather than of a paragraph, so it stays a soft edge on a
+   * letter instead of a gradient over a clause.
+   */
   @supports (background-clip: text) or (-webkit-background-clip: text) {
-    [data-caption-active] .caption-line__text {
+    [data-caption-active] .caption-word {
+      --local: clamp(
+        0,
+        (var(--caption-fill) - var(--w-from)) / (var(--w-to) - var(--w-from)),
+        1
+      );
       background-image: linear-gradient(
         90deg,
-        var(--caption-spoken) var(--caption-fill),
-        /* A hair of softness on the leading edge; a hard stop reads as a bug. */
-          var(--caption-unspoken) calc(var(--caption-fill) + 1.5%)
+        var(--caption-spoken) calc(var(--local) * 100%),
+        var(--caption-unspoken) calc(var(--local) * 100% + 12%)
       );
       -webkit-background-clip: text;
       background-clip: text;

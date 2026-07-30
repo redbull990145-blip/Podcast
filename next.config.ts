@@ -6,8 +6,17 @@ const nextConfig: NextConfig = {
   images: {
     // Podcast artwork comes from arbitrary third-party hosts (Libsyn, Megaphone,
     // Simplecast, self-hosted feeds...). We cannot enumerate them, so allow any
-    // https host but keep optimization on.
-    remotePatterns: [{ protocol: "https", hostname: "**" }],
+    // host but keep optimization on.
+    //
+    // http as well as https: plenty of long-running feeds still declare their
+    // artwork over plain http (the BBC's ichef.bbci.co.uk among them), and
+    // refusing those means a broken image rather than a secure one. Nothing
+    // insecure reaches the browser — the optimizer fetches server-side and
+    // re-serves the result over the page's own origin.
+    remotePatterns: [
+      { protocol: "https", hostname: "**" },
+      { protocol: "http", hostname: "**" },
+    ],
     // Publishers upload 3000x3000 cover art. Serving that untouched into a 44px
     // list thumbnail was the single biggest thing making the app feel slow, so
     // every artwork <Image> now goes through the optimizer with a real `sizes`.
