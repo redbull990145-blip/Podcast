@@ -1,13 +1,19 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Sparkles } from "lucide-react";
 import type { TranscriptSegment } from "@/lib/db/schema";
 import { usePlayer } from "@/lib/player/store";
 import { activeSegmentIndex } from "@/lib/player/captions";
+import {
+  centreOn,
+  measureRows,
+  visibleRange,
+  type RowMetrics,
+} from "@/lib/player/virtual-list";
 import { TranscribeProgress } from "./transcribe-progress";
-import { formatDuration } from "@/lib/utils";
+import { cn, formatDuration } from "@/lib/utils";
 
 type TranscriptResponse = {
   segments: TranscriptSegment[] | null;
@@ -18,22 +24,19 @@ type TranscriptResponse = {
 /**
  * Live captions, following the audio the way Apple Podcasts does.
  *
- * The thing that makes this feel smooth is what it does *not* do. Position
- * updates arrive about four times a second, and re-rendering a few thousand
- * lines at that rate is what made the first version stutter. So the component
- * subscribes to the player directly and only sets state when the *line* changes
- * — every few seconds — leaving React idle in between. Scrolling is then a
- * single eased animation on the container rather than a browser smooth-scroll
- * that gets cancelled and restarted on each change.
+ * Smoothness came down to two measurements. Re-rendering the transcript on
+ * every position update cost about 900ms of blocked main thread per second of
+ * playback. Fixing that exposed a subtler limit: on a 2,855-line episode a
+ * single `scrollTop` write costs 11ms on its own, because the browser is
+ * maintaining a 111,000px scroller full of elements — and an animation that
+ * writes scroll position every frame cannot afford that at any frame rate.
+ *
+ * So only the rows on screen exist in the DOM. Heights are measured once (a
+ * transcript never changes after it loads) and every position after that comes
+ * from the resulting table.
  */
 export function CaptionsPanel({ episodeId }: { episodeId: string }) {
   const seek = usePlayer((s) => s.seek);
-
-  const [autoScroll, setAutoScroll] = useState(true);
-  const listRef = useRef<HTMLOListElement>(null);
-  const activeRef = useRef<HTMLLIElement | null>(null);
-  /** Set while we animate the scroll, so it isn't mistaken for the user. */
-  const selfScrolling = useRef(false);
 
   const { data, isPending, refetch } = useQuery<TranscriptResponse>({
     queryKey: ["transcript", episodeId],
@@ -46,80 +49,6 @@ export function CaptionsPanel({ episodeId }: { episodeId: string }) {
   });
 
   const segments = data?.segments ?? null;
-  const activeIndex = useActiveSegment(segments);
-
-  const scrollToActive = useCallback((node: HTMLElement) => {
-    const list = listRef.current;
-    if (!list) return;
-
-    // Centre the line in the viewport of the list.
-    const target =
-      node.offsetTop - list.clientHeight / 2 + node.clientHeight / 2;
-    const from = list.scrollTop;
-    const distance = target - from;
-    if (Math.abs(distance) < 1) return;
-
-    selfScrolling.current = true;
-
-    // Hand-rolled rather than `scrollIntoView({behavior:"smooth"})`: the native
-    // one restarts from scratch every time it is called, so consecutive lines
-    // produce a visible stutter. This one always runs to completion over a
-    // fixed duration with the app's own easing curve.
-    const duration = Math.min(520, 220 + Math.abs(distance) * 0.35);
-    const start = performance.now();
-
-    const step = (now: number) => {
-      const t = Math.min(1, (now - start) / duration);
-      // cubic-bezier(0.22, 1, 0.36, 1) approximated: fast out, gentle settle.
-      const eased = 1 - Math.pow(1 - t, 3);
-      list.scrollTop = from + distance * eased;
-
-      if (t < 1) {
-        requestAnimationFrame(step);
-      } else {
-        selfScrolling.current = false;
-      }
-    };
-
-    requestAnimationFrame(step);
-  }, []);
-
-  // Move the highlight by touching the two affected rows directly. Going
-  // through React here would mean rebuilding the whole list — see CaptionLines.
-  useEffect(() => {
-    const list = listRef.current;
-    if (!list) return;
-
-    const previous = activeRef.current;
-    previous?.querySelector("button")?.removeAttribute("data-active");
-
-    const node = activeIndex >= 0 ? (list.children[activeIndex] as HTMLLIElement) : null;
-    activeRef.current = node;
-    node?.querySelector("button")?.setAttribute("data-active", "");
-
-    if (node && autoScroll) scrollToActive(node);
-  }, [activeIndex, autoScroll, scrollToActive, segments]);
-
-  useEffect(() => {
-    const list = listRef.current;
-    if (!list) return;
-
-    const onScroll = () => {
-      if (selfScrolling.current) return;
-      const node = activeRef.current;
-      if (!node) return;
-
-      // Resume following once the active line is back in view, rather than
-      // requiring a scroll to the bottom — people scroll up to reread a line
-      // and expect following to pick back up when they scroll back.
-      const listBox = list.getBoundingClientRect();
-      const nodeBox = node.getBoundingClientRect();
-      setAutoScroll(nodeBox.bottom > listBox.top && nodeBox.top < listBox.bottom);
-    };
-
-    list.addEventListener("scroll", onScroll, { passive: true });
-    return () => list.removeEventListener("scroll", onScroll);
-  }, []);
 
   if (isPending) {
     return (
@@ -146,22 +75,211 @@ export function CaptionsPanel({ episodeId }: { episodeId: string }) {
   }
 
   return (
+    <VirtualTranscript segments={segments} onSeek={seek} source={data?.source ?? null} />
+  );
+}
+
+function VirtualTranscript({
+  segments,
+  onSeek,
+  source,
+}: {
+  segments: TranscriptSegment[];
+  onSeek: (seconds: number) => void;
+  source: string | null;
+}) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [metrics, setMetrics] = useState<RowMetrics | null>(null);
+  const [range, setRange] = useState({ start: 0, end: 40 });
+  const [autoScroll, setAutoScroll] = useState(true);
+
+  const activeIndex = useActiveSegment(segments);
+  // Held in a ref so the scroll listener never needs re-binding per line.
+  const activeIndexRef = useRef(activeIndex);
+  activeIndexRef.current = activeIndex;
+
+  /** True while our own animation is driving scrollTop. */
+  const selfScrolling = useRef(false);
+  const pendingFrame = useRef<number | null>(null);
+
+  /**
+   * Which transcript `metrics` describes. Comparing identity rather than
+   * holding a boolean flag means a new transcript automatically drops back to
+   * the measuring pass instead of reusing another episode's row heights.
+   */
+  const [measuredFor, setMeasuredFor] = useState<TranscriptSegment[] | null>(null);
+  const measuring = measuredFor !== segments;
+  const listRef = useRef<HTMLOListElement>(null);
+
+  /**
+   * The measuring pass lays every row out in normal flow purely so their
+   * heights can be read once; from then on the list is positioned from that
+   * table and only the visible slice is rendered.
+   *
+   * A layout effect, so the full-list frame is measured and replaced before the
+   * browser paints it — otherwise the whole transcript flashes on screen first.
+   */
+  useLayoutEffect(() => {
+    if (!measuring) return;
+    const node = listRef.current;
+    if (!node || node.children.length === 0) return;
+
+    const heights = Array.from(
+      node.children,
+      (child) => (child as HTMLElement).offsetHeight,
+    );
+    setMetrics(measureRows(heights, 2));
+    setMeasuredFor(segments);
+  }, [measuring, segments]);
+
+  const recomputeRange = useCallback(
+    (m: RowMetrics) => {
+      const scroller = scrollerRef.current;
+      if (!scroller) return;
+      setRange(visibleRange(m, scroller.scrollTop, scroller.clientHeight));
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller || !metrics) return;
+
+    recomputeRange(metrics);
+
+    const onScroll = () => {
+      // Coalesce to one update per frame; scroll events outpace rendering.
+      if (pendingFrame.current !== null) return;
+      pendingFrame.current = requestAnimationFrame(() => {
+        pendingFrame.current = null;
+        recomputeRange(metrics);
+
+        if (selfScrolling.current) return;
+
+        // Resume following once the active line is back in view — people scroll
+        // up to reread a line and expect it to pick back up.
+        const top = metrics.tops[activeIndexRef.current];
+        if (top === undefined) return;
+        setAutoScroll(
+          top >= scroller.scrollTop - 40 &&
+            top <= scroller.scrollTop + scroller.clientHeight,
+        );
+      });
+    };
+
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      if (pendingFrame.current !== null) cancelAnimationFrame(pendingFrame.current);
+      pendingFrame.current = null;
+    };
+  }, [metrics, recomputeRange]);
+
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller || !metrics || !autoScroll || activeIndex < 0) return;
+
+    const rowHeight =
+      (metrics.tops[activeIndex + 1] ?? metrics.total) - metrics.tops[activeIndex];
+    const target = centreOn(metrics, activeIndex, scroller.clientHeight, rowHeight);
+    const from = scroller.scrollTop;
+    const distance = target - from;
+    if (Math.abs(distance) < 1) return;
+
+    // A long jump — after a seek — isn't worth animating across thousands of
+    // pixels; land immediately and redraw the window once.
+    if (Math.abs(distance) > scroller.clientHeight * 3) {
+      scroller.scrollTop = target;
+      return;
+    }
+
+    selfScrolling.current = true;
+    const duration = Math.min(460, 200 + Math.abs(distance) * 0.4);
+    const start = performance.now();
+    let raf = 0;
+
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / duration);
+      // Mirrors --ease-out: quick departure, gentle settle.
+      scroller.scrollTop = from + distance * (1 - Math.pow(1 - t, 3));
+      if (t < 1) raf = requestAnimationFrame(step);
+      else selfScrolling.current = false;
+    };
+
+    raf = requestAnimationFrame(step);
+    return () => {
+      cancelAnimationFrame(raf);
+      selfScrolling.current = false;
+    };
+  }, [activeIndex, autoScroll, metrics]);
+
+  // Null while measuring; non-null narrows the positioned branch for TypeScript.
+  const positioned = measuring ? null : metrics;
+  const rows = positioned ? segments.slice(range.start, range.end) : segments;
+
+  return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between px-1 pb-2 text-[11px] uppercase tracking-wide opacity-50">
-        <span>
-          {data?.source === "publisher" ? "Publisher transcript" : "AI transcript"}
-        </span>
+        <span>{source === "publisher" ? "Publisher transcript" : "AI transcript"}</span>
         {!autoScroll && (
           <button
             onClick={() => setAutoScroll(true)}
-            className="rounded-full bg-white/15 px-2.5 py-1 text-[10px] normal-case tracking-normal transition-colors duration-200 hover:bg-white/25"
+            className="rounded-full bg-white/15 px-2.5 py-1 text-[10px] normal-case tracking-normal transition-colors hover:bg-white/25"
           >
             Follow along
           </button>
         )}
       </div>
 
-      <CaptionLines listRef={listRef} segments={segments} onSeek={seek} />
+      <div
+        ref={scrollerRef}
+        // scroll-behavior stays auto: the animation writes scrollTop directly
+        // and a native smooth behaviour would fight it.
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 [scroll-behavior:auto]"
+        // One delegated listener instead of a closure per line.
+        onClick={(event) => {
+          const target = (event.target as HTMLElement).closest("[data-start]");
+          if (target) onSeek(Number(target.getAttribute("data-start")));
+        }}
+      >
+        <ol
+          ref={listRef}
+          className="relative"
+          style={positioned ? { height: positioned.total } : undefined}
+        >
+          {rows.map((segment, i) => {
+            const index = positioned ? range.start + i : i;
+            const isActive = index === activeIndex;
+            return (
+              <li
+                key={index}
+                className={positioned ? "absolute inset-x-0" : "mb-0.5"}
+                style={positioned ? { top: positioned.tops[index] } : undefined}
+              >
+                <button
+                  data-start={segment.start}
+                  className={cn(
+                    "flex w-full gap-3 rounded-lg px-2 py-1.5 text-left",
+                    // Only opacity and background animate, both composited, so
+                    // following along never triggers layout.
+                    "transition-[opacity,background-color] duration-300 hover:bg-white/10",
+                    isActive ? "bg-white/15 opacity-100" : "opacity-50",
+                  )}
+                >
+                  <span className="shrink-0 pt-0.5 text-[11px] tabular-nums opacity-60">
+                    {formatDuration(segment.start)}
+                  </span>
+                  <span
+                    className={cn("text-sm leading-relaxed", isActive && "font-medium")}
+                  >
+                    {segment.text}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      </div>
     </div>
   );
 }
@@ -169,10 +287,9 @@ export function CaptionsPanel({ episodeId }: { episodeId: string }) {
 /**
  * Tracks which line is being spoken.
  *
- * Subscribes to the store outside React's render cycle so a position update
- * costs nothing unless it actually changes the line. Scanning resumes from the
- * previous index, so normal playback is a constant-time check and only a seek
- * walks the list.
+ * Subscribes to the store outside React's render cycle, so a position update
+ * costs nothing unless it changes the line. The search resumes from the
+ * previous index, making playback a constant-time check.
  */
 function useActiveSegment(segments: TranscriptSegment[] | null): number {
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -184,7 +301,6 @@ function useActiveSegment(segments: TranscriptSegment[] | null): number {
     }
 
     let previous = -1;
-
     const update = (currentTime: number) => {
       const next = activeSegmentIndex(segments, currentTime, previous);
       if (next !== previous) {
@@ -199,60 +315,6 @@ function useActiveSegment(segments: TranscriptSegment[] | null): number {
 
   return activeIndex;
 }
-
-/**
- * The transcript, rendered exactly once.
- *
- * Memoized on `segments` alone, so it never re-renders while playing. A
- * transcript can run to several thousand lines, and rebuilding that element
- * tree every time the spoken line advances was costing hundreds of
- * milliseconds of blocked main thread — measured, on a 2,855-line episode, as
- * roughly 2.5 seconds of long tasks per 5 seconds of playback.
- *
- * The highlight is therefore applied imperatively by the parent (see
- * `useHighlight`): two classList writes instead of a full reconciliation.
- * Everything React needs to own here is static.
- */
-const CaptionLines = memo(
-  function CaptionLines({
-    listRef,
-    segments,
-    onSeek,
-  }: {
-    listRef: React.RefObject<HTMLOListElement | null>;
-    segments: TranscriptSegment[];
-    onSeek: (seconds: number) => void;
-  }) {
-    return (
-      <ol
-        ref={listRef}
-        // scroll-behavior must stay auto: the eased animation sets scrollTop
-        // directly and a native smooth behaviour would fight it.
-        className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain pr-1 [scroll-behavior:auto]"
-        // One delegated listener rather than 2,855 closures.
-        onClick={(event) => {
-          const target = (event.target as HTMLElement).closest("[data-start]");
-          if (target) onSeek(Number(target.getAttribute("data-start")));
-        }}
-      >
-        {segments.map((segment, index) => (
-          <li key={index}>
-            <button
-              data-start={segment.start}
-              className="flex w-full gap-3 rounded-lg px-2 py-1.5 text-left opacity-50 transition-[opacity,background-color] duration-300 ease-[var(--ease-out)] hover:bg-white/10 data-[active]:bg-white/15 data-[active]:opacity-100"
-            >
-              <span className="shrink-0 pt-0.5 text-[11px] tabular-nums opacity-60">
-                {formatDuration(segment.start)}
-              </span>
-              <span className="text-sm leading-relaxed">{segment.text}</span>
-            </button>
-          </li>
-        ))}
-      </ol>
-    );
-  },
-  (a, b) => a.segments === b.segments,
-);
 
 function NoCaptions({
   episodeId,
@@ -289,9 +351,7 @@ function NoCaptions({
     }
   }
 
-  if (generating) {
-    return <TranscribeProgress durationSeconds={duration} />;
-  }
+  if (generating) return <TranscribeProgress durationSeconds={duration} />;
 
   return (
     <div className="grid flex-1 place-items-center px-6 text-center">
@@ -306,7 +366,7 @@ function NoCaptions({
           <>
             <button
               onClick={generate}
-              className="mt-4 inline-flex h-10 items-center gap-2 rounded-full bg-white/15 px-5 text-sm font-medium backdrop-blur transition-[background-color,transform] duration-200 ease-[var(--ease-out)] hover:bg-white/25 active:scale-95"
+              className="mt-4 inline-flex h-10 items-center gap-2 rounded-full bg-white/15 px-5 text-sm font-medium backdrop-blur transition-[background-color,transform] hover:bg-white/25 active:scale-95"
             >
               <Sparkles className="size-4" />
               Generate captions

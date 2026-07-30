@@ -1,11 +1,12 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { ChevronUp, Loader2, Pause, Play, RotateCcw, RotateCw, X } from "lucide-react";
 import { usePlayer } from "@/lib/player/store";
 import { SpeedControl } from "./speed-control";
 import { VolumeControl } from "./volume-control";
+import { Scrubber } from "./scrubber";
 import { formatDuration } from "@/lib/utils";
 
 /**
@@ -29,11 +30,6 @@ export function PlayerBar() {
   const skipBack = usePlayer((s) => s.skipBack);
   const stop = usePlayer((s) => s.stop);
   const setExpanded = usePlayer((s) => s.setExpanded);
-
-  // While dragging the scrubber, show the dragged value rather than fighting
-  // the timeupdate events streaming in underneath.
-  const [scrubbing, setScrubbing] = useState<number | null>(null);
-  const displayTime = scrubbing ?? currentTime;
 
   // Space toggles playback anywhere that isn't a text field.
   useEffect(() => {
@@ -63,8 +59,6 @@ export function PlayerBar() {
 
   if (!episode) return null;
 
-  const progress = duration > 0 ? (displayTime / duration) * 100 : 0;
-
   return (
     <div className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-40 border-t border-border bg-surface/95 backdrop-blur-xl lg:bottom-0">
       {error && (
@@ -74,30 +68,12 @@ export function PlayerBar() {
       )}
 
       {/* Scrubber sits flush along the top edge, full width, easy to hit. */}
-      <div className="group relative h-1 w-full bg-border">
-        <div
-          className="h-full bg-accent transition-[width] duration-100"
-          style={{ width: `${progress}%` }}
-        />
-        <input
-          type="range"
-          min={0}
-          max={duration || 0}
-          step={1}
-          value={displayTime}
-          aria-label="Seek"
-          onChange={(e) => setScrubbing(Number(e.target.value))}
-          onPointerUp={() => {
-            if (scrubbing != null) seek(scrubbing);
-            setScrubbing(null);
-          }}
-          onKeyUp={() => {
-            if (scrubbing != null) seek(scrubbing);
-            setScrubbing(null);
-          }}
-          className="absolute inset-0 h-4 w-full -translate-y-1.5 cursor-pointer opacity-0"
-        />
-      </div>
+      <Scrubber
+        currentTime={currentTime}
+        duration={duration}
+        onSeek={seek}
+        trackClassName="rounded-none"
+      />
 
       <div className="mx-auto flex max-w-6xl items-center gap-3 px-3 py-2.5 sm:gap-4 sm:px-5">
         {/*
@@ -178,7 +154,7 @@ export function PlayerBar() {
 
         <div className="hidden items-center gap-3 sm:flex">
           <span className="text-xs tabular-nums text-muted-foreground">
-            {formatDuration(displayTime)}
+            {formatDuration(currentTime)}
             <span className="mx-1 text-subtle-foreground">/</span>
             {formatDuration(duration)}
           </span>

@@ -177,6 +177,9 @@ function clampRate(rate: number) {
 
 const STORAGE_KEY = "cadence-player-prefs";
 
+/** Bumped when a stored preference needs rewriting rather than just defaulting. */
+const PREFS_VERSION = 2;
+
 /** Skip intervals offered in Settings. */
 export const SKIP_CHOICES = [5, 10, 15, 30, 45, 60] as const;
 
@@ -211,11 +214,23 @@ function loadPrefs(): Pick<
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return fallback;
-    const parsed = JSON.parse(raw) as Partial<typeof fallback>;
+    const parsed = JSON.parse(raw) as Partial<typeof fallback> & { version?: number };
+
+    // Anyone who used the app before the default became symmetric has 30/15
+    // stored, and a stored value beats a changed default forever. Rewrite that
+    // exact pair once — it is the old default, not a choice anyone made, since
+    // there was no way to set these until now.
+    const inheritedOldDefault =
+      (parsed.version ?? 1) < 2 &&
+      Number(parsed.skipForwardSeconds) === 30 &&
+      Number(parsed.skipBackSeconds) === 15;
+
     return {
       playbackRate: clampRate(Number(parsed.playbackRate) || 1),
       volume: Math.min(1, Math.max(0, Number(parsed.volume ?? 1))),
-      skipForwardSeconds: clampSkip(parsed.skipForwardSeconds, 15),
+      skipForwardSeconds: inheritedOldDefault
+        ? 15
+        : clampSkip(parsed.skipForwardSeconds, 15),
       skipBackSeconds: clampSkip(parsed.skipBackSeconds, 15),
       skipSilence: parsed.skipSilence === true,
       volumeBoost: Math.min(3, Math.max(1, Number(parsed.volumeBoost) || 1)),
@@ -231,6 +246,9 @@ function savePrefs(state: PlayerState) {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
+        // Stamped so the 30/15 migration in loadPrefs runs at most once, and a
+        // deliberate 30s forward chosen from Settings afterwards sticks.
+        version: PREFS_VERSION,
         playbackRate: state.playbackRate,
         volume: state.volume,
         skipForwardSeconds: state.skipForwardSeconds,
@@ -342,10 +360,23 @@ export const usePlayer = create<PlayerState & PlayerActions>((set, get) => ({
   seek(seconds) {
     const audio = getAudio();
     if (!audio) return;
-    const duration = get().duration || audio.duration || 0;
-    const target = Math.min(Math.max(0, seconds), duration || seconds);
+
+    // The decoded duration is authoritative. Feed durations are frequently
+    // wrong, and clamping a valid seek against a too-short feed value would
+    // silently drop the request.
+    const decoded = Number.isFinite(audio.duration) && audio.duration > 0
+      ? audio.duration
+      : 0;
+    const duration = decoded || get().duration || 0;
+    const target = Math.max(0, duration > 0 ? Math.min(seconds, duration) : seconds);
+
     audio.currentTime = target;
-    set({ currentTime: target });
+
+    // Optimistic, then reconciled: the `seeked`/`timeupdate` handlers publish
+    // whatever position the element actually reached, so a seek the browser
+    // refuses (an unseekable stream) corrects itself rather than leaving the
+    // bar parked somewhere the audio never went.
+    set({ currentTime: target, isBuffering: !audio.paused });
   },
 
   skipForward() {

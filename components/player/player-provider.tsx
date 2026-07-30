@@ -51,6 +51,11 @@ export function PlayerProvider() {
     };
     const onTimeUpdate = () => _sync({ currentTime: audio.currentTime });
 
+    // Authoritative position once a seek settles. If the browser clamped or
+    // refused the request, this is what puts the bar back in step with the
+    // audio instead of leaving it stranded at the requested time.
+    const onSeeked = () => _sync({ currentTime: audio.currentTime, isBuffering: false });
+
     const onLoadedMetadata = () => {
       // A duration from the feed is often wrong or absent; the decoded value wins.
       if (Number.isFinite(audio.duration) && audio.duration > 0) {
@@ -115,6 +120,7 @@ export function PlayerProvider() {
     audio.addEventListener("waiting", onWaiting);
     audio.addEventListener("playing", onPlaying);
     audio.addEventListener("timeupdate", onTimeUpdate);
+    audio.addEventListener("seeked", onSeeked);
     audio.addEventListener("loadedmetadata", onLoadedMetadata);
     audio.addEventListener("error", onError);
     audio.addEventListener("ended", onEnded);
@@ -126,6 +132,7 @@ export function PlayerProvider() {
       audio.removeEventListener("waiting", onWaiting);
       audio.removeEventListener("playing", onPlaying);
       audio.removeEventListener("timeupdate", onTimeUpdate);
+      audio.removeEventListener("seeked", onSeeked);
       audio.removeEventListener("loadedmetadata", onLoadedMetadata);
       audio.removeEventListener("error", onError);
       audio.removeEventListener("ended", onEnded);

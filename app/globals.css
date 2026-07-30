@@ -124,6 +124,20 @@
   --ease-out: var(--ease-out);
   --ease-in-out: var(--ease-in-out);
   --ease-spring: var(--ease-spring);
+
+  /*
+   * Retunes every `transition-*` utility at the source.
+   *
+   * The obvious way to do this is a `*, *::before, *::after` rule, but a
+   * universal declaration makes the browser consider every element a candidate
+   * for that property and re-run style resolution across the whole tree — on a
+   * page holding a few thousand transcript rows that is expensive enough to
+   * notice when starting playback. Overriding Tailwind's own default variable
+   * changes the generated utilities instead, so the curve applies only where a
+   * transition is actually declared.
+   */
+  --default-transition-timing-function: var(--ease-out);
+  --default-transition-duration: 200ms;
 }
 
 @layer base {
@@ -142,17 +156,6 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
-  }
-
-  /*
-   * Every transition that doesn't ask for its own curve gets the good one.
-   * Tailwind's `transition-*` utilities default to a symmetric ease, which is
-   * the single biggest reason a web UI feels less settled than a native one.
-   */
-  *,
-  *::before,
-  *::after {
-    transition-timing-function: var(--ease-out);
   }
 
   /*

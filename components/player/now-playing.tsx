@@ -18,6 +18,7 @@ import {
   FALLBACK_PALETTE,
   type ArtworkPalette,
 } from "@/lib/player/artwork-palette";
+import { Scrubber } from "./scrubber";
 import { SpeedControl } from "./speed-control";
 import { VolumeControl } from "./volume-control";
 import { SleepTimer } from "./sleep-timer";
@@ -53,7 +54,6 @@ export function NowPlaying() {
   const setCaptionsOpen = usePlayer((s) => s.setCaptionsOpen);
 
   const [palette, setPalette] = useState<ArtworkPalette>(FALLBACK_PALETTE);
-  const [scrubbing, setScrubbing] = useState<number | null>(null);
 
   const artworkUrl = episode?.artworkUrl ?? null;
 
@@ -87,9 +87,7 @@ export function NowPlaying() {
 
   if (!episode || !expanded) return null;
 
-  const displayTime = scrubbing ?? currentTime;
-  const progress = duration > 0 ? (displayTime / duration) * 100 : 0;
-  const remaining = duration > 0 ? duration - displayTime : 0;
+  const remaining = duration > 0 ? duration - currentTime : 0;
 
   return (
     <div
@@ -179,33 +177,16 @@ export function NowPlaying() {
 
           {/* --- scrubber --- */}
           <div className="mt-5">
-            <div className="relative h-1.5 w-full rounded-full bg-white/20">
-              <div
-                className="h-full rounded-full bg-white transition-[width] duration-100"
-                style={{ width: `${progress}%` }}
-              />
-              <input
-                type="range"
-                min={0}
-                max={duration || 0}
-                step={1}
-                value={displayTime}
-                aria-label="Seek"
-                onChange={(e) => setScrubbing(Number(e.target.value))}
-                onPointerUp={() => {
-                  if (scrubbing != null) seek(scrubbing);
-                  setScrubbing(null);
-                }}
-                onKeyUp={() => {
-                  if (scrubbing != null) seek(scrubbing);
-                  setScrubbing(null);
-                }}
-                className="absolute inset-x-0 -inset-y-2 w-full cursor-pointer opacity-0"
-              />
-            </div>
+            <Scrubber
+              currentTime={currentTime}
+              duration={duration}
+              onSeek={seek}
+              trackClassName="h-1.5 bg-white/20"
+              fillClassName="bg-white"
+            />
 
             <div className="mt-2 flex justify-between text-[11px] tabular-nums text-white/55">
-              <span>{formatDuration(displayTime)}</span>
+              <span>{formatDuration(currentTime)}</span>
               <span>−{formatDuration(remaining)}</span>
             </div>
           </div>
