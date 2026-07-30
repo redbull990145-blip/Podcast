@@ -1,6 +1,14 @@
 import type { SttConfig } from "./config";
 import type { TranscriptSegment, TranscriptWord } from "@/lib/db/schema";
 import { prepareChunk } from "./mp3";
+import {
+  buildM4A,
+  parseAudioTrack,
+  planSampleGroups,
+  readBoxes,
+  sampleRange,
+  type Mp4AudioTrack,
+} from "./mp4";
 
 /**
  * Speech to text.
@@ -48,6 +56,18 @@ const PROBE_TIMEOUT_MS = 20_000;
 const CHUNK_FETCH_TIMEOUT_MS = 45_000;
 const TRANSCRIBE_TIMEOUT_MS = 60_000;
 
+/** How much to read at a time while hunting for an MP4's `moov` index. */
+const MOOV_SCAN_BYTES = 64 * 1024;
+
+/** Stop walking rather than chase boxes forever through a pathological file. */
+const MOOV_SCAN_HOPS = 8;
+
+/**
+ * A `moov` larger than this is not a podcast index. Refusing beats buffering it
+ * — the index is held whole in memory to plan the split.
+ */
+const MAX_MOOV_BYTES = 32 * 1024 * 1024;
+
 export type TranscriptionResult =
   | { ok: true; text: string; segments: TranscriptSegment[]; model: string }
   | { ok: false; error: string };
@@ -64,8 +84,6 @@ type VerboseTranscription = {
 };
 
 type ChunkResult = {
-  startByte: number;
-  byteLength: number;
   segments: TranscriptSegment[];
   /** Per-word timings for this chunk, chunk-relative (start from 0). */
   words: TranscriptWord[];
@@ -74,8 +92,11 @@ type ChunkResult = {
 const TOO_LONG_ERROR =
   "This episode is too long to transcribe automatically yet. Try an episode under about six hours.";
 
-const NON_MP3_TOO_LARGE_ERROR =
-  "This episode is an M4A/AAC file over the provider's 25 MB per-request cap. Splitting non-MP3 audio isn't supported yet — try a shorter episode or a different show for now.";
+const UNSPLITTABLE_ERROR =
+  "This episode is too large to transcribe — its host doesn't support the range requests needed to split it up.";
+
+const MP4_UNREADABLE_ERROR =
+  "This episode's audio is in a format we couldn't read well enough to split up for transcription.";
 
 /**
  * Which audio container this file uses.
@@ -300,26 +321,11 @@ async function fetchChunk(
   isFirst: boolean,
   signal?: AbortSignal,
 ): Promise<Blob> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), CHUNK_FETCH_TIMEOUT_MS);
-  const combined = mergeSignals(signal, controller.signal);
-
-  try {
-    const response = await fetch(url, {
-      // end is inclusive in an HTTP range header.
-      headers: { range: `bytes=${start}-${end - 1}` },
-      signal: combined,
-    });
-    if (!response.ok) throw new Error(`range fetch failed: ${response.status}`);
-
-    const buffer = await response.arrayBuffer();
-    const prepared = prepareChunk(new Uint8Array(buffer), isFirst);
-    // Re-wrap the view's bytes: a subarray shares its parent's buffer, and the
-    // Blob constructor's type only accepts a plain ArrayBuffer view.
-    return new Blob([prepared.slice().buffer], { type: "audio/mpeg" });
-  } finally {
-    clearTimeout(timeout);
-  }
+  const bytes = await fetchRange(url, start, end, CHUNK_FETCH_TIMEOUT_MS, signal);
+  const prepared = prepareChunk(bytes, isFirst);
+  // Re-wrap the view's bytes: a subarray shares its parent's buffer, and the
+  // Blob constructor's type only accepts a plain ArrayBuffer view.
+  return new Blob([prepared.slice().buffer], { type: "audio/mpeg" });
 }
 
 /**
@@ -415,34 +421,36 @@ export async function transcribeAudio(
     return { ok: false, error: TOO_LONG_ERROR };
   }
 
-  // Small enough for one request, or the host won't let us range-fetch it. In
-  // the latter case we can only try it whole, so bail if that would exceed the
-  // provider cap rather than pulling a huge file into memory to be rejected.
-  const canChunk = probe.rangeSupported && probe.total > 0 && probe.kind === "mp3";
+  // Small enough to send in one request — always the simplest thing that works.
   if (probe.total > 0 && probe.total <= PROVIDER_MAX_BYTES) {
     return transcribeWhole(audioUrl, config, signal);
   }
+
+  // Splitting needs both a known size and a host that honours byte ranges.
+  const canChunk = probe.rangeSupported && probe.total > 0;
   if (!canChunk) {
     if (probe.total > PROVIDER_MAX_BYTES) {
-      // Non-MP3 audio can't be split on byte boundaries — MP4/M4A wraps its
-      // frames in atoms, so a raw byte slice isn't valid on its own. Say so
-      // plainly rather than let the provider return "not a media file" for
-      // every chunk, which reads as a credit or key problem.
-      if (probe.kind !== "mp3") {
-        return { ok: false, error: NON_MP3_TOO_LARGE_ERROR };
-      }
-      return {
-        ok: false,
-        error:
-          "This episode is too large to transcribe — its host doesn't support the range requests needed to split it up.",
-      };
+      return { ok: false, error: UNSPLITTABLE_ERROR };
     }
     // Unknown size and no range support: attempt it whole and let the size
     // guard inside catch anything over the cap.
     return transcribeWhole(audioUrl, config, signal);
   }
 
-  return transcribeChunked(audioUrl, config, probe.total, signal);
+  // How a file is split depends entirely on its container. MP3 frames are
+  // self-syncing, so a byte range is already valid audio; MP4 keeps its frames
+  // in an opaque blob described by a separate index, so each piece has to be
+  // repackaged into a real file. See lib/ai/mp4.ts.
+  if (probe.kind === "mp4") {
+    return transcribeMp4Chunked(audioUrl, config, probe.total, signal);
+  }
+  if (probe.kind !== "mp3") {
+    // Something we can't identify. A byte split would probably produce
+    // undecodable pieces, so try it whole and let the size guard answer.
+    return transcribeWhole(audioUrl, config, signal);
+  }
+
+  return transcribeMp3Chunked(audioUrl, config, probe.total, signal);
 }
 
 /** The simple path: one download, one transcription. */
@@ -480,19 +488,23 @@ async function transcribeWhole(
   };
 }
 
-/** The large-episode path: range-fetch, transcribe per chunk, stitch timings. */
-async function transcribeChunked(
-  audioUrl: string,
+/**
+ * Runs `count` chunks through the provider in a bounded pool and stitches the
+ * results onto one timeline.
+ *
+ * How a chunk is produced is left to the caller, because that is the only part
+ * that differs between containers — everything after "here is a piece of
+ * playable audio" is identical. Downloading and uploading a chunk in the same
+ * task keeps at most TRANSCRIBE_CONCURRENCY of them resident in memory.
+ */
+async function transcribeChunks(
+  count: number,
+  makeChunk: (index: number, signal?: AbortSignal) => Promise<Blob>,
   config: SttConfig,
-  total: number,
   signal?: AbortSignal,
 ): Promise<TranscriptionResult> {
-  const ranges = planChunks(total);
+  const results = new Array<ChunkResult | null>(count).fill(null);
 
-  const results = new Array<ChunkResult | null>(ranges.length).fill(null);
-
-  // Transcribe in a bounded pool. Downloading and uploading each chunk in the
-  // same task keeps at most TRANSCRIBE_CONCURRENCY chunks resident in memory.
   let nextIndex = 0;
   let failure: string | null = null;
   const deadline = Date.now() + JOB_DEADLINE_MS;
@@ -500,7 +512,7 @@ async function transcribeChunked(
   async function worker() {
     for (;;) {
       const index = nextIndex++;
-      if (index >= ranges.length || failure) return;
+      if (index >= count || failure) return;
 
       if (Date.now() > deadline) {
         failure ??=
@@ -508,17 +520,14 @@ async function transcribeChunked(
         return;
       }
 
-      const { start, end } = ranges[index];
       try {
-        const blob = await fetchChunk(audioUrl, start, end, index === 0, signal);
+        const blob = await makeChunk(index, signal);
         const transcribed = await transcribeBlob(blob, config, signal);
         if (!transcribed.ok) {
           failure ??= transcribed.error;
           return;
         }
         results[index] = {
-          startByte: start,
-          byteLength: end - start,
           segments: transcribed.segments,
           words: transcribed.words,
         };
@@ -533,14 +542,12 @@ async function transcribeChunked(
     }
   }
 
-  await Promise.all(
-    Array.from({ length: Math.min(TRANSCRIBE_CONCURRENCY, ranges.length) }, worker),
-  );
+  await Promise.all(Array.from({ length: Math.min(TRANSCRIBE_CONCURRENCY, count) }, worker));
 
   if (failure) return { ok: false, error: failure };
 
   const chunks = results.filter((r): r is ChunkResult => r !== null);
-  if (chunks.length !== ranges.length) {
+  if (chunks.length !== count) {
     return { ok: false, error: "Transcription failed. Please try again." };
   }
 
@@ -549,6 +556,164 @@ async function transcribeChunked(
   if (!text) return { ok: false, error: "The transcription came back empty." };
 
   return { ok: true, text, segments, model: `${config.provider}/${config.model}` };
+}
+
+/** MP3: every byte range is already playable once trimmed to a frame boundary. */
+async function transcribeMp3Chunked(
+  audioUrl: string,
+  config: SttConfig,
+  total: number,
+  signal?: AbortSignal,
+): Promise<TranscriptionResult> {
+  const ranges = planChunks(total);
+
+  return transcribeChunks(
+    ranges.length,
+    (index, sig) => {
+      const { start, end } = ranges[index];
+      return fetchChunk(audioUrl, start, end, index === 0, sig);
+    },
+    config,
+    signal,
+  );
+}
+
+/**
+ * MP4/M4A: read the sample index once, then repackage each group of frames into
+ * a standalone little M4A.
+ *
+ * The index (`moov`) is fetched up front because nothing about the file can be
+ * planned without it — it is what says where each audio frame lives. After that
+ * each chunk costs exactly one ranged fetch, the same as the MP3 path.
+ */
+async function transcribeMp4Chunked(
+  audioUrl: string,
+  config: SttConfig,
+  total: number,
+  signal?: AbortSignal,
+): Promise<TranscriptionResult> {
+  const moov = await locateMoov(audioUrl, total, signal);
+  if (!moov) return { ok: false, error: MP4_UNREADABLE_ERROR };
+
+  const track = parseAudioTrack(moov);
+  if (!track) return { ok: false, error: MP4_UNREADABLE_ERROR };
+
+  const groups = planSampleGroups(track.samples, CHUNK_TARGET_BYTES);
+  if (groups.length === 0) return { ok: false, error: MP4_UNREADABLE_ERROR };
+
+  return transcribeChunks(
+    groups.length,
+    (index, sig) => buildMp4Chunk(audioUrl, track, groups[index], sig),
+    config,
+    signal,
+  );
+}
+
+/** Fetches one group's audio frames and wraps them in a playable M4A. */
+async function buildMp4Chunk(
+  audioUrl: string,
+  track: Mp4AudioTrack,
+  group: { start: number; end: number },
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const range = sampleRange(track.samples, group.start, group.end);
+  const data = await fetchRange(audioUrl, range.start, range.end, CHUNK_FETCH_TIMEOUT_MS, signal);
+
+  const samples = track.samples.slice(group.start, group.end);
+  const file = buildM4A(track, samples, data, range.start);
+
+  return new Blob([file.slice().buffer], { type: "audio/mp4" });
+}
+
+/**
+ * Finds and downloads an MP4's `moov` index, wherever it happens to live.
+ *
+ * Position is not fixed: encoders that optimise for streaming put it at the
+ * front, and plenty of others leave it at the end, after the audio. Rather than
+ * guess, this walks the top-level boxes — each one declares its own length, so
+ * a small read at the right place is enough to hop to the next.
+ */
+async function locateMoov(
+  url: string,
+  total: number,
+  signal?: AbortSignal,
+): Promise<Uint8Array | null> {
+  let cursor = 0;
+
+  for (let hop = 0; hop < MOOV_SCAN_HOPS && cursor < total; hop += 1) {
+    let window: Uint8Array;
+    try {
+      window = await fetchRange(
+        url,
+        cursor,
+        Math.min(cursor + MOOV_SCAN_BYTES, total),
+        PROBE_TIMEOUT_MS,
+        signal,
+      );
+    } catch {
+      return null;
+    }
+
+    const boxes = readBoxes(window);
+    if (boxes.length === 0) return null;
+
+    const moov = boxes.find((b) => b.type === "moov");
+    if (moov) {
+      if (moov.end - moov.start > MAX_MOOV_BYTES) return null;
+
+      // Already fully inside the window we happened to read.
+      if (moov.end <= window.length) return window.slice(moov.dataStart, moov.end);
+
+      // Otherwise fetch exactly the index, now that its length is known.
+      try {
+        const full = await fetchRange(
+          url,
+          cursor + moov.start,
+          Math.min(cursor + moov.end, total),
+          CHUNK_FETCH_TIMEOUT_MS,
+          signal,
+        );
+        const [box] = readBoxes(full);
+        if (!box || box.type !== "moov") return null;
+        return full.slice(box.dataStart, Math.min(box.end, full.length));
+      } catch {
+        return null;
+      }
+    }
+
+    // No index here. The last box's declared length says where the next one
+    // starts, which is how the audio blob gets skipped without downloading it.
+    const next = cursor + boxes[boxes.length - 1].end;
+    if (next <= cursor) return null;
+    cursor = next;
+  }
+
+  return null;
+}
+
+/** Fetches a byte range as raw bytes. Throws on transport or status failure. */
+async function fetchRange(
+  url: string,
+  start: number,
+  end: number,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const combined = mergeSignals(signal, controller.signal);
+
+  try {
+    const response = await fetch(url, {
+      // `end` is exclusive here but inclusive in an HTTP range header.
+      headers: { range: `bytes=${start}-${end - 1}` },
+      signal: combined,
+    });
+    if (!response.ok) throw new Error(`range fetch failed: ${response.status}`);
+    return new Uint8Array(await response.arrayBuffer());
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /**

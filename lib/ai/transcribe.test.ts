@@ -76,8 +76,6 @@ describe("mergeSegments", () => {
     // of byte position or bitrate, which is what kills the old drift.
     const merged = mergeSegments([
       {
-        startByte: 0,
-        byteLength: 1000,
         segments: [{ start: 0, end: 2, text: "one" }],
         words: [
           { start: 0, end: 1, text: "on" },
@@ -85,8 +83,6 @@ describe("mergeSegments", () => {
         ],
       },
       {
-        startByte: 1000,
-        byteLength: 1000,
         segments: [{ start: 0, end: 2, text: "two" }],
         words: [
           { start: 0, end: 1, text: "tw" },
@@ -110,12 +106,12 @@ describe("mergeSegments", () => {
     ]);
   });
 
-  it("ignores byte offsets entirely — only measured durations place chunks", () => {
-    // Bytes that would imply wildly different starts under the old byte-rate
-    // model; the new model must not use them.
+  it("places each chunk purely by how long the ones before it measured", () => {
+    // Two chunks of one second each, whatever their byte sizes were — position
+    // on the timeline is a function of duration alone.
     const merged = mergeSegments([
-      { startByte: 0, byteLength: 999999, segments: [{ start: 0, end: 1, text: "a" }], words: [] },
-      { startByte: 999999, byteLength: 1, segments: [{ start: 0, end: 1, text: "b" }], words: [] },
+      { segments: [{ start: 0, end: 1, text: "a" }], words: [] },
+      { segments: [{ start: 0, end: 1, text: "b" }], words: [] },
     ]);
     expect(merged.map((s) => s.start)).toEqual([0, 1]);
   });
@@ -126,9 +122,9 @@ describe("mergeSegments", () => {
     // sorting by global start the order is chunk 0, 1, 2 — which happens to be
     // the same as array order here because durations are monotonically placed.
     const merged = mergeSegments([
-      { startByte: 0, byteLength: 1000, segments: [{ start: 0, end: 3, text: "alpha" }], words: [] },
-      { startByte: 3000, byteLength: 1000, segments: [{ start: 0, end: 1, text: "beta" }], words: [] },
-      { startByte: 6000, byteLength: 1000, segments: [{ start: 0, end: 2, text: "gamma" }], words: [] },
+      { segments: [{ start: 0, end: 3, text: "alpha" }], words: [] },
+      { segments: [{ start: 0, end: 1, text: "beta" }], words: [] },
+      { segments: [{ start: 0, end: 2, text: "gamma" }], words: [] },
     ]);
 
     expect(merged.map((s) => ({ text: s.text, start: s.start }))).toEqual([
@@ -141,14 +137,10 @@ describe("mergeSegments", () => {
   it("drops a duplicate line produced by an overlap at a cut point", () => {
     const merged = mergeSegments([
       {
-        startByte: 0,
-        byteLength: 1000,
         segments: [{ start: 0.9, end: 1, text: "boundary" }],
         words: [],
       },
       {
-        startByte: 1000,
-        byteLength: 1000,
         segments: [{ start: 0, end: 0.2, text: "boundary" }],
         words: [],
       },
@@ -162,10 +154,8 @@ describe("mergeSegments", () => {
     // The first chunk measures 3s of audio, so the second "yeah" starts at t=3
     // — well past the 1.5s near-duplicate threshold.
     const merged = mergeSegments([
-      { startByte: 0, byteLength: 1000, segments: [{ start: 0, end: 3, text: "yeah" }], words: [] },
+      { segments: [{ start: 0, end: 3, text: "yeah" }], words: [] },
       {
-        startByte: 5000,
-        byteLength: 1000,
         segments: [{ start: 0, end: 1, text: "yeah" }],
         words: [],
       },
@@ -176,7 +166,7 @@ describe("mergeSegments", () => {
 
   it("skips blank segments", () => {
     const merged = mergeSegments([
-      { startByte: 0, byteLength: 1000, segments: [{ start: 0, end: 1, text: "   " }], words: [] },
+      { segments: [{ start: 0, end: 1, text: "   " }], words: [] },
     ]);
     expect(merged).toEqual([]);
   });
@@ -184,8 +174,6 @@ describe("mergeSegments", () => {
   it("attaches words to the segment whose span they start in", () => {
     const merged = mergeSegments([
       {
-        startByte: 0,
-        byteLength: 1000,
         segments: [
           { start: 0, end: 2, text: "first part" },
           { start: 2, end: 4, text: "second part" },
@@ -205,7 +193,7 @@ describe("mergeSegments", () => {
 
   it("omits the words field when a chunk carried none", () => {
     const merged = mergeSegments([
-      { startByte: 0, byteLength: 1000, segments: [{ start: 0, end: 1, text: "ok" }], words: [] },
+      { segments: [{ start: 0, end: 1, text: "ok" }], words: [] },
     ]);
     expect(merged[0].words).toBeUndefined();
   });
