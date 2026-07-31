@@ -7,6 +7,7 @@ import { recordUsage, resolveTier } from "@/lib/ai/quota";
 import { colabSttConfig } from "@/lib/ai/config";
 import { servedLocally, transcribeWithFallback } from "@/lib/ai/transcribe";
 import { generateChapters, generateShowNotes } from "@/lib/ai/llm";
+import { isUuid } from "@/lib/api/validation";
 
 export const runtime = "nodejs";
 
@@ -59,6 +60,9 @@ export async function POST(request: NextRequest) {
 
   if (!episodeId) {
     return NextResponse.json({ error: "An episode id is required." }, { status: 400 });
+  }
+  if (!isUuid(episodeId)) {
+    return NextResponse.json({ error: "Unknown episode." }, { status: 400 });
   }
 
   const episode = await db.query.episodes.findFirst({
@@ -287,6 +291,9 @@ export async function GET(request: NextRequest) {
   const episodeId = request.nextUrl.searchParams.get("episodeId");
   if (!episodeId) {
     return NextResponse.json({ error: "An episode id is required." }, { status: 400 });
+  }
+  if (!isUuid(episodeId)) {
+    return NextResponse.json({ error: "Unknown episode." }, { status: 400 });
   }
 
   const summary = await readCached(episodeId, "show_notes");

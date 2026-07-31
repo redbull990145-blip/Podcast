@@ -6,6 +6,7 @@ import { episodes, transcripts, type TranscriptSegment } from "@/lib/db/schema";
 import { fetchTranscript } from "@/lib/rss/transcript";
 import { colabSttConfig } from "@/lib/ai/config";
 import { estimateSeconds } from "@/lib/player/transcribe-stages";
+import { isUuid } from "@/lib/api/validation";
 
 export const runtime = "nodejs";
 
@@ -28,6 +29,9 @@ export async function GET(
   if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
 
   const { id } = await params;
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: "Unknown episode." }, { status: 404 });
+  }
 
   // Both together: the episode row is needed on every path now, because even a
   // cached transcript can be regenerated and the progress bar for that needs

@@ -4,6 +4,7 @@ import { getUser } from "@/lib/supabase/server";
 import { db } from "@/lib/db/client";
 import { episodes } from "@/lib/db/schema";
 import { fetchChapters } from "@/lib/rss/parse-feed";
+import { isUuid } from "@/lib/api/validation";
 
 export const runtime = "nodejs";
 
@@ -23,6 +24,9 @@ export async function GET(
   if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
 
   const { id } = await params;
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: "Unknown episode." }, { status: 404 });
+  }
 
   const episode = await db.query.episodes.findFirst({
     where: eq(episodes.id, id),

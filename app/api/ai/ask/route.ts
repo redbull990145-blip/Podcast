@@ -5,6 +5,7 @@ import { db } from "@/lib/db/client";
 import { episodes, transcripts } from "@/lib/db/schema";
 import { recordUsage, resolveTier } from "@/lib/ai/quota";
 import { answerQuestion } from "@/lib/ai/llm";
+import { isUuid, sanitizeHistory } from "@/lib/api/validation";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -36,9 +37,15 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
+  if (!isUuid(episodeId)) {
+    return NextResponse.json({ error: "Unknown episode." }, { status: 400 });
+  }
   if (question.length > 1000) {
     return NextResponse.json({ error: "That question is too long." }, { status: 400 });
   }
+
+  // Roles re-derived and lengths capped — see sanitizeHistory.
+  const history = sanitizeHistory(body?.history);
 
   const transcript = await db.query.transcripts.findFirst({
     where: eq(transcripts.episodeId, episodeId),
@@ -85,7 +92,7 @@ export async function POST(request: NextRequest) {
     segments,
     transcript.text,
     question,
-    body?.history ?? [],
+    history,
   );
 
   if (!result.ok) {

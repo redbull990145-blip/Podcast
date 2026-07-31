@@ -8,7 +8,19 @@ import { validateApiKey, type Provider } from "@/lib/ai/validate-key";
 
 export const runtime = "nodejs";
 
-const ALLOWED_PROVIDERS = ["openrouter", "deepseek", "openai", "anthropic", "groq"];
+/**
+ * Must stay in step with PROVIDERS in components/settings/api-keys-panel.tsx —
+ * a name offered in that dropdown but missing here is rejected as "unsupported"
+ * after the person has already pasted their key.
+ */
+const ALLOWED_PROVIDERS = [
+  "gemini",
+  "openrouter",
+  "deepseek",
+  "openai",
+  "anthropic",
+  "groq",
+];
 
 /**
  * Bring-your-own-key management.

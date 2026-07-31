@@ -1,8 +1,50 @@
 import type { NextConfig } from "next";
 import withSerwistInit from "@serwist/next";
 
+/**
+ * Baseline response hardening.
+ *
+ * Vercel supplies HSTS and nothing else, so before this the app shipped with no
+ * clickjacking, sniffing or referrer protection at all.
+ *
+ * The CSP here is deliberately partial. `frame-ancestors`, `object-src`,
+ * `base-uri` and `form-action` are the directives that need no cooperation from
+ * the application — they close off framing, plugin embedding, `<base>` hijacking
+ * and cross-origin form posts outright. `script-src` is absent on purpose:
+ * Next.js inlines bootstrap scripts, so a real script policy needs per-request
+ * nonces threaded through the document, and a half-written one would either
+ * break the app or reduce to 'unsafe-inline' and protect nothing. `img-src` is
+ * likewise absent because podcast artwork legitimately comes from any host.
+ */
+const SECURITY_HEADERS = [
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  {
+    key: "Permissions-Policy",
+    // This app needs none of these; naming them denies them to any embedded
+    // third-party content too.
+    value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+  },
+  {
+    key: "Content-Security-Policy",
+    value: [
+      "frame-ancestors 'none'",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join("; "),
+  },
+];
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Removes "X-Powered-By: Next.js", which tells an attacker which framework
+  // (and so which CVE list) to try without telling a user anything.
+  poweredByHeader: false,
+  async headers() {
+    return [{ source: "/:path*", headers: SECURITY_HEADERS }];
+  },
   images: {
     // Podcast artwork comes from arbitrary third-party hosts (Libsyn, Megaphone,
     // Simplecast, self-hosted feeds...). We cannot enumerate them, so allow any
