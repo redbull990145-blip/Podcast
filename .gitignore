@@ -55,6 +55,7 @@ drizzle/.snapshot-tmp/
 
 # local agent/tooling state
 .claude/
+.zcode/
 
 # cloudflare worker (phase 3)
 .wrangler/

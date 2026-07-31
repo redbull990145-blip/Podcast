@@ -15,9 +15,23 @@ import { cn } from "@/lib/utils";
  * break — and the listener is the only one in a position to notice, because
  * they can hear it.
  *
- * So the guess is a starting point, not a verdict. A nudge is stored per
- * episode, because ad load differs between episodes and a correction for one
- * says nothing about the next.
+ * So the guess is a starting point, not a verdict — and a correction is
+ * remembered for the whole show, not just the episode it was made on.
+ *
+ * That is not a convenience, it is what the measurements say. Elevation with
+ * Steven Furtick serves files about nine seconds longer than its feed declares,
+ * and cross-correlating the audio's speech envelope against the transcript's
+ * puts the front insertion at 4.4s — the same 4.4s in every ten-minute window
+ * of the episode, so it is a fixed pre-roll rather than a mid-roll break. The
+ * remaining four-odd seconds are appended to the end.
+ *
+ * Nothing in the feed distinguishes those two halves. The total excess is
+ * knowable; the split is not, short of decoding an hour of audio the browser
+ * cannot even read cross-origin. But the split is a property of how the show's
+ * host is configured, so it is the same on the next episode and the one after
+ * — which makes one correction per show the right unit. Correct it once and
+ * every episode of that show inherits it; correct a single episode that differs
+ * and that episode wins.
  */
 
 /**
@@ -39,22 +53,48 @@ import { cn } from "@/lib/utils";
  */
 const STORAGE_PREFIX = "cadence-caption-nudge:v2:";
 
+/** Where a correction is kept for every future episode of the same show. */
+const SHOW_PREFIX = "cadence-caption-nudge:show:v1:";
+
 /** One press. Small enough to land on a sentence, large enough to feel. */
 const NUDGE_STEP = 1;
 
 /** Beyond this the automatic guess is wrong, not slightly out. */
 const MAX_NUDGE = 120;
 
-function readNudge(episodeId: string): number {
-  if (typeof window === "undefined") return 0;
+function read(key: string): number | null {
+  if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(STORAGE_PREFIX + episodeId);
-    const value = raw == null ? 0 : Number(raw);
-    return Number.isFinite(value) ? clampNudge(value) : 0;
+    const raw = window.localStorage.getItem(key);
+    if (raw == null) return null;
+    const value = Number(raw);
+    return Number.isFinite(value) ? clampNudge(value) : null;
   } catch {
     // Private mode, or storage disabled. The automatic offset still applies.
-    return 0;
+    return null;
   }
+}
+
+function write(key: string, value: number) {
+  try {
+    if (value === 0) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, String(value));
+  } catch {
+    // Not being able to remember it is not a reason to refuse to do it.
+  }
+}
+
+/**
+ * This episode's correction: its own if it has one, otherwise the show's.
+ *
+ * Episode beats show so that a one-off — a live special with a longer break, a
+ * re-run with different advertising — can be fixed without moving everything
+ * else off.
+ */
+function readNudge(episodeId: string, podcastId: string | null): number {
+  const own = read(STORAGE_PREFIX + episodeId);
+  if (own != null) return own;
+  return (podcastId && read(SHOW_PREFIX + podcastId)) || 0;
 }
 
 function clampNudge(value: number): number {
@@ -68,37 +108,39 @@ function clampNudge(value: number): number {
  * localStorage, and seeding state from it directly would make the first client
  * render disagree with the HTML.
  */
-export function useCaptionOffset(episodeId: string) {
+export function useCaptionOffset(episodeId: string, podcastId: string | null) {
   const [nudge, setNudge] = useState(0);
 
   useEffect(() => {
-    setNudge(readNudge(episodeId));
-  }, [episodeId]);
+    setNudge(readNudge(episodeId, podcastId));
+  }, [episodeId, podcastId]);
 
   const adjust = useCallback(
     (delta: number) => {
       setNudge((current) => {
         const next = clampNudge(current + delta);
-        try {
-          if (next === 0) window.localStorage.removeItem(STORAGE_PREFIX + episodeId);
-          else window.localStorage.setItem(STORAGE_PREFIX + episodeId, String(next));
-        } catch {
-          // Not being able to remember it is not a reason to refuse to do it.
-        }
+        write(STORAGE_PREFIX + episodeId, next);
+        // The show carries the same correction forward, which is the point:
+        // the insertion that made it necessary is the same next week.
+        if (podcastId) write(SHOW_PREFIX + podcastId, next);
         return next;
       });
     },
-    [episodeId],
+    [episodeId, podcastId],
   );
 
+  /**
+   * Clears the show's correction as well as this episode's.
+   *
+   * Clearing only the episode would let the show's value reapply immediately,
+   * so the display would read the same after pressing reset as before it —
+   * which looks like a broken button rather than an inherited setting.
+   */
   const reset = useCallback(() => {
     setNudge(0);
-    try {
-      window.localStorage.removeItem(STORAGE_PREFIX + episodeId);
-    } catch {
-      /* ignore */
-    }
-  }, [episodeId]);
+    write(STORAGE_PREFIX + episodeId, 0);
+    if (podcastId) write(SHOW_PREFIX + podcastId, 0);
+  }, [episodeId, podcastId]);
 
   return { nudge, adjust, reset };
 }

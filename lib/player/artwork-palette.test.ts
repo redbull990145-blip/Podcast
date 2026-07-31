@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { paletteFromPixels } from "./artwork-palette";
+import { FALLBACK_PALETTE, paletteFromPixels } from "./artwork-palette";
 
 /** Builds RGBA pixel data from `[count, [r,g,b], alpha?]` runs. */
 function pixels(runs: [number, [number, number, number], number?][]): Uint8ClampedArray {
@@ -123,5 +123,82 @@ describe("paletteFromPixels", () => {
 
     const [r, , b] = channels(palette.glow);
     expect(r).toBeGreaterThan(b);
+  });
+});
+
+/** 0 (grey) to 1, from the HSL definition — mirrors the module's own maths. */
+function hslSaturation([r, g, b]: [number, number, number]): number {
+  const max = Math.max(r, g, b) / 255;
+  const min = Math.min(r, g, b) / 255;
+  if (max === min) return 0;
+  const l = (max + min) / 2;
+  const d = max - min;
+  return l > 0.5 ? d / (2 - max - min) : d / (max + min);
+}
+
+function hslLightness([r, g, b]: [number, number, number]): number {
+  return (Math.max(r, g, b) / 255 + Math.min(r, g, b) / 255) / 2;
+}
+
+describe("mesh (ambient backdrop colours)", () => {
+  it("tones down a fully-saturated logo colour instead of rendering it as a warning light", () => {
+    const palette = paletteFromPixels(pixels([[400, [255, 0, 0]]]))!;
+    expect(hslSaturation(channels(palette.mesh[0]))).toBeLessThanOrEqual(0.58);
+  });
+
+  it("lifts a dishwater-grey cover so its colours still read as colour", () => {
+    const palette = paletteFromPixels(pixels([[400, [90, 88, 92]]]))!;
+    for (const colour of palette.mesh) {
+      expect(hslLightness(channels(colour))).toBeGreaterThanOrEqual(0.2);
+    }
+  });
+
+  it("keeps every mesh colour dark enough to hold white text", () => {
+    const palette = paletteFromPixels(
+      pixels([
+        [500, [250, 240, 40]],
+        [300, [40, 240, 250]],
+      ]),
+    )!;
+    for (const colour of palette.mesh) {
+      expect(hslLightness(channels(colour))).toBeLessThanOrEqual(0.42);
+    }
+  });
+
+  it("picks more than one colour when the cover actually has more than one", () => {
+    const palette = paletteFromPixels(
+      pixels([
+        [500, [200, 60, 60]],
+        [500, [60, 90, 200]],
+      ]),
+    )!;
+    expect(palette.mesh.length).toBeGreaterThanOrEqual(2);
+
+    const [r1] = channels(palette.mesh[0]);
+    const [r2] = channels(palette.mesh[1]);
+    // The two chosen colours must actually differ, not both collapse to the
+    // same muted grey under the matte clamp.
+    expect(Math.abs(r1 - r2)).toBeGreaterThan(10);
+  });
+
+  it("still returns at least two colours for a single-colour cover", () => {
+    const palette = paletteFromPixels(pixels([[400, [80, 120, 200]]]))!;
+    expect(palette.mesh.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("never returns more than three mesh colours", () => {
+    const palette = paletteFromPixels(
+      pixels([
+        [200, [200, 60, 60]],
+        [200, [60, 200, 60]],
+        [200, [60, 60, 200]],
+        [200, [200, 200, 60]],
+      ]),
+    )!;
+    expect(palette.mesh.length).toBeLessThanOrEqual(3);
+  });
+
+  it("gives the fallback palette a usable mesh", () => {
+    expect(FALLBACK_PALETTE.mesh.length).toBeGreaterThanOrEqual(2);
   });
 });

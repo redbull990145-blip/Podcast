@@ -22,7 +22,10 @@ const MAX_TRANSCRIPT_CHARS = 400_000;
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 type ChatResponse = {
-  choices?: { message?: { content?: string } }[];
+  choices?: {
+    message?: { content?: string; reasoning?: string };
+    finish_reason?: string;
+  }[];
   error?: { message?: string };
 };
 
@@ -40,7 +43,8 @@ async function chatOnce(
   messages: ChatMessage[],
   options: { maxTokens?: number; temperature?: number },
 ): Promise<
-  { ok: true; text: string } | { ok: false; error: string; status?: number }
+  | { ok: true; text: string; truncated: boolean }
+  | { ok: false; error: string; status?: number }
 > {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -86,10 +90,29 @@ async function chatOnce(
     }
 
     const data = (await response.json()) as ChatResponse;
-    const text = data.choices?.[0]?.message?.content?.trim();
-    if (!text) return { ok: false, error: "The AI service returned nothing." };
+    const choice = data.choices?.[0];
+    const text = choice?.message?.content?.trim();
 
-    return { ok: true, text };
+    /**
+     * Reasoning models spend tokens thinking before they answer, and some
+     * report that thinking separately rather than in `content`. An empty
+     * `content` next to a non-empty `reasoning` means the budget ran out
+     * mid-thought — the answer was never reached.
+     */
+    if (!text) {
+      const thought = choice?.message?.reasoning?.trim();
+      if (thought) {
+        console.error(
+          "LLM returned only reasoning, no answer",
+          model,
+          thought.slice(0, 200),
+        );
+        return { ok: false, error: "The AI ran out of room before answering." };
+      }
+      return { ok: false, error: "The AI service returned nothing." };
+    }
+
+    return { ok: true, text, truncated: choice?.finish_reason === "length" };
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       return { ok: false, error: "The AI service took too long to respond." };
@@ -108,18 +131,48 @@ async function chatOnce(
  * next model in the list probably works. An API-key rejection is not
  * model-specific and stops the chain immediately rather than burning through
  * every candidate for the same reason.
+ *
+ * `parse` extends that same logic past the HTTP layer. A model can answer 200
+ * OK and still be useless to the caller — a reasoning model that thinks until
+ * it runs out of room, or one that ignores "JSON only" and writes an essay.
+ * That is a property of the model, not the request, so it is exactly as
+ * retryable as a 429 and is treated the same way. Callers that only need prose
+ * omit it and take the first successful response.
  */
-async function chat(
+async function chat<T = string>(
   config: LlmConfig,
   messages: ChatMessage[],
-  options: { maxTokens?: number; temperature?: number } = {},
-): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  options: {
+    maxTokens?: number;
+    temperature?: number;
+    parse?: (text: string) => T | null;
+  } = {},
+): Promise<{ ok: true; text: string; value: T } | { ok: false; error: string }> {
   const candidates = config.models.length > 0 ? config.models : [config.model];
   let last: { ok: false; error: string; status?: number } | null = null;
 
   for (const model of candidates) {
     const result = await chatOnce(config, model, messages, options);
-    if (result.ok) return result;
+
+    if (result.ok) {
+      if (!options.parse) {
+        return { ok: true, text: result.text, value: result.text as T };
+      }
+
+      const value = options.parse(result.text);
+      if (value !== null) return { ok: true, text: result.text, value };
+
+      // Unusable answer. Log what it actually said — without this the only
+      // symptom is a generic failure with no way to tell which model misbehaved.
+      console.error(
+        "LLM answer could not be used, trying next model",
+        model,
+        result.truncated ? "(truncated: ran out of tokens)" : "",
+        result.text.slice(0, 300),
+      );
+      last = { ok: false, error: "The AI returned something we couldn't read." };
+      continue;
+    }
 
     last = result;
     if (result.status === 401 || result.status === 403) break;
@@ -200,13 +253,15 @@ export async function generateChapters(
     return { ok: false, error: "No timed transcript available for this episode." };
   }
 
-  const result = await chat(
+  const duration = segments[segments.length - 1]?.end ?? Infinity;
+
+  const result = await chat<Chapter[]>(
     config,
     [
       {
         role: "system",
         content:
-          "You segment podcast transcripts into chapters. Respond with JSON only — no prose, no code fences.",
+          "You segment podcast transcripts into chapters. Reply with a JSON array and nothing else — no reasoning, no explanation, no code fences. Begin your reply with the character [.",
       },
       {
         role: "user",
@@ -217,52 +272,151 @@ Respond with a JSON array only, in this exact shape:
 
 startTime is in seconds and must be one of the timestamps shown in the transcript. Titles should be 2-6 words describing what is discussed. The first chapter must start at 0.
 
+Do not explain your reasoning. Output the array immediately.
+
 Transcript:
 ${truncate(withTimestamps(segments))}`,
       },
     ],
-    { maxTokens: 900, temperature: 0.2 },
+    {
+      /*
+       * Sized for a reasoning model, not for the answer.
+       *
+       * Twelve chapters of JSON is perhaps 300 tokens, and the previous budget
+       * of 900 looked generous against that. But models in the free chain think
+       * before they answer and their thinking is billed to the same budget, so
+       * the whole allowance went on deliberation and the response was cut off
+       * mid-sentence, before a single bracket was emitted. The ceiling has to
+       * cover the thinking as well as the answer.
+       */
+      maxTokens: 4000,
+      temperature: 0.2,
+      parse: (text) => parseChapters(text, duration),
+    },
   );
 
-  if (!result.ok) return result;
-
-  // Models sometimes wrap JSON in prose or code fences despite instructions.
-  const match = result.text.match(/\[[\s\S]*\]/);
-  if (!match) {
-    return { ok: false, error: "Couldn't read the generated chapters." };
+  if (!result.ok) {
+    return { ok: false, error: "The AI couldn't produce chapters for this episode. Try again." };
   }
+
+  return { ok: true, chapters: result.value };
+}
+
+/**
+ * Turns a model's reply into chapters, or null if nothing usable is in it.
+ *
+ * Null is a signal to try another model rather than an error to show anyone,
+ * so every rejection here is a judgement that *this* response is unusable —
+ * not that the episode can't be chaptered.
+ */
+function parseChapters(text: string, duration: number): Chapter[] | null {
+  const parsed = extractChapterArray(text);
+  if (!parsed) return null;
+
+  const chapters = parsed
+    .map((c): Chapter | null => {
+      if (!c || typeof c !== "object") return null;
+      const obj = c as Record<string, unknown>;
+      const startTime = coerceStartTime(obj);
+      const title = coerceTitle(obj);
+      // Drop anything past the end of the episode — a hallucinated timestamp
+      // would produce a chapter that seeks nowhere.
+      if (startTime == null || startTime < 0 || startTime > duration) return null;
+      if (!title) return null;
+      return { startTime, title };
+    })
+    .filter((c): c is Chapter => c !== null)
+    .sort((a, b) => a.startTime - b.startTime);
+
+  // One chapter is not a chaptering — it's the episode. Two is the point at
+  // which the strip can actually navigate somewhere.
+  return chapters.length >= 2 ? chapters : null;
+}
+
+/**
+ * Fishes the chapter array out of whatever the model actually returned.
+ *
+ * Free-tier models are inconsistent: they wrap output in code fences, add a
+ * preamble, return `{"chapters": [...]}`, or emit trailing commentary. This
+ * tries the cheapest interpretation first and widens outward, rather than
+ * relying on one greedy regex that breaks the moment prose contains brackets.
+ */
+function extractChapterArray(text: string): unknown[] | null {
+  const stripped = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  const asArray = (value: unknown): unknown[] | null => {
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === "object") {
+      // Common wrappers: {"chapters": [...]}, {"data": [...]}, etc.
+      for (const key of ["chapters", "data", "items", "result"]) {
+        const inner = (value as Record<string, unknown>)[key];
+        if (Array.isArray(inner)) return inner;
+      }
+    }
+    return null;
+  };
 
   try {
-    const parsed = JSON.parse(match[0]) as unknown;
-    if (!Array.isArray(parsed)) throw new Error("not an array");
+    const arr = asArray(JSON.parse(stripped));
+    if (arr) return arr;
+  } catch {
+    // Fall through to bracket scanning.
+  }
 
-    const duration = segments[segments.length - 1]?.end ?? Infinity;
+  // Scan for the first balanced [...] block. Skips brackets inside strings so
+  // an embedded timestamp like "[0:00]" in a title doesn't fool the counter.
+  const start = stripped.indexOf("[");
+  if (start === -1) return null;
 
-    const chapters = parsed
-      .map((c): Chapter | null => {
-        if (!c || typeof c !== "object") return null;
-        const obj = c as Record<string, unknown>;
-        const startTime = Number(obj.startTime);
-        const title = typeof obj.title === "string" ? obj.title.trim() : "";
-        // Drop anything past the end of the episode — a hallucinated timestamp
-        // would produce a chapter that seeks nowhere.
-        if (!Number.isFinite(startTime) || startTime < 0 || startTime > duration) {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < stripped.length; i++) {
+    const ch = stripped[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\") { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "[") depth++;
+    else if (ch === "]") {
+      depth--;
+      if (depth === 0) {
+        try {
+          const arr = asArray(JSON.parse(stripped.slice(start, i + 1)));
+          if (arr) return arr;
+        } catch {
           return null;
         }
-        if (!title) return null;
-        return { startTime, title };
-      })
-      .filter((c): c is Chapter => c !== null)
-      .sort((a, b) => a.startTime - b.startTime);
-
-    if (chapters.length === 0) {
-      return { ok: false, error: "Couldn't read the generated chapters." };
+        return null;
+      }
     }
-
-    return { ok: true, chapters };
-  } catch {
-    return { ok: false, error: "Couldn't read the generated chapters." };
   }
+  return null;
+}
+
+function coerceStartTime(obj: Record<string, unknown>): number | null {
+  const raw = obj.startTime ?? obj.start_time ?? obj.start ?? obj.time ?? obj.timestamp;
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    // "mm:ss" or "hh:mm:ss"
+    const parts = trimmed.split(":").map((p) => Number(p));
+    if (parts.length > 1 && parts.every((p) => Number.isFinite(p))) {
+      return parts.reduce((acc, p) => acc * 60 + p, 0);
+    }
+    const num = Number(trimmed);
+    if (Number.isFinite(num)) return num;
+  }
+  return null;
+}
+
+function coerceTitle(obj: Record<string, unknown>): string {
+  const raw = obj.title ?? obj.name ?? obj.chapter ?? obj.heading;
+  return typeof raw === "string" ? raw.trim() : "";
 }
 
 // ---------------------------------------------------------------------------

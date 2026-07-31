@@ -61,7 +61,7 @@ export const userApiKeys = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    /** 'openai' | 'anthropic' | 'openrouter' | 'groq' */
+    /** 'gemini' | 'openai' | 'anthropic' | 'openrouter' | 'deepseek' | 'groq' */
     provider: text("provider").notNull(),
     encryptedKey: text("encrypted_key").notNull(),
     /** Last 4 chars, shown in Settings so users can identify the key. */

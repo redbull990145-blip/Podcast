@@ -21,12 +21,36 @@
  */
 
 /**
- * Below this, the gap is rounding rather than advertising.
+ * Below this, the extra audio is the end of the episode, not advertising.
  *
- * Feed durations are routinely a second or two out from the decoded file, and
- * transcripts stop at the last word rather than the last sample.
+ * This used to be 3 seconds, which was measured off the wrong thing and made
+ * captions worse on every show it touched. Elevation with Steven Furtick is the
+ * case that proved it: three episodes each came back exactly 8.73s longer than
+ * the feed declares, which read as nine seconds of pre-roll and shifted every
+ * caption nine seconds late.
+ *
+ * Decoding the file settles what those 8.73s actually are. Content runs to
+ * 3514.0s and fades out by 3515.5s — the transcript's last word is at 3514.48s,
+ * so the episode proper ends exactly where the transcript says. Then comes
+ * digital silence at -74dB until 3518.5s, and then a separate four-second
+ * segment at normal level before the file ends at 3523.2s. The inserted audio
+ * is all of it at the *end*. Nothing was added to the front, and the correct
+ * shift is zero.
+ *
+ * Which is the general case, not a quirk: every podcast ends with an outro,
+ * sting or promo after the last word, so a small excess is what a normal
+ * episode looks like. A pre-roll ad slot is a different order of magnitude —
+ * fifteen seconds at the very least, usually thirty or more. Thirty seconds
+ * sits above anything a show tacks onto its own ending and below any real ad
+ * break, so the guess only fires when there is something substantial to
+ * explain.
+ *
+ * Erring this way is also the cheaper mistake. Failing to correct a genuine
+ * short pre-roll leaves captions a few seconds out and still readable, and the
+ * listener can nudge them; shifting for an outro breaks captions on shows that
+ * had nothing wrong with them.
  */
-const NOISE_FLOOR_SECONDS = 3;
+const NOISE_FLOOR_SECONDS = 30;
 
 /** Above this, something other than an ad break is going on — don't guess. */
 export const MAX_AUTO_OFFSET_SECONDS = 600;
@@ -76,9 +100,33 @@ export function captionOffsetFor(
   source: string | null,
   audioDuration: number,
   transcriptEnd: number,
+  publishedDuration?: number | null,
 ): number {
   if (source !== "publisher") return 0;
-  return inferCaptionOffset(audioDuration, transcriptEnd);
+  return inferCaptionOffset(audioDuration, masterLength(transcriptEnd, publishedDuration));
+}
+
+/**
+ * How long the episode is without whatever the host stitched in — the number
+ * the served file is compared against.
+ *
+ * The feed's own `<itunes:duration>` when there is one, because the transcript
+ * is the wrong ruler: it stops at the last word spoken, so measuring against it
+ * counts every episode's outro as though it were advertising. On the Elevation
+ * episodes the two differ by exactly that outro — the feed says 3514s and the
+ * transcript's last word lands at 3514.48s, while the file runs to 3523.2s.
+ * Against the feed the excess is a clean 8.7s of appended material; against the
+ * transcript it is the same 8.7s but now indistinguishable from a pre-roll.
+ *
+ * Falls back to the transcript when a feed omits its duration, which is common
+ * enough to need handling and safe enough now that the floor is well above the
+ * length of a normal ending.
+ */
+function masterLength(transcriptEnd: number, publishedDuration?: number | null): number {
+  if (typeof publishedDuration === "number" && publishedDuration > 0) {
+    return publishedDuration;
+  }
+  return transcriptEnd;
 }
 
 /** End of the last caption, or 0 for an empty transcript. */

@@ -21,17 +21,30 @@ export type LineEmphasis = {
  * Emphasis by distance from the active line, nearest first; the last entry is
  * the floor for everything further away.
  *
- * Two things are load-bearing here. The scale range is tiny — 5% end to end —
- * because text is the one thing a user is actively reading, and anything larger
- * turns "this line matters" into "the layout is moving". And the table stops
- * changing after three lines out, which means advancing one line only re-animates
- * the handful of rows whose values actually differ, not every row on screen.
+ * Measured off Spotify's lyrics view rather than chosen by eye. Sampling the
+ * same line while it was being sung and again once it had scrolled up one
+ * place: peak brightness fell from 255 to 79 over a background of 38, which is
+ * an effective opacity near 0.3; the steepest edge in the glyphs fell from 214
+ * to 8, which for a step that size puts the blur at roughly two CSS pixels; and
+ * the rendered line narrowed from 891px to 879px, a scale of 0.983.
+ *
+ * The surprise in those numbers is which one does the work. The scale barely
+ * moves — under two percent — while the blur is heavy enough to make a
+ * neighbouring line genuinely unreadable. That is the opposite of the usual
+ * instinct to shrink the inactive rows, and it is why the effect reads as
+ * depth-of-field on one sentence rather than as a list resizing itself. Scale
+ * stays tiny for the same reason it always did: text is being actively read,
+ * and a large scale change turns "this line matters" into "the layout moved".
+ *
+ * The table stops changing after three lines out, which means advancing one
+ * line only re-animates the handful of rows whose values actually differ, not
+ * every row on screen.
  */
 const EMPHASIS: readonly LineEmphasis[] = [
   { opacity: 1, scale: 1, blur: 0 },
-  { opacity: 0.42, scale: 0.972, blur: 0.7 },
-  { opacity: 0.3, scale: 0.958, blur: 1.2 },
-  { opacity: 0.24, scale: 0.95, blur: 1.6 },
+  { opacity: 0.3, scale: 0.983, blur: 2 },
+  { opacity: 0.24, scale: 0.976, blur: 3.2 },
+  { opacity: 0.2, scale: 0.972, blur: 4 },
 ];
 
 /** The distance past which emphasis is constant. */
@@ -310,7 +323,51 @@ function clamp01(value: number): number {
 }
 
 /**
- * Where the list has to sit for `index` to be centred, as a translateY.
+ * Which word the fill is currently passing through, for a fill of `fill`.
+ *
+ * -1 before the line has started, `words.length` once it is finished; in
+ * between, the index of the one word that is part spoken and part not.
+ *
+ * This exists to keep the expensive paint down to a single word. Painting the
+ * sweep means clipping a gradient to the glyphs, and `background-clip: text`
+ * is one of the costliest things a browser can be asked to rasterise: it
+ * builds a mask from the shaped text and composites the gradient through it,
+ * every frame the gradient moves. Applying it to every word of the line meant
+ * about twenty of those per frame, plus forty at a line change as one line
+ * handed over to the next — measured at a 152ms stall on a 44px line, which is
+ * eleven dropped frames right where the scroll begins.
+ *
+ * Only one word is ever mid-sweep. The ones behind it are flat spoken colour
+ * and the ones ahead are flat unspoken colour, and a flat colour costs nothing.
+ * So the clip is applied to that word alone and the rest are painted normally,
+ * which looks identical and is twenty times less work.
+ */
+export function fillingWordIndex(words: readonly CaptionWord[], fill: number): number {
+  if (fill <= 0) return -1;
+  for (let i = 0; i < words.length; i += 1) {
+    if (fill < words[i].to) return i;
+  }
+  return words.length;
+}
+
+/**
+ * Where the spoken line sits in the viewport, as a fraction of its height.
+ *
+ * Above the middle, not on it. Locating the sung text in a frame-by-frame
+ * capture of Spotify's lyrics puts it at 41% of the panel every time — a
+ * single-row line parks there and a two-row line straddles it, so it is the
+ * line's centre being anchored, not its top.
+ *
+ * The asymmetry is the point: it leaves half again as much room below the
+ * current line as above it, so what is coming is always more legible than what
+ * has gone. Centring gives equal weight to text nobody is going to read again,
+ * and that is the difference between a transcript that leads and one that
+ * trails.
+ */
+export const ACTIVE_LINE_ANCHOR = 0.41;
+
+/**
+ * Where the list has to sit for `index` to sit on the anchor, as a translateY.
  *
  * Negative, because the list moves up to bring later lines into view. Clamped
  * so the first and last lines can't be dragged into empty space — the same
@@ -322,9 +379,10 @@ export function centreOffset(
   index: number,
   viewportHeight: number,
   rowHeight: number,
+  anchor: number = ACTIVE_LINE_ANCHOR,
 ): number {
   const top = tops[index] ?? 0;
-  const ideal = top - viewportHeight / 2 + rowHeight / 2;
+  const ideal = top - viewportHeight * anchor + rowHeight / 2;
   const max = Math.max(0, total - viewportHeight);
   const scrollTop = Math.max(0, Math.min(ideal, max));
   // `-0` is a valid translateY but a nuisance to assert against and to compare

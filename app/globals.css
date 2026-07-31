@@ -236,32 +236,59 @@
    * — and it is what makes the lines appear to come from somewhere rather than
    * blink into existence at the edge. Static, so it costs one paint.
    */
+  /*
+   * The fade runs deeper than it used to because the lines are now much taller:
+   * a 5% ramp was shorter than a single line of text, so a line hit the edge
+   * essentially at full opacity and clipped. The ramp has to be a good fraction
+   * of a row for the row to actually dissolve.
+   */
   .caption-viewport {
     -webkit-mask-image: linear-gradient(
       to bottom,
       transparent 0,
-      #000 5%,
-      #000 92%,
+      #000 11%,
+      #000 89%,
       transparent 100%
     );
     mask-image: linear-gradient(
       to bottom,
       transparent 0,
-      #000 5%,
-      #000 92%,
+      #000 11%,
+      #000 89%,
       transparent 100%
     );
   }
 
+  /*
+   * Emphasis is transitioned here rather than sprung in JS — see the comment
+   * on the row in captions-panel.tsx for why.
+   *
+   * Blur gets the shortest leg on purpose. Opacity and transform are composited
+   * and cost nothing per frame, but a blur radius that is still changing forces
+   * the browser to re-rasterise that row's text every frame, and six rows are
+   * mid-change at once during a line advance. Finishing the blur early keeps
+   * that expensive window well clear of the tail of the list's own travel,
+   * where the eye is most likely to notice a dropped frame.
+   */
   .caption-line {
+    transition:
+      opacity 300ms var(--ease-out),
+      transform 300ms var(--ease-out),
+      filter 190ms var(--ease-out);
+
     /* Position along the line's text, 0 to 1. Written once per frame. */
     --caption-fill: 0;
     --caption-spoken: rgb(255 255 255);
-    --caption-unspoken: rgb(255 255 255 / 0.45);
+    /*
+     * 0.42 rather than a rounder number because that is what the reference
+     * measures: unsung words on the active line sit at 128 against a
+     * background of 38 and a sung 255, which is 0.415 of the way up.
+     */
+    --caption-unspoken: rgb(255 255 255 / 0.42);
   }
 
   /*
-   * Captions are set in Geist Bold.
+   * Captions are set large in Geist Bold.
    *
    * The weight is on every line, not just the spoken one. Bolding only the
    * active line would be the obvious way to emphasise it, but changing weight
@@ -269,11 +296,32 @@
    * row's height — and the transcript's positions come from a height table
    * measured once. Every line would shift as the highlight passed it. Emphasis
    * is carried by colour, scale and blur instead, none of which affect layout.
+   *
+   * The size is taken from the same Spotify capture the motion came from.
+   * Measuring a rendered line there — 445 CSS px across eighteen characters,
+   * with an ascender height of 35px — puts the face at roughly 46px in a
+   * column about 590px wide, or a thirteenth of the measure. This panel is
+   * capped at 608px, so the ceiling lands in the same place; the floor keeps a
+   * phone at a size that still fits a phrase per line.
+   *
+   * Large type is not decoration here, it is what makes the rest work. The
+   * per-word fill has to be readable in peripheral vision while the eye is
+   * still on the word before it, and two-percent scale steps between lines only
+   * register at all once the glyphs are this big.
    */
   .caption-line__text {
     font-family: var(--font-geist), var(--font-sans);
     font-weight: 700;
-    letter-spacing: -0.01em;
+    font-size: clamp(1.75rem, 7.5vw, 2.75rem);
+    line-height: 1.65;
+    letter-spacing: -0.02em;
+    /*
+     * At 16px almost any token fitted the column; at 44px a long one — a URL a
+     * speaker read out, a German compound, a Whisper mishearing run together —
+     * is wide enough to push the row past the viewport and take the whole
+     * transcript's width with it, since the height table is measured from it.
+     */
+    overflow-wrap: break-word;
   }
 
   /*
@@ -290,8 +338,27 @@
    * a share of a word rather than of a paragraph, so it stays a soft edge on a
    * letter instead of a gradient over a clause.
    */
+  /*
+   * Words the sweep has passed and words it has not reached are flat colour,
+   * which costs a normal text paint and nothing more. `data-sung` and
+   * `data-filling` are moved by the player as the sweep crosses each word —
+   * see useKaraokeFill in captions-panel.tsx.
+   */
+  [data-caption-active] .caption-word {
+    color: var(--caption-unspoken);
+  }
+
+  [data-caption-active] .caption-word[data-sung] {
+    color: var(--caption-spoken);
+  }
+
+  /*
+   * Only the word actually being spoken pays for the clip. See
+   * fillingWordIndex in caption-motion.ts — this used to apply to every word
+   * on the line and cost eleven frames at every line change.
+   */
   @supports (background-clip: text) or (-webkit-background-clip: text) {
-    [data-caption-active] .caption-word {
+    [data-caption-active] .caption-word[data-filling] {
       --local: clamp(
         0,
         (var(--caption-fill) - var(--w-from)) * var(--w-scale),
@@ -307,6 +374,26 @@
       color: transparent;
       -webkit-text-fill-color: transparent;
     }
+  }
+
+  /*
+   * Grain over the Now Playing backdrop.
+   *
+   * A smooth colour gradient — however rich the colours — reads as a plastic
+   * gel over a light, and it bands visibly on an 8-bit display besides. Real
+   * matte surfaces scatter light unevenly at a microscopic scale; a static
+   * noise texture is the cheap approximation of that, and it's the difference
+   * between "gradient" and "surface". Static on purpose: animating it would
+   * cost a repaint every frame for a texture nobody consciously looks at.
+   * `overlay` lets the noise darken already-dark areas and lighten already-
+   * light ones rather than washing everything toward grey, which is what
+   * keeps the effect reading as texture instead of as a haze over the colour.
+   */
+  .now-playing-grain {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 180px 180px;
+    mix-blend-mode: overlay;
+    opacity: 0.05;
   }
 }
 

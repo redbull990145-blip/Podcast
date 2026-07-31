@@ -16,6 +16,7 @@ export function Scrubber({
   className,
   trackClassName,
   tone = "accent",
+  ticks,
 }: {
   currentTime: number;
   duration: number;
@@ -23,6 +24,8 @@ export function Scrubber({
   className?: string;
   trackClassName?: string;
   tone?: SliderTone;
+  /** Chapter boundaries as fractions of the episode — see chapterTicks. */
+  ticks?: number[];
 }) {
   return (
     <Slider
@@ -36,6 +39,7 @@ export function Scrubber({
       tone={tone}
       className={className}
       trackClassName={trackClassName}
+      ticks={ticks}
     />
   );
 }

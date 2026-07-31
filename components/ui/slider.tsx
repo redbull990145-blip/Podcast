@@ -24,10 +24,16 @@ import { cn } from "@/lib/utils";
 
 export type SliderTone = "accent" | "light";
 
-const TONES: Record<SliderTone, { track: string; fill: string }> = {
-  accent: { track: "bg-border", fill: "bg-accent" },
+/**
+ * `tick` is the colour of the gap punched through the bar at a chapter
+ * boundary, so it has to match what is *behind* the slider rather than the
+ * slider itself — that is what makes one mark read the same against the played
+ * and unplayed halves.
+ */
+const TONES: Record<SliderTone, { track: string; fill: string; tick: string }> = {
+  accent: { track: "bg-border", fill: "bg-accent", tick: "bg-surface" },
   // Sits on the Now Playing backdrop, which is always dark.
-  light: { track: "bg-white/20", fill: "bg-white" },
+  light: { track: "bg-white/20", fill: "bg-white", tick: "bg-black/70" },
 };
 
 export function Slider({
@@ -43,6 +49,7 @@ export function Slider({
   tone = "accent",
   className,
   trackClassName,
+  ticks,
 }: {
   value: number;
   min?: number;
@@ -69,6 +76,14 @@ export function Slider({
   tone?: SliderTone;
   className?: string;
   trackClassName?: string;
+  /**
+   * Positions to mark on the track, each 0 to 1. Used for chapter boundaries.
+   *
+   * Fractions rather than values because the marks are a painting concern: they
+   * are placed with `left`, so they cost nothing per frame and do not care what
+   * the slider's units are.
+   */
+  ticks?: number[];
 }) {
   const [dragging, setDragging] = useState<number | null>(null);
   const pendingRef = useRef<number | null>(null);
@@ -121,7 +136,7 @@ export function Slider({
       <div
         ref={trackRef}
         className={cn(
-          "h-1 w-full overflow-hidden rounded-full",
+          "relative h-1 w-full overflow-hidden rounded-full",
           colours.track,
           trackClassName,
         )}
@@ -130,6 +145,25 @@ export function Slider({
           className={cn("h-full w-full origin-left rounded-full", colours.fill)}
           style={{ transform: `scaleX(${fraction})`, transition: glide }}
         />
+
+        {/*
+          Chapter marks, cut out of the bar rather than drawn on top of it.
+          `mix-blend-overlay` would tint rather than separate, and a solid mark
+          has to be one colour against the played side of the bar and another
+          against the unplayed side. A gap reads correctly against both, which
+          is the same trick a segmented progress bar uses.
+
+          Inside the track, so its `overflow-hidden` clips a mark that lands
+          under the rounded cap instead of letting it hang off the end.
+        */}
+        {ticks?.map((tick) => (
+          <span
+            key={tick}
+            aria-hidden
+            className={cn("absolute top-0 h-full w-0.5 -translate-x-1/2", colours.tick)}
+            style={{ left: `${tick * 100}%` }}
+          />
+        ))}
       </div>
 
       {/*

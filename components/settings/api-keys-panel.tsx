@@ -10,6 +10,12 @@ type StoredKey = { provider: string; keyHint: string | null; createdAt: string }
 
 const PROVIDERS = [
   {
+    id: "gemini",
+    label: "Google AI Studio",
+    kind: "text",
+    help: "Gemini. Generous free tier.",
+  },
+  {
     id: "openrouter",
     label: "OpenRouter",
     kind: "text",

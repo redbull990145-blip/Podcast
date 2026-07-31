@@ -5,6 +5,7 @@ import {
   clampOffset,
   captionWords,
   fillFraction,
+  fillingWordIndex,
   isRowVisible,
   lineEmphasis,
 } from "./caption-motion";
@@ -211,6 +212,41 @@ describe("fillFraction", () => {
   });
 });
 
+describe("fillingWordIndex", () => {
+  // "a" (2) + "bb" (3) + "ccc" (4) of 9 characters: boundaries at 2/9 and 5/9.
+  const words = captionWords({ start: 0, end: 9, text: "a bb ccc" });
+
+  it("reports nothing filling before the line starts", () => {
+    expect(fillingWordIndex(words, 0)).toBe(-1);
+    expect(fillingWordIndex(words, -0.5)).toBe(-1);
+  });
+
+  it("points at the word the sweep is inside", () => {
+    expect(fillingWordIndex(words, 0.1)).toBe(0);
+    expect(fillingWordIndex(words, 0.4)).toBe(1);
+    expect(fillingWordIndex(words, 0.8)).toBe(2);
+  });
+
+  it("moves on at a word boundary rather than lingering", () => {
+    // Exactly on the end of "a" is the start of "bb" — which is also where a
+    // pause parks the fill, so the next word must render as untouched rather
+    // than the finished one keeping the gradient.
+    expect(fillingWordIndex(words, 2 / 9)).toBe(1);
+    expect(fillingWordIndex(words, 5 / 9)).toBe(2);
+  });
+
+  it("reports the line finished once the sweep is past the last word", () => {
+    // Past the end, so no word carries the clip and every one is flat colour.
+    expect(fillingWordIndex(words, 1)).toBe(words.length);
+    expect(fillingWordIndex(words, 1.5)).toBe(words.length);
+  });
+
+  it("says nothing is filling on an empty line", () => {
+    expect(fillingWordIndex([], 0.5)).toBe(0);
+    expect(fillingWordIndex([], 0)).toBe(-1);
+  });
+});
+
 describe("fillFraction (word-level)", () => {
   // Two words of equal length, each +1 trailing space => each owns half the line.
   // "hello" (0-1) ... gap ... "world" (2-3).
@@ -293,14 +329,28 @@ describe("centreOffset", () => {
   const tops = Array.from({ length: 10 }, (_, i) => i * 100);
   const total = 1000;
 
-  it("centres a mid-list row", () => {
-    // Row 5 starts at 500; centring a 100px row in 300px puts the top at 400.
-    expect(centreOffset(tops, total, 5, 300, 100)).toBe(-400);
+  it("parks a mid-list row on the anchor", () => {
+    // Row 5 spans 500-600, so its centre is 550. The anchor is 41% of a 300px
+    // viewport, or 123px down, so the list sits at 550 - 123 - 50 = 427.
+    expect(centreOffset(tops, total, 5, 300, 100)).toBeCloseTo(-427);
+  });
+
+  it("puts the spoken line above the middle, not on it", () => {
+    // The whole point of the anchor: more room below the line than above it.
+    const anchored = centreOffset(tops, total, 5, 300, 100);
+    const centred = centreOffset(tops, total, 5, 300, 100, 0.5);
+    expect(anchored).toBeLessThan(centred);
+  });
+
+  it("honours an explicit anchor", () => {
+    expect(centreOffset(tops, total, 5, 300, 100, 0.5)).toBe(-400);
   });
 
   it("never scrolls above the first line", () => {
     expect(centreOffset(tops, total, 0, 300, 100)).toBe(0);
-    expect(centreOffset(tops, total, 1, 300, 100)).toBe(0);
+    // Row 1 wants to sit 27px down rather than flush, which is still a list
+    // scrolled forwards — what must never happen is a positive offset.
+    expect(centreOffset(tops, total, 1, 300, 100)).toBeCloseTo(-27);
   });
 
   it("never scrolls past the last line", () => {

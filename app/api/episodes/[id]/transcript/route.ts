@@ -59,11 +59,21 @@ export async function GET(
     colabSttConfig() ? "local" : "hosted",
   );
 
+  /**
+   * The feed's own length, which the player compares the downloaded file
+   * against to work out how much advertising was stitched in — see
+   * captionOffsetFor. The browser can't derive it: `audio.duration` describes
+   * the file it was served, ads and all, which is exactly the thing being
+   * measured.
+   */
+  const publishedDuration = episode.durationSeconds;
+
   if (cached?.segments) {
     return NextResponse.json({
       segments: cached.segments as TranscriptSegment[],
       source: cached.source,
       estimatedSeconds,
+      publishedDuration,
     });
   }
 
@@ -104,5 +114,9 @@ export async function GET(
       set: { segments: fetched.segments },
     });
 
-  return NextResponse.json({ segments: fetched.segments, source: "publisher" });
+  return NextResponse.json({
+    segments: fetched.segments,
+    source: "publisher",
+    publishedDuration,
+  });
 }

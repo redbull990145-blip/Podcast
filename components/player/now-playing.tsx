@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Captions, ChevronDown } from "lucide-react";
 import { usePlayer } from "@/lib/player/store";
@@ -14,6 +14,8 @@ import {
 import { SPRING, TWEEN } from "@/lib/motion/config";
 import { press, pressPrimary } from "@/lib/motion/gestures";
 import { sheet } from "@/lib/motion/variants";
+import { chapterTicks } from "@/lib/player/chapters";
+import { ChapterStrip, useChapters } from "./chapter-strip";
 import { Scrubber } from "./scrubber";
 import { SkipButton } from "./skip-button";
 import { SpeedControl } from "./speed-control";
@@ -33,11 +35,23 @@ import { cn, formatDuration } from "@/lib/utils";
  * whole transcript, which measured 34 long tasks and 112ms of blocked main
  * thread per second with the captions panel open.
  */
-function PositionBar() {
+function PositionBar({ episodeId }: { episodeId: string }) {
   const currentTime = usePlayer((s) => s.currentTime);
   const duration = usePlayer((s) => s.duration);
   const seek = usePlayer((s) => s.seek);
   const remaining = duration > 0 ? duration - currentTime : 0;
+
+  /*
+   * Chapter marks on the seek bar. The query is shared with the strip above,
+   * so this is a cache read rather than a second request, and `useMemo` keeps
+   * the array identity stable across the four position updates a second — a
+   * fresh array each tick would re-render every mark for nothing.
+   */
+  const { data } = useChapters(episodeId);
+  const ticks = useMemo(
+    () => chapterTicks(data?.chapters ?? [], duration),
+    [data?.chapters, duration],
+  );
 
   return (
     <div className="mt-5">
@@ -47,6 +61,7 @@ function PositionBar() {
         onSeek={seek}
         tone="light"
         trackClassName="h-1.5"
+        ticks={ticks}
       />
 
       <div className="mt-2 flex justify-between text-[11px] tabular-nums text-white/55">
@@ -55,6 +70,38 @@ function PositionBar() {
       </div>
     </div>
   );
+}
+
+/**
+ * Ambient backdrop, built from `palette.mesh` — see artwork-palette.ts for how
+ * those colours are chosen and toned.
+ *
+ * A single vertical fade of one or two colours is what a colour picker looks
+ * like, not what a premium player looks like: Apple Music and Spotify both
+ * scatter several soft, blurred colour fields across the screen rather than
+ * one directional gradient, which is what actually reads as depth rather than
+ * as a swatch. Three overlapping radial fields do that here, positioned
+ * off-centre and asymmetrically so the eye reads it as light falling on a
+ * surface rather than as a shape.
+ *
+ * The vignette is listed first — CSS paints earlier background layers on top
+ * of later ones — so it sits above the colour fields and guarantees the
+ * control area at the bottom is always on near-black, whatever the artwork's
+ * colours are. Without it, a bright mesh colour landing near the bottom could
+ * make the transport controls hard to read.
+ */
+function meshBackground(mesh: string[]): { backgroundImage: string; backgroundColor: string } {
+  const [first, second, third] = mesh;
+
+  return {
+    backgroundImage: [
+      "linear-gradient(180deg, transparent 0%, transparent 38%, rgba(6, 6, 10, 0.62) 74%, #06060a 100%)",
+      `radial-gradient(115% 85% at 14% 6%, ${first} 0%, transparent 58%)`,
+      `radial-gradient(105% 80% at 90% 20%, ${second ?? first} 0%, transparent 60%)`,
+      `radial-gradient(125% 90% at 46% 100%, ${third ?? second ?? first} 0%, transparent 64%)`,
+    ].join(", "),
+    backgroundColor: "#06060a",
+  };
 }
 
 /**
@@ -127,16 +174,17 @@ export function NowPlaying() {
       animate="visible"
       exit="exit"
       className="fixed inset-0 z-[60] flex flex-col text-white"
-      style={{
-        // color-mix does the darkening, so the gradient stays tied to the real
-        // artwork colours instead of a hand-tuned approximation of them.
-        background: `linear-gradient(180deg,
-          color-mix(in oklab, ${palette.glow} 62%, #0d0d12) 0%,
-          color-mix(in oklab, ${palette.glow} 34%, #0a0a0f) 32%,
-          color-mix(in oklab, ${palette.base} 20%, #08080c) 68%,
-          #07070b 100%)`,
-      }}
+      style={meshBackground(palette.mesh)}
     >
+      {/*
+        Purely decorative texture sitting over the gradient and under the
+        header/content — see `.now-playing-grain` in globals.css. `-z-10`
+        matters: an absolutely positioned box otherwise paints above static
+        siblings regardless of DOM order, which would put the grain over the
+        controls instead of behind them.
+      */}
+      <div aria-hidden className="now-playing-grain pointer-events-none absolute inset-0 -z-10" />
+
       <header className="flex items-center justify-between px-4 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-6">
         <motion.button
           {...press}
@@ -251,8 +299,16 @@ export function NowPlaying() {
             )}
           </AnimatePresence>
 
+          {/*
+            Sits between the title and the seek bar, which is where it reads as
+            a caption on the episode rather than a control. It renders nothing
+            when the episode has no chapters, so the layout is unchanged for
+            shows that don't publish them.
+          */}
+          <ChapterStrip episodeId={episode.id} />
+
           {/* --- scrubber --- */}
-          <PositionBar />
+          <PositionBar episodeId={episode.id} />
 
           {/* --- transport --- */}
           <div className="mt-4 flex items-center justify-center gap-6 sm:gap-8">

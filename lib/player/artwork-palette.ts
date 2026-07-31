@@ -3,6 +3,12 @@
 /**
  * Pulls a colour palette out of podcast artwork, for the Now Playing backdrop.
  *
+ * Uses k-means clustering (k = 4) to find the true dominant colours rather than
+ * the coarse bucket quantisation from before.  K-means converges to cluster
+ * centres that represent what a human would describe as "the colours in this
+ * image", which is what Apple Music, Spotify and every other player with a
+ * dynamic backdrop uses under the hood.
+ *
  * The awkward part is CORS: reading pixels back out of a canvas that has drawn
  * a cross-origin image taints it and `getImageData` throws, and podcast artwork
  * lives on hosts we do not control and that mostly send no CORS headers.
@@ -10,7 +16,7 @@
  * The way around it is to load the image through Next's own image endpoint. That
  * is same-origin, so the canvas stays clean, and asking for a 64px version means
  * we download a couple of kilobytes instead of the 3000px original the publisher
- * uploaded. Nothing here needs a colour-extraction dependency.
+ * uploaded.  Nothing here needs a colour-extraction dependency.
  */
 
 export type ArtworkPalette = {
@@ -18,10 +24,17 @@ export type ArtworkPalette = {
   glow: string;
   /** The most common colour — drives the body of the gradient. */
   base: string;
+  /** 3–4 dominant colours from k-means, sorted by cluster size (most pixels first). */
+  colors: string[];
+  /**
+   * 2–3 colours reshaped for an ambient backdrop — see `matteTone`. Ordered by
+   * how much of the cover they came from, most first.
+   */
+  mesh: string[];
 };
 
-/** Sampling grid. 32x32 is plenty to find dominant colours and costs nothing. */
-const SAMPLE_SIZE = 32;
+/** Sampling grid.  48×48 gives k-means enough data without being expensive. */
+const SAMPLE_SIZE = 48;
 
 /** Palettes are stable per image, so never compute one twice in a session. */
 const cache = new Map<string, ArtworkPalette | null>();
@@ -31,15 +44,21 @@ const inFlight = new Map<string, Promise<ArtworkPalette | null>>();
 export const FALLBACK_PALETTE: ArtworkPalette = {
   glow: "rgb(88, 84, 122)",
   base: "rgb(42, 42, 58)",
+  colors: ["rgb(88, 84, 122)", "rgb(42, 42, 58)", "rgb(60, 58, 80)"],
+  mesh: ["rgb(76, 72, 104)", "rgb(48, 46, 68)"],
 };
+
+// ---------------------------------------------------------------------------
+// Image loading
+// ---------------------------------------------------------------------------
 
 /**
  * Routes a remote image through the optimizer so it arrives same-origin and
- * small. Local paths are already same-origin and need no help.
+ * small.  Local paths are already same-origin and need no help.
  *
  * `w` and `q` must both be values the image config permits — Next answers 400
  * for anything else — so this uses the default quality of 75 rather than a
- * lower one. That is the right call anyway: 75 is what every <Image> on the
+ * lower one.  That is the right call anyway: 75 is what every <Image> on the
  * page already requests, so this reuses a cache entry instead of forcing a
  * second transformation of the same artwork.
  */
@@ -58,48 +77,9 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-type Bucket = { r: number; g: number; b: number; count: number };
-
-/**
- * Groups pixels into coarse colour buckets.
- *
- * Quantizing to 4 bits per channel merges the near-identical shades that
- * gradients and JPEG artefacts produce, so a photo of one red jacket registers
- * as one red rather than four hundred slightly different reds.
- */
-function bucketPixels(data: Uint8ClampedArray): Map<number, Bucket> {
-  const buckets = new Map<number, Bucket>();
-
-  for (let i = 0; i < data.length; i += 4) {
-    // Skip anything meaningfully transparent — usually a logo's padding.
-    if (data[i + 3] < 125) continue;
-
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
-
-    const existing = buckets.get(key);
-    if (existing) {
-      existing.r += r;
-      existing.g += g;
-      existing.b += b;
-      existing.count += 1;
-    } else {
-      buckets.set(key, { r, g, b, count: 1 });
-    }
-  }
-
-  return buckets;
-}
-
-function average(bucket: Bucket) {
-  return {
-    r: Math.round(bucket.r / bucket.count),
-    g: Math.round(bucket.g / bucket.count),
-    b: Math.round(bucket.b / bucket.count),
-  };
-}
+// ---------------------------------------------------------------------------
+// Colour helpers
+// ---------------------------------------------------------------------------
 
 /** 0 (grey) to 1 (fully saturated), from the HSL definition. */
 function saturation(r: number, g: number, b: number): number {
@@ -111,7 +91,7 @@ function saturation(r: number, g: number, b: number): number {
   return lightness > 0.5 ? delta / (2 - max / 255 - min / 255) : delta / (max / 255 + min / 255);
 }
 
-/** Perceived brightness, 0-1. Weighted because green reads far brighter than blue. */
+/** Perceived brightness, 0-1.  Weighted because green reads far brighter than blue. */
 function luminance(r: number, g: number, b: number): number {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
 }
@@ -122,17 +102,177 @@ function rgb({ r, g, b }: { r: number; g: number; b: number }): string {
 
 type Colour = { r: number; g: number; b: number };
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function rgbToHsl({ r, g, b }: Colour): { h: number; s: number; l: number } {
+  const rn = r / 255,
+    gn = g / 255,
+    bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l };
+
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h: number;
+  if (max === rn) h = (gn - bn) / d + (gn < bn ? 6 : 0);
+  else if (max === gn) h = (bn - rn) / d + 2;
+  else h = (rn - gn) / d + 4;
+
+  return { h: h * 60, s, l };
+}
+
+function hslToRgb(h: number, s: number, l: number): Colour {
+  if (s === 0) {
+    const v = Math.round(l * 255);
+    return { r: v, g: v, b: v };
+  }
+
+  const hueToChannel = (p: number, q: number, t: number) => {
+    let tt = t;
+    if (tt < 0) tt += 1;
+    if (tt > 1) tt -= 1;
+    if (tt < 1 / 6) return p + (q - p) * 6 * tt;
+    if (tt < 1 / 2) return q;
+    if (tt < 2 / 3) return p + (q - p) * (2 / 3 - tt) * 6;
+    return p;
+  };
+
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const hk = h / 360;
+
+  return {
+    r: Math.round(hueToChannel(p, q, hk + 1 / 3) * 255),
+    g: Math.round(hueToChannel(p, q, hk) * 255),
+    b: Math.round(hueToChannel(p, q, hk - 1 / 3) * 255),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// K-means clustering
+// ---------------------------------------------------------------------------
+
+/**
+ * K-means clustering for dominant colour extraction.
+ *
+ * Deterministic: initial centroids are picked by the k-means++ max-distance
+ * strategy, starting from the first non-transparent pixel.  This avoids the
+ * random-seed instability that would make the backdrop flicker between loads.
+ */
+function kMeans(
+  pixels: Array<[number, number, number]>,
+  k: number,
+  maxIter = 12,
+): Array<{ r: number; g: number; b: number; count: number }> {
+  const n = pixels.length;
+  if (n === 0) return [];
+  if (n <= k) return pixels.map(([r, g, b]) => ({ r, g, b, count: 1 }));
+
+  // --- deterministic k-means++ initialisation ---
+  const centroids: Array<[number, number, number]> = [
+    [pixels[0][0], pixels[0][1], pixels[0][2]],
+  ];
+
+  // Each subsequent centroid is the pixel farthest from all existing centroids.
+  for (let c = 1; c < k; c++) {
+    let maxDist = -1;
+    let farthest = 0;
+    for (let p = 0; p < n; p++) {
+      let minDist = Infinity;
+      for (let j = 0; j < centroids.length; j++) {
+        const dr = pixels[p][0] - centroids[j][0];
+        const dg = pixels[p][1] - centroids[j][1];
+        const db = pixels[p][2] - centroids[j][2];
+        const d = dr * dr + dg * dg + db * db;
+        if (d < minDist) minDist = d;
+      }
+      if (minDist > maxDist) {
+        maxDist = minDist;
+        farthest = p;
+      }
+    }
+    centroids.push([pixels[farthest][0], pixels[farthest][1], pixels[farthest][2]]);
+  }
+
+  // --- iterate: assign → update ---
+  const assignments = new Int32Array(n);
+
+  for (let iter = 0; iter < maxIter; iter++) {
+    let changed = false;
+
+    // Assign each pixel to its nearest centroid.
+    for (let p = 0; p < n; p++) {
+      let minDist = Infinity;
+      let closest = 0;
+      for (let c = 0; c < k; c++) {
+        const dr = pixels[p][0] - centroids[c][0];
+        const dg = pixels[p][1] - centroids[c][1];
+        const db = pixels[p][2] - centroids[c][2];
+        const d = dr * dr + dg * dg + db * db;
+        if (d < minDist) {
+          minDist = d;
+          closest = c;
+        }
+      }
+      if (assignments[p] !== closest) {
+        assignments[p] = closest;
+        changed = true;
+      }
+    }
+
+    if (!changed) break;
+
+    // Recompute centroids as the mean of their members.
+    for (let c = 0; c < k; c++) {
+      let sumR = 0,
+        sumG = 0,
+        sumB = 0,
+        count = 0;
+      for (let p = 0; p < n; p++) {
+        if (assignments[p] === c) {
+          sumR += pixels[p][0];
+          sumG += pixels[p][1];
+          sumB += pixels[p][2];
+          count++;
+        }
+      }
+      if (count > 0) {
+        centroids[c] = [sumR / count, sumG / count, sumB / count];
+      }
+    }
+  }
+
+  // Count final cluster sizes.
+  const counts = new Array(k).fill(0) as number[];
+  for (let p = 0; p < n; p++) counts[assignments[p]]++;
+
+  return centroids.map((c, i) => ({
+    r: Math.round(c[0]),
+    g: Math.round(c[1]),
+    b: Math.round(c[2]),
+    count: counts[i],
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Palette selection
+// ---------------------------------------------------------------------------
+
 /**
  * Below these, a colour is too washed out or too close to black/white to carry
- * a gradient. Weighting saturation instead of excluding outright is not enough:
+ * a gradient.  Weighting saturation instead of excluding outright is not enough:
  * a dark cover has so many near-black pixels that sheer count wins anyway, and
  * the result is a black rectangle.
  */
-const MIN_GLOW_SATURATION = 0.18;
-const MIN_GLOW_LUMINANCE = 0.12;
-const MAX_GLOW_LUMINANCE = 0.9;
+const MIN_GLOW_SATURATION = 0.15;
+const MIN_GLOW_LUMINANCE = 0.10;
+const MAX_GLOW_LUMINANCE = 0.92;
 
-/** Where a lifted fallback colour lands. Dark enough for white text to sit on. */
+/** Where a lifted fallback colour lands.  Dark enough for white text to sit on. */
 const LIFT_TARGET_LUMINANCE = 0.34;
 
 /**
@@ -161,23 +301,111 @@ function lift(colour: Colour): Colour {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Mesh backdrop
+// ---------------------------------------------------------------------------
+
+/**
+ * Bounds a raw cluster colour is reshaped into for the ambient backdrop.
+ *
+ * A cluster centroid is whatever the cover happens to contain, and covers
+ * contain two problem cases: a fully-saturated primary from a logo or a text
+ * card, and dishwater grey from flat photography. Rendered as-is, the first
+ * reads as a warning light behind the controls and the second reads as fog
+ * rather than colour. Clamping saturation into a band gives both the same
+ * jewel-tone richness; clamping lightness the same way keeps every colour dark
+ * enough to hold white text and light enough to still register as a colour.
+ * The result is deliberately narrower than what the human eye can tell apart —
+ * that's the "matte" instead of "glossy" difference: every cover lands
+ * somewhere in the same rich, muted register instead of however saturated the
+ * original photo or logo happened to be.
+ */
+const MESH_MIN_SATURATION = 0.32;
+const MESH_MAX_SATURATION = 0.58;
+const MESH_MIN_LIGHTNESS = 0.2;
+const MESH_MAX_LIGHTNESS = 0.42;
+
+function matteTone(colour: Colour): Colour {
+  const { h, s, l } = rgbToHsl(colour);
+  return hslToRgb(
+    h,
+    clamp(s, MESH_MIN_SATURATION, MESH_MAX_SATURATION),
+    clamp(l, MESH_MIN_LIGHTNESS, MESH_MAX_LIGHTNESS),
+  );
+}
+
+function colourDistance(a: Colour, b: Colour): number {
+  const dr = a.r - b.r,
+    dg = a.g - b.g,
+    db = a.b - b.b;
+  return Math.sqrt(dr * dr + dg * dg + db * db);
+}
+
+/**
+ * Below this RGB distance, two clusters would paint as the same colour in two
+ * different spots — which reads as a mistake, not a second colour.
+ */
+const MESH_MIN_DISTANCE = 36;
+
+/**
+ * Up to three colours for the ambient backdrop, ranked the way `glow` is —
+ * weighted toward whichever clusters are both vivid and cover a lot of the
+ * image — but keeping several instead of just the winner, and skipping any
+ * that would sit almost on top of one already chosen.
+ *
+ * A single-colour cover (a photo of a clear sky, a plain text card) can fail
+ * to produce two distinct clusters; a lifted echo of what little there is
+ * still gives the backdrop some depth, rather than one flat colour filling
+ * the whole screen.
+ */
+function pickMeshColours(
+  analysed: Array<{ r: number; g: number; b: number; count: number; sat: number; lum: number }>,
+): Colour[] {
+  const ranked = [...analysed].sort(
+    (a, b) => b.count * (0.3 + b.sat) - a.count * (0.3 + a.sat),
+  );
+
+  const chosen: Colour[] = [];
+  for (const c of ranked) {
+    if (chosen.length >= 3) break;
+    if (chosen.some((picked) => colourDistance(picked, c) < MESH_MIN_DISTANCE)) continue;
+    chosen.push(c);
+  }
+
+  while (chosen.length < 2 && analysed.length > 0) {
+    chosen.push(lift(analysed[chosen.length % analysed.length]));
+  }
+
+  return chosen;
+}
+
 /** Exported for tests — the pixel decoding above needs a real canvas. */
 export function paletteFromPixels(data: Uint8ClampedArray): ArtworkPalette | null {
-  const buckets = [...bucketPixels(data).values()];
-  if (buckets.length === 0) return null;
+  // Collect pixels, skipping transparent ones.
+  const pixels: Array<[number, number, number]> = [];
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 125) continue;
+    pixels.push([data[i], data[i + 1], data[i + 2]]);
+  }
+  if (pixels.length === 0) return null;
 
-  const colours = buckets.map((bucket) => {
-    const { r, g, b } = average(bucket);
-    return { r, g, b, count: bucket.count, sat: saturation(r, g, b), lum: luminance(r, g, b) };
-  });
+  const clusters = kMeans(pixels, 4);
+  if (clusters.length === 0) return null;
 
-  // The body colour is simply whatever covers the most of the artwork.
-  const base = colours.reduce((best, c) => (c.count > best.count ? c : best));
+  // Sort by pixel count so the most dominant colour is first.
+  clusters.sort((a, b) => b.count - a.count);
 
-  // The accent is the colour someone would name if asked what the cover looks
-  // like. Candidates are filtered to ones that can actually carry a gradient
-  // first, then ranked by how much of the cover they occupy.
-  const candidates = colours.filter(
+  const analysed = clusters.map((c) => ({
+    ...c,
+    sat: saturation(c.r, c.g, c.b),
+    lum: luminance(c.r, c.g, c.b),
+  }));
+
+  // Base: the most dominant colour.
+  const base = analysed[0];
+
+  // Glow: the most vivid colour that can carry a gradient.
+  const candidates = analysed.filter(
     (c) =>
       c.sat >= MIN_GLOW_SATURATION &&
       c.lum > MIN_GLOW_LUMINANCE &&
@@ -189,11 +417,19 @@ export function paletteFromPixels(data: Uint8ClampedArray): ArtworkPalette | nul
       ? candidates.reduce((best, c) =>
           c.count * (0.3 + c.sat) > best.count * (0.3 + best.sat) ? c : best,
         )
-      : // Nothing vivid anywhere — a greyscale or very dark cover.
-        lift(base);
+      : lift(base);
 
-  return { glow: rgb(glow), base: rgb(lift(base)) };
+  // All cluster centres, ordered by count.
+  const colors = analysed.map((c) => rgb(c));
+
+  const mesh = pickMeshColours(analysed).map((c) => rgb(matteTone(c)));
+
+  return { glow: rgb(glow), base: rgb(lift(base)), colors, mesh };
 }
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 /**
  * Reads the dominant colours out of an artwork URL.

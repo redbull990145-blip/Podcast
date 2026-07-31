@@ -10,7 +10,7 @@ import {
 
 describe("captionOffsetFor", () => {
   it("shifts a publisher transcript by the inserted advertising", () => {
-    expect(captionOffsetFor("publisher", 3851, 3838)).toBe(13);
+    expect(captionOffsetFor("publisher", 3883, 3838)).toBe(45);
   });
 
   it("never shifts an AI transcript, whatever the gap", () => {
@@ -36,9 +36,8 @@ describe("captionOffsetFor", () => {
 });
 
 describe("inferCaptionOffset", () => {
-  it("reads the gap as inserted advertising", () => {
-    // The real case: a 3838s transcript against a 3851s served file.
-    expect(inferCaptionOffset(3851, 3838)).toBe(13);
+  it("reads a gap the size of an ad break as inserted advertising", () => {
+    expect(inferCaptionOffset(3883, 3838)).toBe(45);
   });
 
   it("ignores a gap small enough to be rounding", () => {
@@ -46,8 +45,17 @@ describe("inferCaptionOffset", () => {
     expect(inferCaptionOffset(3841, 3838)).toBe(0);
   });
 
+  it("leaves an episode's own outro alone", () => {
+    // Measured from Elevation with Steven Furtick: the served file runs 8.73s
+    // past the length the feed declares, and decoding it shows every one of
+    // those seconds is silence and a sting *after* the last word. Reading them
+    // as pre-roll shifted the whole transcript nine seconds late.
+    expect(inferCaptionOffset(3523.21, 3514)).toBe(0);
+    expect(inferCaptionOffset(3108.57, 3100)).toBe(0);
+  });
+
   it("takes a gap just past the noise floor", () => {
-    expect(inferCaptionOffset(3842, 3838)).toBe(4);
+    expect(inferCaptionOffset(3869, 3838)).toBe(31);
   });
 
   it("refuses when the transcript is longer than the audio", () => {
@@ -73,6 +81,29 @@ describe("inferCaptionOffset", () => {
   it("is 0 for an AI transcript, which was made from the served audio", () => {
     // Same file in and out, so the span already matches bar a rounding second.
     expect(inferCaptionOffset(3851, 3850.4)).toBe(0);
+  });
+});
+
+describe("captionOffsetFor, measuring against the feed's own duration", () => {
+  it("prefers the feed's length to the transcript's last word", () => {
+    // The transcript stops at the last word and the feed counts the outro too,
+    // so the two disagree by however long the ending runs. Only the feed's
+    // number isolates what the host actually inserted.
+    const ads = captionOffsetFor("publisher", 3900, 3500, 3838);
+    expect(ads).toBe(62);
+  });
+
+  it("falls back to the transcript when a feed omits its duration", () => {
+    expect(captionOffsetFor("publisher", 3900, 3838, null)).toBe(62);
+    expect(captionOffsetFor("publisher", 3900, 3838, undefined)).toBe(62);
+    // A zero is a missing value, not a zero-length episode.
+    expect(captionOffsetFor("publisher", 3900, 3838, 0)).toBe(62);
+  });
+
+  it("leaves the Elevation episodes unshifted", () => {
+    // The bug this was written for: nine seconds of lag on every caption.
+    expect(captionOffsetFor("publisher", 3523.21, 3514.48, 3514)).toBe(0);
+    expect(captionOffsetFor("publisher", 3108.57, 3099.84, 3100)).toBe(0);
   });
 });
 

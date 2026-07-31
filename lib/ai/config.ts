@@ -13,7 +13,12 @@
 
 export type AiTier = "default" | "byok";
 
-export type LlmProvider = "openrouter" | "deepseek" | "openai" | "anthropic";
+export type LlmProvider =
+  | "gemini"
+  | "openrouter"
+  | "deepseek"
+  | "openai"
+  | "anthropic";
 export type SttProvider = "groq" | "openai" | "colab";
 
 export type LlmConfig = {
@@ -64,30 +69,89 @@ export type SttConfig = {
 };
 
 /**
- * Best-guess API slugs for OpenRouter's currently free-variant models, ordered
- * by general-purpose quality for summarization/Q&A. OpenRouter's free catalogue
- * rotates and the display name shown in their UI is not always the exact API
- * id — if a call 404s on "model not found", open the model's page at
- * openrouter.ai/models, copy the id shown there (format org/name:free), and
- * override this list via AI_OPENROUTER_MODELS (comma-separated) in .env.local.
+ * OpenRouter's free-variant models, ordered by how well they suit this app's
+ * work: long transcripts in, short structured answers out.
+ *
+ * Every id here is copied from GET https://openrouter.ai/api/v1/models rather
+ * than written from memory. That endpoint is public and needs no key, and it
+ * is the only way to be sure — the earlier version of this list was guessed
+ * from display names and five of its six entries were rejected outright
+ * ("gemma-4-31b" is really "gemma-4-31b-it", "nemotron-3-super" is really
+ * "nemotron-3-super-120b-a12b"). Because a bad id fails the same way an
+ * exhausted rate limit does, the fallback chain hid it: every request quietly
+ * walked the whole list to reach the one model that existed.
+ *
+ * Non-reasoning instruct models come first deliberately. The reasoning models
+ * below them think before answering and bill that thinking to the same token
+ * budget as the answer, which is what made chapter generation fail — see the
+ * maxTokens note in generateChapters.
+ *
+ * The free catalogue rotates. Re-run the endpoint above when calls start
+ * failing, or override the whole list with AI_OPENROUTER_MODELS in .env.local.
  */
 const DEFAULT_OPENROUTER_FREE_MODELS = [
+  // Answers with bare JSON and no preamble; the only candidate that spent zero
+  // tokens on reasoning when probed.
+  "google/gemma-4-26b-a4b-it:free",
+  "google/gemma-4-31b-it:free",
+  // Reasoning models from here down. They work, but only with token headroom.
   "openai/gpt-oss-20b:free",
-  "google/gemma-4-31b:free",
-  "google/gemma-4-26b-a4b:free",
-  "nvidia/nemotron-3-super:free",
-  "nvidia/nemotron-3-ultra:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
   "nvidia/nemotron-3-nano-30b-a3b:free",
 ];
 
-function openrouterModelChain(): string[] {
-  const override = process.env.AI_OPENROUTER_MODELS?.split(",")
+/** Reads a comma-separated model override, or null when it isn't set. */
+function envModelChain(name: string): string[] | null {
+  const override = process.env[name]
+    ?.split(",")
     .map((m) => m.trim())
     .filter(Boolean);
-  return override && override.length > 0 ? override : DEFAULT_OPENROUTER_FREE_MODELS;
+  return override && override.length > 0 ? override : null;
+}
+
+function openrouterModelChain(): string[] {
+  return envModelChain("AI_OPENROUTER_MODELS") ?? DEFAULT_OPENROUTER_FREE_MODELS;
+}
+
+/**
+ * Google's Gemini models, via the OpenAI-compatible surface of AI Studio.
+ *
+ * Google publishes both a native API and this shim, and the shim is the reason
+ * Gemini needs no new client code: it speaks the same chat-completions wire
+ * format and the same bearer auth as everything else here, so it drops into
+ * the existing fetch untouched.
+ *
+ * Flash and flash-lite only — those are the tiers with a free allowance. Pro
+ * models are deliberately absent rather than merely unlisted: they would work,
+ * and they would bill.
+ *
+ * Every id below was confirmed to answer 200 on this endpoint. That is not
+ * ceremony — "gemini-2.5-flash", the obvious guess and this list's first draft,
+ * 404s here, as does "gemini-2.5-flash-lite". Google's OpenAI shim does not
+ * expose the same model names as the native API, so the only reliable source
+ * is a live GET against the /models path of this same baseUrl.
+ *
+ * The two `-latest` aliases sit behind the pinned ids on purpose. A pinned id
+ * gives predictable behaviour until the day it is retired; the alias is the
+ * insurance that the chain still resolves to something on that day, which is
+ * exactly the failure this file has now been bitten by twice.
+ */
+const DEFAULT_GEMINI_MODELS = [
+  "gemini-3.6-flash",
+  "gemini-flash-latest",
+  "gemini-3.5-flash-lite",
+  "gemini-flash-lite-latest",
+];
+
+function geminiModelChain(): string[] {
+  return envModelChain("AI_GEMINI_MODELS") ?? DEFAULT_GEMINI_MODELS;
 }
 
 const LLM_ENDPOINTS: Record<LlmProvider, { baseUrl: string; defaultModel: string }> = {
+  gemini: {
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    defaultModel: DEFAULT_GEMINI_MODELS[0],
+  },
   // Free-tier models during development. See openrouterModelChain() for the
   // full fallback list actually used — this single default is only the
   // provider-level fallback for byokLlmConfig, where there is no quota
@@ -128,35 +192,73 @@ const STT_ENDPOINTS: Record<HostedSttProvider, { baseUrl: string; defaultModel: 
   },
 };
 
-/** Which provider the operator-funded tier uses. Set by AI_DEFAULT_PROVIDER. */
-function defaultLlmProvider(): LlmProvider {
+/** Which env var funds each provider's operator-funded tier. */
+const LLM_KEY_ENV: Record<LlmProvider, string> = {
+  gemini: "GEMINI_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
+  deepseek: "DEEPSEEK_API_KEY",
+  openai: "OPENAI_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
+};
+
+/**
+ * Preference order when AI_DEFAULT_PROVIDER doesn't name one.
+ *
+ * Gemini first: its free allowance is the most generous of these, its context
+ * window swallows a three-hour transcript whole, and it answers without the
+ * reasoning-token overhead that makes the OpenRouter free chain unreliable for
+ * structured output.
+ */
+const LLM_PROVIDER_PREFERENCE: LlmProvider[] = [
+  "gemini",
+  "openrouter",
+  "deepseek",
+  "openai",
+];
+
+function configuredLlmProvider(): LlmProvider | null {
   const configured = process.env.AI_DEFAULT_PROVIDER?.toLowerCase();
-  return configured === "deepseek" ? "deepseek" : "openrouter";
+  return configured && configured in LLM_KEY_ENV
+    ? (configured as LlmProvider)
+    : null;
 }
 
-/** Resolves the LLM config for the operator-funded tier, or null if unconfigured. */
+function modelChainFor(provider: LlmProvider): string[] {
+  if (provider === "gemini") return geminiModelChain();
+  if (provider === "openrouter") return openrouterModelChain();
+  return [process.env.AI_DEFAULT_MODEL || LLM_ENDPOINTS[provider].defaultModel];
+}
+
+/**
+ * Resolves the LLM config for the operator-funded tier, or null if unconfigured.
+ *
+ * AI_DEFAULT_PROVIDER still wins when set, but naming a provider whose key is
+ * missing no longer disables AI outright — the preference order below is tried
+ * instead. Before this, adding a key for anything other than the one hard-coded
+ * name left the feature reporting itself as unconfigured, with the key sitting
+ * right there in the environment.
+ */
 export function defaultLlmConfig(): LlmConfig | null {
-  const provider = defaultLlmProvider();
-  const apiKey =
-    provider === "deepseek"
-      ? process.env.DEEPSEEK_API_KEY
-      : process.env.OPENROUTER_API_KEY;
+  const preferred = configuredLlmProvider();
+  const order = preferred
+    ? [preferred, ...LLM_PROVIDER_PREFERENCE.filter((p) => p !== preferred)]
+    : LLM_PROVIDER_PREFERENCE;
 
-  if (!apiKey) return null;
+  for (const provider of order) {
+    const apiKey = process.env[LLM_KEY_ENV[provider]];
+    if (!apiKey) continue;
 
-  const endpoint = LLM_ENDPOINTS[provider];
-  const models =
-    provider === "openrouter"
-      ? openrouterModelChain()
-      : [process.env.AI_DEFAULT_MODEL || endpoint.defaultModel];
+    const models = modelChainFor(provider);
+    return {
+      provider,
+      baseUrl: LLM_ENDPOINTS[provider].baseUrl,
+      model: models[0],
+      models,
+      apiKey,
+    };
+  }
 
-  return {
-    provider,
-    baseUrl: endpoint.baseUrl,
-    model: models[0],
-    models,
-    apiKey,
-  };
+  return null;
 }
 
 /** Resolves the speech-to-text config for the operator-funded tier. */

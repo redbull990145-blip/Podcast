@@ -21,6 +21,12 @@ const VALIDATION_TIMEOUT_MS = 8_000;
  * to validate against.
  */
 const PROBES: Partial<Record<Provider, { url: string; headers: (key: string) => HeadersInit }>> = {
+  gemini: {
+    // AI Studio's OpenAI-compatible surface, so one bearer-token probe covers
+    // it like the rest rather than needing Google's own ?key= convention.
+    url: "https://generativelanguage.googleapis.com/v1beta/openai/models",
+    headers: (key) => ({ authorization: `Bearer ${key}` }),
+  },
   openrouter: {
     url: "https://openrouter.ai/api/v1/key",
     headers: (key) => ({ authorization: `Bearer ${key}` }),

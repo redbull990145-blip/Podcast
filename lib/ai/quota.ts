@@ -81,6 +81,7 @@ export async function resolveTier(
   kind: QuotaKind,
 ): Promise<TierDecision> {
   const userLlm = await getUserKey(userId, [
+    "gemini",
     "openrouter",
     "deepseek",
     "openai",

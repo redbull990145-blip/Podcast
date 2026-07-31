@@ -27,6 +27,7 @@ import {
   centreOffset,
   clampOffset,
   fillFraction,
+  fillingWordIndex,
   isRowVisible,
   lineEmphasis,
 } from "@/lib/player/caption-motion";
@@ -54,6 +55,12 @@ type TranscriptResponse = {
    * the browser can see.
    */
   estimatedSeconds?: number;
+  /**
+   * The episode's length as the feed declares it, which is the clean master —
+   * the downloaded file is that plus whatever the host stitched in. Only the
+   * server knows it; see captionOffsetFor for what it's for.
+   */
+  publishedDuration?: number | null;
 };
 
 /** Momentum for a wheel or trackpad flick — stiffer and more damped than the follow spring. */
@@ -186,6 +193,7 @@ export function CaptionsPanel({ episodeId }: { episodeId: string }) {
         segments={segments}
         onSeek={seek}
         source={data?.source ?? null}
+        publishedDuration={data?.publishedDuration ?? null}
         onRegenerate={regenerate}
       />
     </div>
@@ -197,12 +205,14 @@ function VirtualTranscript({
   segments: provided,
   onSeek,
   source,
+  publishedDuration,
   onRegenerate,
 }: {
   episodeId: string;
   segments: TranscriptSegment[];
   onSeek: (seconds: number) => void;
   source: string | null;
+  publishedDuration: number | null;
   onRegenerate: () => void;
 }) {
   const reduceMotion = useReducedMotion() ?? false;
@@ -227,12 +237,21 @@ function VirtualTranscript({
    * captionOffsetFor.
    */
   const duration = usePlayer((s) => s.duration);
-  const { nudge, adjust, reset } = useCaptionOffset(episodeId);
+  /*
+   * Only the loaded episode's own show, never whichever show happens to be
+   * playing — inheriting a correction from an unrelated podcast would be worse
+   * than having none.
+   */
+  const podcastId = usePlayer((s) =>
+    s.episode?.id === episodeId ? s.episode.podcastId : null,
+  );
+  const { nudge, adjust, reset } = useCaptionOffset(episodeId, podcastId);
   // Deliberately the settled duration, never the live one — see the hook.
   const autoOffset = captionOffsetFor(
     source,
     useSettledDuration(duration),
     transcriptEndSeconds(segments),
+    publishedDuration,
   );
   const offset = autoOffset + nudge;
 
@@ -515,15 +534,22 @@ function VirtualTranscript({
               <button
                 data-start={segment.start}
                 data-caption-active={isActive ? "" : undefined}
+                aria-label={`Jump to ${formatDuration(segment.start)}`}
                 className={cn(
-                  "flex w-full gap-3 rounded-lg px-2 py-1.5 text-left",
-                  "transition-colors duration-300 hover:bg-white/10",
-                  isActive && "bg-white/[0.08]",
+                  "flex w-full rounded-xl px-2 py-2.5 text-left",
+                  "transition-colors duration-300 hover:bg-white/[0.06]",
                 )}
               >
-                <span className="shrink-0 pt-0.5 text-[11px] tabular-nums opacity-60">
-                  {formatDuration(segment.start)}
-                </span>
+                {/*
+                  No timestamp column and no tint behind the spoken line. Both
+                  were carrying emphasis that the type now carries by itself,
+                  and at this size both fought it — a 11px timestamp beside a
+                  44px line reads as a mistake, and a filled rounded box behind
+                  one line of six turns a transcript into a list of rows. The
+                  whole line is still the seek target; `aria-label` keeps the
+                  destination available to a screen reader now that it is no
+                  longer printed.
+                */}
                 {/*
                   The inner span is inline on purpose: an inline box broken
                   across lines paints its background as though it were never
@@ -538,7 +564,7 @@ function VirtualTranscript({
                   sweeping the whole sentence. Painting is still one custom
                   property write per frame, not one per word.
                 */}
-                <span className="caption-line__text text-base leading-relaxed">
+                <span className="caption-line__text">
                   {captionWords(segment).map((word, wordIndex) => (
                     <span
                       key={wordIndex}
@@ -568,21 +594,41 @@ function VirtualTranscript({
               );
             }
 
+            /*
+              A plain `li` with inline values and a CSS transition, not a
+              `motion.li` with a spring — this is the difference between the
+              scroll holding 60fps and dropping a tenth of its frames.
+              Overscan keeps about seventeen rows mounted, and a spring on each
+              one means Motion integrating three properties per row per frame
+              and writing three inline styles, all on the same main thread that
+              is already driving the list's own spring, the karaoke fill loop
+              and the active-line loop. Handing opacity and transform to CSS
+              moves them to the compositor and takes roughly fifty spring
+              integrations a frame off the thread entirely.
+
+              The values only change when the spoken line changes, and blur and
+              opacity have no momentum to carry, so a spring was never buying
+              anything here — which is what lib/motion/config.ts says to do:
+              springs for things that move, tweens for things that fade.
+
+              A row entering the window mounts with its final values already
+              set, and a transition needs a previous computed value to run
+              from, so it appears at rest rather than animating in. That is the
+              same reason the old code passed `initial={false}`.
+            */
             return (
-              <motion.li
+              <li
                 key={index}
                 className="caption-line absolute inset-x-0"
-                style={{ top: positioned.tops[index] }}
-                initial={false}
-                animate={{
+                style={{
+                  top: positioned.tops[index],
                   opacity: emphasis.opacity,
-                  scale: reduceMotion ? 1 : emphasis.scale,
-                  filter: reduceMotion ? "blur(0px)" : `blur(${emphasis.blur}px)`,
+                  transform: reduceMotion ? undefined : `scale(${emphasis.scale})`,
+                  filter: reduceMotion ? undefined : `blur(${emphasis.blur}px)`,
                 }}
-                transition={SPRING.caption}
               >
                 {body}
-              </motion.li>
+              </li>
             );
           })}
         </motion.ol>
@@ -621,6 +667,26 @@ function useKaraokeFill(
     const node = document.querySelector<HTMLElement>("[data-caption-active]");
     if (!node) return;
 
+    const words = captionWords(segment);
+    const spans = node.querySelectorAll<HTMLElement>(".caption-word");
+
+    /**
+     * Moves the gradient onto whichever word is mid-sweep — see
+     * fillingWordIndex for why only one word ever carries it.
+     *
+     * Runs when the sweep crosses into a new word, which is a few times a
+     * second, not once a frame. Everything on the per-frame path below is
+     * still a single custom-property write.
+     */
+    let filling = -2;
+    const markWords = (index: number) => {
+      for (let i = 0; i < spans.length; i += 1) {
+        const span = spans[i];
+        span.toggleAttribute("data-sung", i < index);
+        span.toggleAttribute("data-filling", i === index);
+      }
+    };
+
     const paint = () => {
       // The element is the finer clock, but only once it actually has media
       // loaded — an element with no source reports 0 forever, which would peg
@@ -631,10 +697,16 @@ function useKaraokeFill(
           ? audio.currentTime
           : usePlayer.getState().currentTime;
       const time = toTranscriptTime(playback, offset);
-      // A plain number, not a percentage: each word turns it into its own
-      // local fill in CSS, which needs to divide by the word's own width.
+      // A plain number, not a percentage: the word being swept turns it into
+      // its own local fill in CSS, which divides by that word's own width.
       const progress = reduceMotion ? 1 : fillFraction(segment, time);
       node.style.setProperty("--caption-fill", progress.toFixed(4));
+
+      const next = fillingWordIndex(words, progress);
+      if (next !== filling) {
+        markWords(next);
+        filling = next;
+      }
     };
 
     paint();
