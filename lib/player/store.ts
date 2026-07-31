@@ -84,6 +84,8 @@ type PlayerState = {
 type PlayerActions = {
   load: (episode: PlayableEpisode, startAt?: number) => void;
   play: () => void;
+  /** Re-fetches the current episode after a failed load, keeping the position. */
+  retry: () => void;
   pause: () => void;
   toggle: () => void;
   seek: (seconds: number) => void;
@@ -347,6 +349,27 @@ export const usePlayer = create<PlayerState & PlayerActions>((set, get) => ({
     const audio = getAudio();
     if (!audio || !get().episode) return;
     void audio.play().catch(() => set({ isPlaying: false, isBuffering: false }));
+  },
+
+  /**
+   * Fetches the current episode again after a failure, from where it stopped.
+   *
+   * Worth offering because the most common reasons a podcast fails to load are
+   * temporary and invisible to us — a CDN dropping a request, a DNS lookup
+   * failing for a minute, a flaky connection. `play()` alone will not do it: an
+   * element that has already errored holds onto that state, and only
+   * re-assigning `src` and calling `load()` re-issues the request. Clearing the
+   * attribute first is what makes `load()` below treat this as a fresh source
+   * rather than the episode it already has.
+   */
+  retry() {
+    const audio = getAudio();
+    const { episode, currentTime } = get();
+    if (!audio || !episode) return;
+
+    audio.removeAttribute("src");
+    set({ error: null });
+    get().load(episode, currentTime);
   },
 
   pause() {

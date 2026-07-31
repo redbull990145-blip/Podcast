@@ -6,7 +6,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { ChevronUp, X } from "lucide-react";
 import { usePlayer } from "@/lib/player/store";
 import { SPRING, TWEEN } from "@/lib/motion/config";
-import { press, pressPrimary } from "@/lib/motion/gestures";
+import { press, pressPrimary, pressSubtle } from "@/lib/motion/gestures";
 import { SpeedControl } from "./speed-control";
 import { VolumeControl } from "./volume-control";
 import { Scrubber } from "./scrubber";
@@ -62,6 +62,7 @@ export function PlayerBar() {
   const skipBackSeconds = usePlayer((s) => s.skipBackSeconds);
 
   const toggle = usePlayer((s) => s.toggle);
+  const retry = usePlayer((s) => s.retry);
   const skipForward = usePlayer((s) => s.skipForward);
   const skipBack = usePlayer((s) => s.skipBack);
   const stop = usePlayer((s) => s.stop);
@@ -118,16 +119,31 @@ export function PlayerBar() {
           */}
           <AnimatePresence initial={false}>
             {error && (
-              <motion.p
+              <motion.div
                 role="alert"
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={TWEEN.normal}
-                className="overflow-hidden bg-danger/10 px-4 py-2 text-center text-xs text-danger"
+                className="overflow-hidden bg-danger/10 px-4 py-2 text-xs text-danger"
               >
-                {error}
-              </motion.p>
+                <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center">
+                  <span>{error}</span>
+                  {/*
+                    Most load failures are temporary — a dropped CDN request, a
+                    momentary DNS failure — and the automatic retry has already
+                    been spent by the time this is on screen. Without this, the
+                    only way back is to find the episode and start it again.
+                  */}
+                  <motion.button
+                    {...pressSubtle}
+                    onClick={retry}
+                    className="shrink-0 rounded-full bg-danger/15 px-2.5 py-1 font-medium hover:bg-danger/25"
+                  >
+                    Try again
+                  </motion.button>
+                </div>
+              </motion.div>
             )}
           </AnimatePresence>
 

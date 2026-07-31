@@ -2,6 +2,12 @@
 
 import { useEffect, useRef } from "react";
 import { getAudio, usePlayer } from "@/lib/player/store";
+import {
+  describeMediaError,
+  MEDIA_ERR,
+  undecodableMessage,
+  unreachableMessage,
+} from "@/lib/player/playback-errors";
 
 /**
  * Bridges the shared <audio> element to the store, persists playback position,
@@ -96,7 +102,30 @@ export function PlayerProvider() {
         return;
       }
 
-      _sync({ isPlaying: false, isBuffering: false, error: describeError(audio.error) });
+      _sync({
+        isPlaying: false,
+        isBuffering: false,
+        error: describeMediaError(audio.error?.code),
+      });
+
+      // "Unsupported source" is the browser's answer both to a file it cannot
+      // decode and to one it never received, and those need opposite responses.
+      // A no-cors probe settles it: the request is opaque, but it only resolves
+      // if the host was actually reached.
+      if (audio.error?.code === MEDIA_ERR.SRC_NOT_SUPPORTED) {
+        const url = episode.enclosureUrl;
+        void fetch(url, { mode: "no-cors", cache: "no-store" }).then(
+          () => finishDiagnosis(episode.id, undecodableMessage()),
+          () => finishDiagnosis(episode.id, unreachableMessage(url)),
+        );
+      }
+    };
+
+    /** Replaces the placeholder message, unless the listener has moved on. */
+    const finishDiagnosis = (episodeId: string, message: string) => {
+      const state = usePlayer.getState();
+      if (state.episode?.id !== episodeId || !state.error) return;
+      _sync({ error: message });
     };
 
     const onEnded = () => {
@@ -260,27 +289,6 @@ export function PlayerProvider() {
   }, []);
 
   return null;
-}
-
-/**
- * Turns a MediaError into something a listener can act on.
- *
- * The distinction that matters is "try again" versus "this file is not going to
- * play here" — a generic message leaves people retrying a dead link forever.
- */
-function describeError(error: MediaError | null): string {
-  switch (error?.code) {
-    case MediaError.MEDIA_ERR_ABORTED:
-      return "Playback was interrupted. Press play to pick it back up.";
-    case MediaError.MEDIA_ERR_NETWORK:
-      return "The connection dropped while loading this episode. Check your network and try again.";
-    case MediaError.MEDIA_ERR_DECODE:
-      return "This episode's audio file appears to be corrupted. The publisher would need to re-upload it.";
-    case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
-      return "This browser can't play this episode's audio format, or the file has moved.";
-    default:
-      return "This episode wouldn't load. The publisher's server may be down, or the file may have moved.";
-  }
 }
 
 /**
