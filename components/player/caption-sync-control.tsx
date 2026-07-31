@@ -20,7 +20,24 @@ import { cn } from "@/lib/utils";
  * says nothing about the next.
  */
 
-const STORAGE_PREFIX = "cadence-caption-nudge:";
+/**
+ * Versioned, and deliberately bumped once already.
+ *
+ * A nudge is a correction *relative to* the automatic guess, so it only means
+ * anything alongside the guess it was made against. Captions used to be shifted
+ * by the gap between the audio's length and the transcript's even for AI
+ * transcripts, where that gap is an outro rather than an ad break — and
+ * listeners quite reasonably dialled in a nudge to cancel it. With the guess
+ * gone (see captionOffsetFor) those nudges are no longer corrections; they are
+ * the entire error, and a saved -16s now drags the captions sixteen seconds off
+ * a transcript that was finally correct.
+ *
+ * Nothing stored under the old key can be reinterpreted, because whether it was
+ * cancelling the guess or correcting a genuine mid-roll was never recorded. So
+ * they are retired wholesale. Anyone who had a real correction makes it again
+ * once; everyone else silently stops being wrong.
+ */
+const STORAGE_PREFIX = "cadence-caption-nudge:v2:";
 
 /** One press. Small enough to land on a sentence, large enough to feel. */
 const NUDGE_STEP = 1;

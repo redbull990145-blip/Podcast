@@ -7,7 +7,7 @@
  * that tracks the voice and text that drifts ahead of it.
  */
 
-import type { TranscriptSegment } from "@/lib/db/schema";
+import type { TranscriptSegment, TranscriptWord } from "@/lib/db/schema";
 
 /** How a caption line looks at a given distance from the one being spoken. */
 export type LineEmphasis = {
@@ -76,6 +76,83 @@ export type CaptionWord = {
 const wordCache = new WeakMap<object, CaptionWord[]>();
 
 /**
+ * A word reduced to the letters and digits in it, for comparison.
+ *
+ * The provider's token and the rendered token are the same word said once, but
+ * they rarely agree character for character: Whisper returns a leading space,
+ * attaches punctuation to one side or the other, and normalises case
+ * differently between the segment text and the word list. Devanagari adds its
+ * own danda, which comes back as a token of its own about half the time.
+ * Comparing on letters alone is what makes "Hai?" and " hai" the same word.
+ */
+function wordKey(text: string): string {
+  return text
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+/**
+ * Whether two keys are the same spoken word.
+ *
+ * Exact match, or one being a prefix of the other — which covers a provider
+ * that split a contraction or clipped a suffix. The three-character floor is
+ * there so short function words can't swallow longer ones: without it "a"
+ * matches "and" and the whole line shifts by one from that point on.
+ */
+function sameWord(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  return short.length >= 3 && long.startsWith(short);
+}
+
+/**
+ * How far ahead in the timing list to look for a rendered word.
+ *
+ * Bounded because the two lists are the same speech in the same order: a real
+ * match is a token or two away, and anything further is a coincidence that
+ * would drag the rest of the line out of alignment behind it.
+ */
+const ALIGN_LOOKAHEAD = 3;
+
+/**
+ * Pairs each rendered token with the provider timing for that word, or null.
+ *
+ * A single forward walk over both lists, so it can never pair a token with a
+ * timing that comes before one already used — the failure that put the
+ * highlight on a different word from the one being said. Tokens with no match
+ * are left null for the caller to interpolate; a timing with no token is simply
+ * skipped.
+ */
+function alignTimings(
+  tokens: string[],
+  timings: readonly TranscriptWord[],
+): (TranscriptWord | null)[] {
+  const anchors: (TranscriptWord | null)[] = new Array(tokens.length).fill(null);
+
+  const tokenKeys = tokens.map(wordKey);
+  const timingKeys = timings.map((w) => wordKey(w.text));
+
+  let next = 0;
+  for (let i = 0; i < tokens.length && next < timings.length; i += 1) {
+    const key = tokenKeys[i];
+    // Punctuation on its own is rendered but never spoken.
+    if (!key) continue;
+
+    const limit = Math.min(timings.length, next + 1 + ALIGN_LOOKAHEAD);
+    for (let j = next; j < limit; j += 1) {
+      if (timingKeys[j] && sameWord(tokenKeys[i], timingKeys[j])) {
+        anchors[i] = timings[j];
+        next = j + 1;
+        break;
+      }
+    }
+  }
+
+  return anchors;
+}
+
+/**
  * The words of a line, positioned in character space and timed in seconds.
  *
  * Tokenising `segment.text` rather than trusting `segment.words` to be the
@@ -85,11 +162,18 @@ const wordCache = new WeakMap<object, CaptionWord[]>();
  * the fill is painted onto the rendered text, the rendered text has to be what
  * defines the boxes — timings are then mapped onto it.
  *
- * When per-word timings line up one-to-one they are used as given. Otherwise
- * the line's own span is shared out in proportion to how long each word is,
- * which is a guess, but a per-word one: the highlight still steps word by word
- * rather than gliding across the whole sentence, which is the part that reads
- * as wrong.
+ * Mapping is by text, not by position. Requiring the two lists to be the same
+ * length was the earlier rule, and it failed in both directions: one extra
+ * punctuation token threw away every real timing on the line and left the whole
+ * sentence to a linear sweep, while a dropped word paired with an extra split
+ * kept the count intact and silently shifted every timing onto the wrong word.
+ * Aligning on the words themselves means a partial match still anchors the
+ * words it does recognise, and a bad match is a gap rather than an error.
+ *
+ * Whatever is left unanchored borrows the time between its neighbours, shared
+ * out by how long each word is. That is a guess, but a per-word one confined to
+ * the run it covers, so the highlight keeps stepping word by word instead of
+ * gliding across the sentence.
  */
 export function captionWords(
   segment: Pick<TranscriptSegment, "start" | "end" | "text" | "words">,
@@ -108,33 +192,74 @@ export function captionWords(
   const totalWidth = widths.reduce((sum, n) => sum + n, 0);
 
   const timings = segment.words;
-  const aligned = timings && timings.length === tokens.length ? timings : null;
+  const anchors =
+    timings && timings.length > 0
+      ? alignTimings(tokens, timings)
+      : new Array<TranscriptWord | null>(tokens.length).fill(null);
 
-  const span = Math.max(0, segment.end - segment.start);
+  const starts = new Array<number>(tokens.length);
+  const ends = new Array<number>(tokens.length);
+  const anchored = new Array<boolean>(tokens.length).fill(false);
+
+  // Anchors first, forced to run forwards. A provider timing that steps
+  // backwards is rare but real, and left alone it makes the fill jump back up
+  // the line mid-sentence.
+  let floor = segment.start;
+  for (let i = 0; i < tokens.length; i += 1) {
+    const anchor = anchors[i];
+    if (!anchor) continue;
+    const start = Math.max(floor, anchor.start);
+    starts[i] = start;
+    ends[i] = Math.max(start, anchor.end);
+    anchored[i] = true;
+    floor = start;
+  }
+
+  // Then every unanchored run, sharing the time between the anchors on either
+  // side of it. With no anchors at all this is one run across the whole line,
+  // which is exactly the proportional fallback a publisher transcript gets.
+  for (let i = 0; i < tokens.length; ) {
+    if (anchored[i]) {
+      i += 1;
+      continue;
+    }
+
+    let j = i;
+    while (j < tokens.length && !anchored[j]) j += 1;
+
+    const from = i > 0 ? ends[i - 1] : segment.start;
+    // A following anchor bounds the run; past the last one, the line's own end
+    // does. `Math.max` keeps the span from going negative when a segment's end
+    // arrives before its last word's timing.
+    const to = j < tokens.length ? starts[j] : segment.end;
+    const span = Math.max(0, to - from);
+
+    let runWidth = 0;
+    for (let k = i; k < j; k += 1) runWidth += widths[k];
+
+    let elapsed = 0;
+    for (let k = i; k < j; k += 1) {
+      starts[k] = from + (elapsed / runWidth) * span;
+      elapsed += widths[k];
+      ends[k] = from + (elapsed / runWidth) * span;
+    }
+
+    i = j;
+  }
 
   const words: CaptionWord[] = [];
   let charsSoFar = 0;
-  let elapsed = 0;
 
   for (let i = 0; i < tokens.length; i += 1) {
     const from = charsSoFar / totalWidth;
     charsSoFar += widths[i];
-    const to = charsSoFar / totalWidth;
-
-    let start: number;
-    let end: number;
-    if (aligned) {
-      start = aligned[i].start;
-      end = aligned[i].end;
-    } else {
-      // Proportional share of the line's duration.
-      const share = (widths[i] / totalWidth) * span;
-      start = segment.start + elapsed;
-      elapsed += share;
-      end = segment.start + elapsed;
-    }
-
-    words.push({ text: tokens[i], from, to, start, end });
+    words.push({
+      text: tokens[i],
+      from,
+      to: charsSoFar / totalWidth,
+      start: starts[i],
+      end: ends[i],
+    });
   }
 
   wordCache.set(segment as object, words);

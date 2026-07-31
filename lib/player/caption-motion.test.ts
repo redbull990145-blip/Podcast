@@ -87,9 +87,9 @@ describe("captionWords", () => {
     expect(words[2].end).toBeCloseTo(9);
   });
 
-  it("ignores word timings that don't match the rendered words", () => {
-    // Three words on screen but two timings: pairing them by index would put
-    // the highlight on the wrong word, so the proportional guess is safer.
+  it("keeps the timings it recognises and interpolates only the rest", () => {
+    // Three words on screen but two timings. The two that match are used as
+    // given; the one with nothing to match borrows the time left over.
     const words = captionWords({
       start: 0,
       end: 9,
@@ -99,7 +99,80 @@ describe("captionWords", () => {
         { start: 1, end: 2, text: "bb" },
       ],
     });
+    expect(words[0].start).toBeCloseTo(0);
+    expect(words[1].end).toBeCloseTo(2);
+    expect(words[2].start).toBeCloseTo(2);
     expect(words[2].end).toBeCloseTo(9);
+  });
+
+  it("matches on the word, not on punctuation or case", () => {
+    // Whisper returns a leading space and keeps the question mark attached;
+    // the rendered line has neither in the same place.
+    const words = captionWords({
+      start: 0,
+      end: 10,
+      text: "Kitni bribe hai?",
+      words: [
+        { start: 1, end: 2, text: " kitni" },
+        { start: 2, end: 3, text: " bribe" },
+        { start: 3, end: 4, text: " hai?" },
+      ],
+    });
+    expect(words.map((w) => [w.start, w.end])).toEqual([
+      [1, 2],
+      [2, 3],
+      [3, 4],
+    ]);
+  });
+
+  it("skips a timing token that isn't a rendered word", () => {
+    // A danda comes back as its own token often enough to matter; pairing by
+    // position would put every word after it one timing late.
+    const words = captionWords({
+      start: 0,
+      end: 10,
+      text: "आप प्लेट सेवा",
+      words: [
+        { start: 1, end: 2, text: "आप" },
+        { start: 2, end: 3, text: "प्लेट" },
+        { start: 3, end: 4, text: "।" },
+        { start: 4, end: 5, text: "सेवा" },
+      ],
+    });
+    expect(words.map((w) => w.start)).toEqual([1, 2, 4]);
+  });
+
+  it("never pairs a word with a timing already used by an earlier word", () => {
+    // "the" appears twice. Matching must walk forwards, so the second "the"
+    // takes the second timing rather than re-taking the first.
+    const words = captionWords({
+      start: 0,
+      end: 10,
+      text: "the cat the dog",
+      words: [
+        { start: 0, end: 1, text: "the" },
+        { start: 1, end: 2, text: "cat" },
+        { start: 5, end: 6, text: "the" },
+        { start: 6, end: 7, text: "dog" },
+      ],
+    });
+    expect(words.map((w) => w.start)).toEqual([0, 1, 5, 6]);
+  });
+
+  it("never lets the fill run backwards on a timing that steps back", () => {
+    const words = captionWords({
+      start: 0,
+      end: 10,
+      text: "one two three",
+      words: [
+        { start: 4, end: 5, text: "one" },
+        { start: 1, end: 2, text: "two" },
+        { start: 6, end: 7, text: "three" },
+      ],
+    });
+    for (let i = 1; i < words.length; i += 1) {
+      expect(words[i].start).toBeGreaterThanOrEqual(words[i - 1].start);
+    }
   });
 
   it("returns nothing for an empty or missing line", () => {

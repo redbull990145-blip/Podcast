@@ -1,5 +1,6 @@
 import { colabSttConfig, type SttConfig } from "./config";
 import type { TranscriptSegment, TranscriptWord } from "@/lib/db/schema";
+import { collapseLoops } from "@/lib/transcript/repetition";
 import { prepareChunk } from "./mp3";
 import {
   buildM4A,
@@ -193,6 +194,59 @@ export function chunkDuration(chunk: { segments: TranscriptSegment[]; words: Tra
   return Math.max(lastSegment, lastWord);
 }
 
+/** How long `word` and `segment` overlap on the timeline, in seconds. */
+function overlapSeconds(
+  word: { start: number; end: number },
+  segment: { start: number; end: number },
+): number {
+  return Math.min(word.end, segment.end) - Math.max(word.start, segment.start);
+}
+
+/**
+ * Gives every word to the line it belongs to.
+ *
+ * Both lists are already in time order, so this is one walk rather than a scan
+ * per line — which matters at the scale a three-hour episode reaches, where the
+ * old filter-per-segment was tens of millions of comparisons.
+ *
+ * A word is placed by how much of it falls inside a line, not by where it
+ * happens to begin. Whisper's segment boundaries and its word timings are
+ * produced by different passes and disagree by a few hundredths of a second at
+ * the seams, so a word starting a hair before its line's start used to be filed
+ * against the previous line — or, at the very first line, dropped entirely.
+ * Every drop cost that line its per-word timings, and the caption fill fell back
+ * to sweeping the whole sentence. Assigning by overlap means every word lands
+ * somewhere, and lands where it is actually said.
+ */
+function assignWords(
+  segments: { start: number; end: number }[],
+  words: TranscriptWord[],
+): TranscriptWord[][] {
+  const owned: TranscriptWord[][] = segments.map(() => []);
+  if (segments.length === 0) return owned;
+
+  let index = 0;
+  for (const word of words) {
+    // Skip past lines that are over before this word begins.
+    while (index + 1 < segments.length && segments[index].end <= word.start) {
+      index += 1;
+    }
+
+    // A word straddling a boundary goes to whichever side holds more of it.
+    let best = index;
+    if (
+      index + 1 < segments.length &&
+      overlapSeconds(word, segments[index + 1]) > overlapSeconds(word, segments[index])
+    ) {
+      best = index + 1;
+    }
+
+    owned[best].push(word);
+  }
+
+  return owned;
+}
+
 /**
  * Shifts every chunk's segments and words onto one timeline and merges them.
  *
@@ -203,10 +257,9 @@ export function chunkDuration(chunk: { segments: TranscriptSegment[]; words: Tra
  * on the file's bitrate or on the feed's reported duration, which is why a
  * stitched-in ad can no longer accumulate error across the episode.
  *
- * After offsetting, words are grouped into whichever segment their start falls
- * inside (so each line carries the per-word timings its fill needs), segments
- * are ordered, and the odd duplicate a frame of overlap at a cut point can
- * produce is dropped.
+ * After offsetting, words are grouped into the line they are spoken in (so each
+ * line carries the per-word timings its fill needs), segments are ordered, and
+ * the odd duplicate a frame of overlap at a cut point can produce is dropped.
  */
 export function mergeSegments(chunks: ChunkResult[]): TranscriptSegment[] {
   // Cumulative start time for each chunk, computed from measured durations.
@@ -219,8 +272,7 @@ export function mergeSegments(chunks: ChunkResult[]): TranscriptSegment[] {
 
   type Item = {
     segment: TranscriptSegment;
-    offset: number;
-    /** Words from the same chunk that fall inside this segment. */
+    /** Words from the same chunk that are spoken in this segment. */
     words: TranscriptWord[];
   };
 
@@ -237,39 +289,44 @@ export function mergeSegments(chunks: ChunkResult[]): TranscriptSegment[] {
       })
       .filter((w): w is TranscriptWord => w !== null);
 
-    for (const seg of chunk.segments) {
-      const text = seg.text.trim();
-      if (!text) continue;
+    const shiftedSegments = chunk.segments
+      .map((seg) => ({
+        start: seg.start + offset,
+        end: seg.end + offset,
+        text: seg.text.trim(),
+      }))
+      .filter((seg) => seg.text.length > 0)
+      // `assignWords` walks both lists once, which only works if they are in
+      // time order. Providers return them that way; sorting says so rather
+      // than trusting it.
+      .sort((a, b) => a.start - b.start);
 
-      const start = seg.start + offset;
-      const end = seg.end + offset;
+    shiftedWords.sort((a, b) => a.start - b.start);
 
-      // A word belongs to a segment when it begins inside that segment's span.
-      // The upper bound is strict on purpose: a word starting exactly on a
-      // segment boundary is the first word of the *next* line, so it is counted
-      // there rather than trailing the previous one — which keeps the highlight
-      // attached to the line being read.
-      const owned = shiftedWords.filter((w) => w.start >= start - 0.01 && w.start < end);
+    const owned = assignWords(shiftedSegments, shiftedWords);
 
-      items.push({
-        segment: { start, end, text },
-        offset,
-        words: owned,
-      });
-    }
+    shiftedSegments.forEach((segment, i) => {
+      items.push({ segment, words: owned[i] });
+    });
   });
 
   items.sort((a, b) => a.segment.start - b.segment.start);
 
   const merged: TranscriptSegment[] = [];
-  for (const { segment, words } of items) {
+  for (const { segment: raw, words } of items) {
+    // Cleaned before storage, not just before display: this text is also what
+    // show notes and chapters are generated from, and a page of one repeated
+    // word becomes the model's impression of what the episode was about.
+    const segment = collapseLoops(words.length > 0 ? { ...raw, words } : raw);
     const prev = merged[merged.length - 1];
     // A cut can make the same line appear at the tail of one chunk and the head
     // of the next; skip a near-identical repeat rather than show it twice.
     if (prev && prev.text === segment.text && Math.abs(prev.start - segment.start) < 1.5) {
       continue;
     }
-    merged.push(words.length > 0 ? { ...segment, words } : segment);
+    // `segment` already carries its words — reattaching the originals here
+    // would put back the copies the collapse just removed.
+    merged.push(segment);
   }
 
   return merged;
@@ -537,7 +594,29 @@ type LocalJobStatus = {
   text?: string;
   segments?: { start?: number; end?: number; text?: string }[];
   words?: { word?: string; start?: number; end?: number }[];
+  /** Length of the audio the server decoded, in seconds. */
+  duration?: number;
 };
+
+/**
+ * How much of the audio's length the timings must span to be believable.
+ *
+ * A transcript's last caption always stops short of the file's end — outros,
+ * music and trailing silence are not speech. A fifth of the episode is generous
+ * room for that. Falling well below it would mean the timings are not on the
+ * same clock as the audio, which is the one thing captions cannot survive:
+ * every line would be early by an amount that grows through the episode, so
+ * there is no offset that fixes it and no way for a listener to correct it.
+ *
+ * No provider here is known to do that — the current notebook measured 99.9%
+ * coverage on a three-hour episode. This is an assertion, not a fix: it costs
+ * one comparison, and it turns a whole class of silent timeline corruption into
+ * a refusal rather than a transcript cached for every user of the episode.
+ */
+const MIN_TIMELINE_COVERAGE = 0.8;
+
+const COMPRESSED_TIMELINE_ERROR =
+  "The local Whisper server returned timings that don't span the episode, so captions would drift further out of sync the longer it played. Check the notebook's output for the job — it prints how much of the audio the timings covered.";
 
 /**
  * Runs an episode through a local Whisper server by handing over its URL.
@@ -639,6 +718,17 @@ async function transcribeViaLocalServer(
     const text = (job.text ?? "").trim() || segments.map((s) => s.text).join(" ").trim();
     if (!text) return { ok: false, error: "The transcription came back empty." };
 
+    // Captions that don't share a clock with the audio are worse than none:
+    // they read as correct and are wrong by an amount that grows. Refuse them
+    // here rather than cache them for everyone.
+    if (!timelineCoversAudio(segments, job.duration)) {
+      console.error(
+        `Local Whisper returned a compressed timeline: captions end at ` +
+          `${transcriptEnd(segments).toFixed(0)}s for ${job.duration?.toFixed(0)}s of audio.`,
+      );
+      return { ok: false, error: COMPRESSED_TIMELINE_ERROR };
+    }
+
     // One "chunk" covering the whole episode: this reuses mergeSegments purely
     // to attach each word to the line it falls inside, which is what the
     // caption fill reads. There is nothing to offset — a single chunk starts
@@ -650,6 +740,27 @@ async function transcribeViaLocalServer(
       model: `${config.provider}/${config.model}`,
     };
   }
+}
+
+/** End of the last caption, or 0 when there are none. */
+function transcriptEnd(segments: TranscriptSegment[]): number {
+  return segments.reduce((max, s) => Math.max(max, s.end), 0);
+}
+
+/**
+ * Whether the timings plausibly run on the same clock as the audio.
+ *
+ * Permissive when it has nothing to compare against: a server that doesn't
+ * report a duration gets the benefit of the doubt rather than having every
+ * transcript refused.
+ */
+export function timelineCoversAudio(
+  segments: TranscriptSegment[],
+  audioDuration: number | undefined,
+): boolean {
+  if (!Number.isFinite(audioDuration) || (audioDuration ?? 0) <= 0) return true;
+  if (segments.length === 0) return true;
+  return transcriptEnd(segments) >= (audioDuration as number) * MIN_TIMELINE_COVERAGE;
 }
 
 /** Fetches JSON with a timeout. Throws on transport or status failure. */
@@ -744,7 +855,14 @@ async function transcribeWhole(
   return {
     ok: true,
     text: result.text,
-    segments: result.segments,
+    // Through `mergeSegments` as a single chunk, the same as the local path.
+    // It was returning the provider's segments raw, which meant an episode
+    // small enough to send in one request — the simplest case there is — was
+    // the one case that got no per-word timings at all, and so the one case
+    // where the caption fill swept whole lines instead of following the voice.
+    // There is nothing to offset with one chunk; this is for the word grouping
+    // and the loop cleanup.
+    segments: mergeSegments([{ segments: result.segments, words: result.words }]),
     model: `${config.provider}/${config.model}`,
   };
 }

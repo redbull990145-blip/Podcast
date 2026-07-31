@@ -1,11 +1,39 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_AUTO_OFFSET_SECONDS,
+  captionOffsetFor,
   inferCaptionOffset,
   toPlaybackTime,
   toTranscriptTime,
   transcriptEndSeconds,
 } from "./caption-sync";
+
+describe("captionOffsetFor", () => {
+  it("shifts a publisher transcript by the inserted advertising", () => {
+    expect(captionOffsetFor("publisher", 3851, 3838)).toBe(13);
+  });
+
+  it("never shifts an AI transcript, whatever the gap", () => {
+    // Whisper transcribed this exact file, so the timings are already right.
+    // The gap is the outro it correctly declined to transcribe.
+    expect(captionOffsetFor("colab/medium", 3851, 3838)).toBe(0);
+    expect(captionOffsetFor("groq/whisper-large-v3", 3600, 3400)).toBe(0);
+  });
+
+  it("does not shift when the source is unknown", () => {
+    expect(captionOffsetFor(null, 3851, 3838)).toBe(0);
+  });
+
+  it("is unmoved by a duration the browser guessed wrong mid-file", () => {
+    // Resuming into the middle of a VBR MP3 makes `duration` an extrapolation.
+    // For an AI transcript that must change nothing — which is the whole point.
+    const at = (guessedDuration: number) =>
+      captionOffsetFor("colab/medium", guessedDuration, 3514);
+    expect(at(3523)).toBe(0);
+    expect(at(3480)).toBe(0);
+    expect(at(0)).toBe(0);
+  });
+});
 
 describe("inferCaptionOffset", () => {
   it("reads the gap as inserted advertising", () => {

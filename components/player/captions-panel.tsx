@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AnimatePresence,
@@ -11,10 +18,10 @@ import {
   useMotionValueEvent,
   useReducedMotion,
 } from "motion/react";
-import { Sparkles } from "lucide-react";
+import { RotateCcw, Sparkles } from "lucide-react";
 import type { TranscriptSegment } from "@/lib/db/schema";
 import { getAudio, usePlayer } from "@/lib/player/store";
-import { activeSegmentIndex } from "@/lib/player/captions";
+import { activeSegmentIndex, captionLines } from "@/lib/player/captions";
 import {
   captionWords,
   centreOffset,
@@ -24,7 +31,7 @@ import {
   lineEmphasis,
 } from "@/lib/player/caption-motion";
 import {
-  inferCaptionOffset,
+  captionOffsetFor,
   toPlaybackTime,
   toTranscriptTime,
   transcriptEndSeconds,
@@ -33,6 +40,7 @@ import { CaptionSyncControl, useCaptionOffset } from "./caption-sync-control";
 import { measureRows, visibleRange, type RowMetrics } from "@/lib/player/virtual-list";
 import { SPRING, TWEEN } from "@/lib/motion/config";
 import { fade, popover } from "@/lib/motion/variants";
+import { press } from "@/lib/motion/gestures";
 import { TranscribeProgress } from "./transcribe-progress";
 import { cn, formatDuration } from "@/lib/utils";
 
@@ -73,6 +81,8 @@ const WHEEL_IDLE_MS = 200;
  */
 export function CaptionsPanel({ episodeId }: { episodeId: string }) {
   const seek = usePlayer((s) => s.seek);
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenerateError, setRegenerateError] = useState<string | null>(null);
 
   const { data, isPending, refetch } = useQuery<TranscriptResponse>({
     queryKey: ["transcript", episodeId],
@@ -85,6 +95,42 @@ export function CaptionsPanel({ episodeId }: { episodeId: string }) {
   });
 
   const segments = data?.segments ?? null;
+
+  /**
+   * Throws away the cached transcript and makes a new one.
+   *
+   * Offered only for AI transcripts, and only because they can come back
+   * genuinely wrong — timings on the wrong clock, or a model that locked into
+   * repeating itself — in a way no amount of nudging the offset fixes. A
+   * publisher transcript gets no such button: replacing a human-checked one,
+   * for every listener, on the strength of one person's ear is not a trade
+   * worth offering.
+   */
+  const regenerate = useCallback(async () => {
+    setRegenerating(true);
+    setRegenerateError(null);
+    try {
+      const res = await fetch("/api/ai/generate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ episodeId, kind: "transcript", force: true }),
+      });
+      const payload = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        setRegenerateError(payload.error ?? "Couldn't regenerate captions.");
+        return;
+      }
+      await refetch();
+    } catch {
+      setRegenerateError("Couldn't reach the server. Try again in a moment.");
+    } finally {
+      setRegenerating(false);
+    }
+  }, [episodeId, refetch]);
+
+  if (regenerating) {
+    return <TranscribeProgress estimatedSeconds={data?.estimatedSeconds ?? 60} />;
+  }
 
   if (isPending) {
     return (
@@ -119,27 +165,55 @@ export function CaptionsPanel({ episodeId }: { episodeId: string }) {
   }
 
   return (
-    <VirtualTranscript
-      episodeId={episodeId}
-      segments={segments}
-      onSeek={seek}
-      source={data?.source ?? null}
-    />
+    <div className="flex min-h-0 flex-1 flex-col">
+      <AnimatePresence>
+        {regenerateError && (
+          <motion.p
+            role="alert"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={TWEEN.normal}
+            className="mb-2 rounded-lg bg-red-500/15 px-2.5 py-1.5 text-xs text-red-200"
+          >
+            {regenerateError}
+          </motion.p>
+        )}
+      </AnimatePresence>
+
+      <VirtualTranscript
+        episodeId={episodeId}
+        segments={segments}
+        onSeek={seek}
+        source={data?.source ?? null}
+        onRegenerate={regenerate}
+      />
+    </div>
   );
 }
 
 function VirtualTranscript({
   episodeId,
-  segments,
+  segments: provided,
   onSeek,
   source,
+  onRegenerate,
 }: {
   episodeId: string;
   segments: TranscriptSegment[];
   onSeek: (seconds: number) => void;
   source: string | null;
+  onRegenerate: () => void;
 }) {
   const reduceMotion = useReducedMotion() ?? false;
+
+  /**
+   * What gets rendered is caption lines, not provider segments — see
+   * captionLines. Memoised on identity because the row height table, the
+   * windowing and the fill loop all key off this array, and a new one every
+   * render would re-measure the whole transcript.
+   */
+  const segments = useMemo(() => captionLines(provided), [provided]);
 
   /**
    * How far the captions have to be shifted to match this download.
@@ -148,11 +222,15 @@ function VirtualTranscript({
    * includes any advertising stitched in on the way; the transcript's own end
    * is the length of the clean master. The difference is the shift, and the
    * listener can correct it (see caption-sync-control.tsx).
+   *
+   * Which transcripts can need it, and why an AI one never does, is in
+   * captionOffsetFor.
    */
   const duration = usePlayer((s) => s.duration);
   const { nudge, adjust, reset } = useCaptionOffset(episodeId);
   // Deliberately the settled duration, never the live one — see the hook.
-  const autoOffset = inferCaptionOffset(
+  const autoOffset = captionOffsetFor(
+    source,
     useSettledDuration(duration),
     transcriptEndSeconds(segments),
   );
@@ -354,8 +432,21 @@ function VirtualTranscript({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between gap-2 px-1 pb-2 text-[11px] uppercase tracking-wide">
-        <span className="truncate opacity-50">
-          {source === "publisher" ? "Publisher transcript" : "AI transcript"}
+        <span className="flex min-w-0 items-center gap-1">
+          <span className="truncate opacity-50">
+            {source === "publisher" ? "Publisher transcript" : "AI transcript"}
+          </span>
+          {source !== "publisher" && (
+            <motion.button
+              {...press}
+              onClick={onRegenerate}
+              aria-label="Transcribe this episode again"
+              title="Captions don't match the audio? Transcribe again."
+              className="grid size-6 shrink-0 place-items-center rounded-full text-white/50 transition-colors hover:bg-white/15 hover:text-white"
+            >
+              <RotateCcw className="size-3" />
+            </motion.button>
+          )}
         </span>
 
         <CaptionSyncControl
@@ -455,7 +546,10 @@ function VirtualTranscript({
                       style={
                         {
                           "--w-from": word.from,
-                          "--w-to": word.to,
+                          // The reciprocal of the word's width, not the width:
+                          // CSS then scales by a multiplication, and nothing
+                          // depends on `calc()` dividing by an expression.
+                          "--w-scale": 1 / (word.to - word.from),
                         } as React.CSSProperties
                       }
                     >
@@ -546,11 +640,21 @@ function useKaraokeFill(
     paint();
     if (!isPlaying || reduceMotion) return;
 
+    // The store as well as the frame loop, for the same reason as
+    // useActiveSegment: an unfocused window throttles rAF to about 1fps, and a
+    // fill that only repaints once a second reads as broken rather than smooth.
+    // `timeupdate` keeps arriving regardless, so the two together degrade to
+    // four steps a second instead of one.
+    const unsubscribe = usePlayer.subscribe(paint);
+
     let raf = requestAnimationFrame(function tick() {
       paint();
       raf = requestAnimationFrame(tick);
     });
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      unsubscribe();
+    };
   }, [segments, activeIndex, rangeStart, isPlaying, pausedTime, reduceMotion, offset]);
 }
 
@@ -598,15 +702,38 @@ function useSettledDuration(duration: number): number {
 /**
  * Tracks which line is being spoken.
  *
- * Subscribes to the store outside React's render cycle, so a position update
- * costs nothing unless it changes the line. The search resumes from the
- * previous index, making playback a constant-time check.
+ * Reads the audio element every frame, for the same reason the fill does — and
+ * it has to be the *same* clock as the fill, or the two disagree about which
+ * line is current. This used to run off the store, which republishes position
+ * on `timeupdate`, and browsers fire that about four times a second: every line
+ * became current up to a quarter of a second after it was actually spoken.
+ * Measured across eighteen line changes on a real episode, a median of 185ms
+ * late and never better than 80ms.
+ *
+ * That was invisible while a "line" was thirty seconds of Whisper's output and
+ * boundaries were rare. Now that lines are a phrase each (see captionLines)
+ * there is a boundary every few seconds, and at every one of them the highlight
+ * stalled at the end of the finished line before jumping — which is exactly
+ * what being out of sync looks like.
+ *
+ * Both clocks drive it, which is not belt and braces — they fail in opposite
+ * conditions. `requestAnimationFrame` is the precise one, but browsers throttle
+ * it hard when the window isn't focused: measured here at 1fps in an unfocused
+ * window, which on its own would be a full second late, worse than the store it
+ * replaced. The store keeps publishing on `timeupdate` regardless of focus, so
+ * it holds the floor at a quarter-second whenever the frame loop is being
+ * starved. Whichever fires first moves the line; the other finds nothing to do.
+ *
+ * The work is cheap enough to run either way: one `activeSegmentIndex` call
+ * resuming from the previous answer, which is a constant-time check during
+ * playback, and React is only told anything when the line actually changes.
  */
 function useActiveSegment(
   segments: TranscriptSegment[] | null,
   offset: number,
 ): number {
   const [activeIndex, setActiveIndex] = useState(-1);
+  const isPlaying = usePlayer((s) => s.isPlaying);
 
   useEffect(() => {
     if (!segments || segments.length === 0) {
@@ -615,10 +742,18 @@ function useActiveSegment(
     }
 
     let previous = -1;
-    const update = (currentTime: number) => {
+    const update = () => {
+      // The element, but only once it has media — one with no source reports 0
+      // forever, which would peg every line to the first.
+      const audio = getAudio();
+      const playback =
+        audio && audio.currentSrc
+          ? audio.currentTime
+          : usePlayer.getState().currentTime;
+
       const next = activeSegmentIndex(
         segments,
-        toTranscriptTime(currentTime, offset),
+        toTranscriptTime(playback, offset),
         previous,
       );
       if (next !== previous) {
@@ -627,9 +762,21 @@ function useActiveSegment(
       }
     };
 
-    update(usePlayer.getState().currentTime);
-    return usePlayer.subscribe((state) => update(state.currentTime));
-  }, [segments, offset]);
+    update();
+    // Also covers seeking while paused, which is the only way the answer can
+    // change with no frame loop running.
+    const unsubscribe = usePlayer.subscribe(update);
+    if (!isPlaying) return unsubscribe;
+
+    let raf = requestAnimationFrame(function tick() {
+      update();
+      raf = requestAnimationFrame(tick);
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      unsubscribe();
+    };
+  }, [segments, offset, isPlaying]);
 
   return activeIndex;
 }

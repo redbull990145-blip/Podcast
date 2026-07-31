@@ -29,21 +29,17 @@ export async function GET(
 
   const { id } = await params;
 
-  const cached = await db.query.transcripts.findFirst({
-    where: eq(transcripts.episodeId, id),
-  });
-
-  if (cached?.segments) {
-    return NextResponse.json({
-      segments: cached.segments as TranscriptSegment[],
-      source: cached.source,
-    });
-  }
-
-  const episode = await db.query.episodes.findFirst({
-    where: eq(episodes.id, id),
-    columns: { id: true, transcriptUrl: true, durationSeconds: true },
-  });
+  // Both together: the episode row is needed on every path now, because even a
+  // cached transcript can be regenerated and the progress bar for that needs
+  // the estimate. In parallel it costs the same round trip as the transcript
+  // lookup alone.
+  const [cached, episode] = await Promise.all([
+    db.query.transcripts.findFirst({ where: eq(transcripts.episodeId, id) }),
+    db.query.episodes.findFirst({
+      where: eq(episodes.id, id),
+      columns: { id: true, transcriptUrl: true, durationSeconds: true },
+    }),
+  ]);
 
   if (!episode) {
     return NextResponse.json({ error: "Unknown episode." }, { status: 404 });
@@ -62,6 +58,14 @@ export async function GET(
     episode.durationSeconds ?? 0,
     colabSttConfig() ? "local" : "hosted",
   );
+
+  if (cached?.segments) {
+    return NextResponse.json({
+      segments: cached.segments as TranscriptSegment[],
+      source: cached.source,
+      estimatedSeconds,
+    });
+  }
 
   if (!episode.transcriptUrl) {
     // A transcript with no timings can't drive captions, but it does mean the

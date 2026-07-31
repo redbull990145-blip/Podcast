@@ -38,11 +38,24 @@ export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as {
     episodeId?: string;
     kind?: GenerateKind;
+    force?: boolean;
   } | null;
 
   const episodeId = body?.episodeId;
   const kind: GenerateKind =
     body?.kind && KINDS.includes(body.kind) ? body.kind : "show_notes";
+
+  /**
+   * Transcribe again even though there is already a transcript.
+   *
+   * The cache is what makes this feature affordable, so this is deliberately
+   * narrow: transcripts only, and only when asked for outright. It exists
+   * because a cached transcript can be *wrong* — a provider that returned
+   * timings on the wrong clock, or a model that locked into a repetition loop
+   * — and until this there was no way to get past one. The listener who can
+   * hear that the captions don't match is the only one in a position to say so.
+   */
+  const force = body?.force === true && kind === "transcript";
 
   if (!episodeId) {
     return NextResponse.json({ error: "An episode id is required." }, { status: 400 });
@@ -57,7 +70,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Serve from cache before spending anything.
-  const cached = await readCached(episodeId, kind);
+  const cached = force ? null : await readCached(episodeId, kind);
   if (cached) return NextResponse.json({ ...cached, cached: true });
 
   const decision = await resolveTier(user.id, "jobs");
@@ -118,7 +131,7 @@ export async function POST(request: NextRequest) {
   // developer's own hardware doesn't burn anyone's allowance below.
   let transcribedLocally = false;
 
-  if (!transcript) {
+  if (!transcript || force) {
     // Null when the quota is spent: local-only, because falling back to a
     // paid provider is precisely what an exhausted allowance rules out.
     const fallbackStt = funded?.stt ?? null;

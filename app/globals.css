@@ -294,7 +294,7 @@
     [data-caption-active] .caption-word {
       --local: clamp(
         0,
-        (var(--caption-fill) - var(--w-from)) / (var(--w-to) - var(--w-from)),
+        (var(--caption-fill) - var(--w-from)) * var(--w-scale),
         1
       );
       background-image: linear-gradient(

@@ -56,6 +56,31 @@ export function inferCaptionOffset(
   return Math.round(gap);
 }
 
+/**
+ * The shift for a transcript from `source`, which for most of them is none.
+ *
+ * `inferCaptionOffset` reads the gap between the audio and the transcript as
+ * inserted advertising. That reading only makes sense for a transcript timed
+ * against a different cut of the episode — a publisher's. An AI transcript was
+ * made from this exact file, so its timings are already correct, and the same
+ * gap means something ordinary instead: an outro, a sting, silence at the end.
+ * Shifting for that threw every caption seconds out of sync.
+ *
+ * It showed up most on resuming mid-episode, which looked unrelated but isn't.
+ * A variable-bitrate MP3 has no length until it has been fetched, so the
+ * browser extrapolates one from the part it has — and seeking into the middle
+ * is when that extrapolation is furthest off. The gap it implied, and so the
+ * shift, changed depending on where playback started.
+ */
+export function captionOffsetFor(
+  source: string | null,
+  audioDuration: number,
+  transcriptEnd: number,
+): number {
+  if (source !== "publisher") return 0;
+  return inferCaptionOffset(audioDuration, transcriptEnd);
+}
+
 /** End of the last caption, or 0 for an empty transcript. */
 export function transcriptEndSeconds(segments: { end: number }[]): number {
   if (segments.length === 0) return 0;

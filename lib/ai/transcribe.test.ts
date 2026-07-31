@@ -6,6 +6,7 @@ import {
   mergeSegments,
   planChunks,
   rateLimitMessage,
+  timelineCoversAudio,
 } from "./transcribe";
 
 describe("planChunks", () => {
@@ -196,6 +197,90 @@ describe("mergeSegments", () => {
       { segments: [{ start: 0, end: 1, text: "ok" }], words: [] },
     ]);
     expect(merged[0].words).toBeUndefined();
+  });
+
+  it("keeps a word that starts a hair before its own line", () => {
+    // Whisper's segment boundaries and its word timings come from different
+    // passes and disagree at the seams. Filing by start time alone dropped the
+    // first word of the episode, which cost that line its per-word timings and
+    // left the fill sweeping the whole sentence.
+    const merged = mergeSegments([
+      {
+        segments: [{ start: 0.5, end: 2, text: "hello there" }],
+        words: [
+          { start: 0.48, end: 1, text: "hello" },
+          { start: 1, end: 2, text: "there" },
+        ],
+      },
+    ]);
+
+    expect(merged[0].words?.map((w) => w.text)).toEqual(["hello", "there"]);
+  });
+
+  it("gives a word straddling a boundary to the line holding more of it", () => {
+    const merged = mergeSegments([
+      {
+        segments: [
+          { start: 0, end: 2, text: "first" },
+          { start: 2, end: 4, text: "second" },
+        ],
+        words: [
+          { start: 0, end: 1.9, text: "first" },
+          // Starts inside the first line but is mostly spoken in the second.
+          { start: 1.9, end: 3.5, text: "second" },
+        ],
+      },
+    ]);
+
+    expect(merged[0].words?.map((w) => w.text)).toEqual(["first"]);
+    expect(merged[1].words?.map((w) => w.text)).toEqual(["second"]);
+  });
+
+  it("never loses a word to the gap between two lines", () => {
+    const merged = mergeSegments([
+      {
+        segments: [
+          { start: 0, end: 1, text: "before" },
+          { start: 5, end: 6, text: "after" },
+        ],
+        // Spoken in the silence between the two lines — Whisper does emit
+        // these. It has to land somewhere rather than vanish.
+        words: [{ start: 3, end: 3.5, text: "stray" }],
+      },
+    ]);
+
+    const kept = merged.flatMap((s) => s.words ?? []).map((w) => w.text);
+    expect(kept).toEqual(["stray"]);
+  });
+});
+
+describe("timelineCoversAudio", () => {
+  const segments = [{ start: 0, end: 90, text: "…" }];
+
+  it("accepts timings that run to near the end of the audio", () => {
+    expect(timelineCoversAudio(segments, 100)).toBe(true);
+  });
+
+  it("accepts a transcript that stops short for an outro", () => {
+    // Music and trailing silence are not speech; the last caption always lands
+    // before the last sample.
+    expect(timelineCoversAudio(segments, 110)).toBe(true);
+  });
+
+  it("rejects a timeline that stops two thirds of the way through", () => {
+    // Timings on a different clock from the audio: captions would gain on the
+    // voice all episode, with no single offset that corrects it.
+    expect(timelineCoversAudio([{ start: 0, end: 2400, text: "…" }], 3600)).toBe(false);
+  });
+
+  it("gives a server that reports no duration the benefit of the doubt", () => {
+    expect(timelineCoversAudio(segments, undefined)).toBe(true);
+    expect(timelineCoversAudio(segments, 0)).toBe(true);
+    expect(timelineCoversAudio(segments, Number.NaN)).toBe(true);
+  });
+
+  it("does not reject an empty transcript on coverage — that is caught earlier", () => {
+    expect(timelineCoversAudio([], 3600)).toBe(true);
   });
 });
 
