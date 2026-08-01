@@ -59,6 +59,8 @@ type PlayerState = {
   expanded: boolean;
   /** Captions panel is open inside Now Playing. */
   captionsOpen: boolean;
+  /** Q&A panel is open inside Now Playing. Mutually exclusive with captions. */
+  askOpen: boolean;
 
   // --- sleep timer ---------------------------------------------------------
   /**
@@ -97,6 +99,7 @@ type PlayerActions = {
   stop: () => void;
   setExpanded: (expanded: boolean) => void;
   setCaptionsOpen: (open: boolean) => void;
+  setAskOpen: (open: boolean) => void;
   /** Minutes from now, "episode" to stop at the end of this one, or null. */
   setSleepTimer: (value: number | "episode" | null) => void;
   setSkipSeconds: (direction: "forward" | "back", seconds: number) => void;
@@ -274,6 +277,7 @@ export const usePlayer = create<PlayerState & PlayerActions>((set, get) => ({
   muted: false,
   expanded: false,
   captionsOpen: false,
+  askOpen: false,
   sleepTimer: null,
   enhancementsUnavailable: false,
   audioEpoch: 0,
@@ -458,16 +462,31 @@ export const usePlayer = create<PlayerState & PlayerActions>((set, get) => ({
       error: null,
       expanded: false,
       captionsOpen: false,
+      askOpen: false,
       sleepTimer: null,
     });
   },
 
   setExpanded(expanded) {
-    set({ expanded, captionsOpen: expanded ? get().captionsOpen : false });
+    set({
+      expanded,
+      captionsOpen: expanded ? get().captionsOpen : false,
+      askOpen: expanded ? get().askOpen : false,
+    });
   },
 
+  /*
+   * The transcript and the Q&A share one slot beside the artwork, so opening
+   * either closes the other. They are two views of the same transcript and
+   * showing both would halve each; more to the point, on the width where the
+   * side panel exists at all there is only room for one.
+   */
   setCaptionsOpen(captionsOpen) {
-    set({ captionsOpen });
+    set({ captionsOpen, askOpen: captionsOpen ? false : get().askOpen });
+  },
+
+  setAskOpen(askOpen) {
+    set({ askOpen, captionsOpen: askOpen ? false : get().captionsOpen });
   },
 
   setSleepTimer(value) {

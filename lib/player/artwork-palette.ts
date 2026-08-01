@@ -379,27 +379,63 @@ function pickMeshColours(
   return chosen;
 }
 
-/** Exported for tests — the pixel decoding above needs a real canvas. */
-export function paletteFromPixels(data: Uint8ClampedArray): ArtworkPalette | null {
+/**
+ * A cluster centre with the two properties every consumer sorts on.
+ *
+ * Exported because the artwork animation engine in `lib/artwork/` needs the
+ * same clusters for a different purpose — classifying them into named swatches
+ * for its shaders — and running k-means a second time over the same cover would
+ * be both wasteful and, more importantly, capable of disagreeing with this one.
+ */
+export type ColourCluster = Colour & { count: number; sat: number; lum: number };
+
+/**
+ * Clusters an RGBA buffer into its dominant colours, most pixels first.
+ *
+ * `maxSamples` strides the collection so a large buffer costs the same as a
+ * small one. K-means is O(pixels × k × iterations), and the animation engine
+ * analyses at 256² — 65k pixels, or roughly thirty times what this module's own
+ * 48² sampling produces, which would turn a two-millisecond pass into a
+ * frame-dropping one. Striding to a few thousand samples changes the resulting
+ * centres by less than a quantisation step; the dominant colours of an image
+ * are not a detail that needs every pixel to find.
+ *
+ * The default is unlimited, so this module's own behaviour is unchanged.
+ */
+export function clusterColours(
+  data: Uint8ClampedArray,
+  k = 4,
+  maxSamples = Infinity,
+): ColourCluster[] {
+  const total = data.length / 4;
+  const stride = Math.max(1, Math.ceil(total / maxSamples));
+
   // Collect pixels, skipping transparent ones.
   const pixels: Array<[number, number, number]> = [];
-  for (let i = 0; i < data.length; i += 4) {
+  for (let p = 0; p < total; p += stride) {
+    const i = p * 4;
     if (data[i + 3] < 125) continue;
     pixels.push([data[i], data[i + 1], data[i + 2]]);
   }
-  if (pixels.length === 0) return null;
+  if (pixels.length === 0) return [];
 
-  const clusters = kMeans(pixels, 4);
-  if (clusters.length === 0) return null;
+  const clusters = kMeans(pixels, k);
+  if (clusters.length === 0) return [];
 
   // Sort by pixel count so the most dominant colour is first.
   clusters.sort((a, b) => b.count - a.count);
 
-  const analysed = clusters.map((c) => ({
+  return clusters.map((c) => ({
     ...c,
     sat: saturation(c.r, c.g, c.b),
     lum: luminance(c.r, c.g, c.b),
   }));
+}
+
+/** Exported for tests — the pixel decoding above needs a real canvas. */
+export function paletteFromPixels(data: Uint8ClampedArray): ArtworkPalette | null {
+  const analysed = clusterColours(data, 4);
+  if (analysed.length === 0) return null;
 
   // Base: the most dominant colour.
   const base = analysed[0];

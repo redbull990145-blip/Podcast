@@ -43,6 +43,7 @@ import { SPRING, TWEEN } from "@/lib/motion/config";
 import { fade, popover } from "@/lib/motion/variants";
 import { press } from "@/lib/motion/gestures";
 import { TranscribeProgress } from "./transcribe-progress";
+import { Skeleton } from "@/components/ui/page";
 import { cn, formatDuration } from "@/lib/utils";
 
 type TranscriptResponse = {
@@ -141,18 +142,22 @@ export function CaptionsPanel({ episodeId }: { episodeId: string }) {
 
   if (isPending) {
     return (
+      /*
+        The app's own `.skeleton` rather than a bespoke pulse.
+
+        The version here previously looped opacity from Motion, which survives
+        `prefers-reduced-motion`: MotionConfig's `reducedMotion="user"` strips
+        transform and layout animation but deliberately keeps opacity, so
+        someone who asked for less motion still got an infinite pulse. The
+        shared class is a CSS animation, which the reduced-motion rule in
+        globals.css does stop — and it is the same sweep every other loading
+        state in the app uses.
+      */
       <div className="flex-1 space-y-3 pt-2">
         {Array.from({ length: 8 }, (_, i) => (
-          <motion.div
+          <Skeleton
             key={i}
-            animate={{ opacity: [0.35, 0.7, 0.35] }}
-            transition={{
-              duration: 1.6,
-              repeat: Infinity,
-              ease: "easeInOut",
-              delay: i * 0.06,
-            }}
-            className="h-4 rounded bg-white/10"
+            className="h-4 rounded bg-white/10 [--skeleton-sheen:rgb(255_255_255/0.14)]"
             style={{ width: `${88 - (i % 4) * 14}%` }}
           />
         ))}
