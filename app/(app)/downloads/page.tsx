@@ -6,13 +6,13 @@ export const metadata: Metadata = { title: "Downloads" };
 
 export default function DownloadsPage() {
   return (
-    <PageShell>
+    <PageShell className="max-w-[820px]">
       <PageHeader
         title="Downloads"
-        description="Stored in this browser only. We never upload your audio anywhere, and downloads don't count against any account limit."
+        description="Stored in this browser only. Everything here plays with the network off, and none of it counts against any account limit."
       />
 
-      <div className="mt-8">
+      <div className="mt-7">
         <DownloadsList />
       </div>
     </PageShell>

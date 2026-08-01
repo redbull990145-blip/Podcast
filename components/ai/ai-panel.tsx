@@ -96,12 +96,12 @@ export function AiPanel({
 
   if (usage && !usage.available) {
     return (
-      <section className="mt-8 rounded-xl border border-dashed border-border p-5">
+      <section className="rounded-app-lg border border-dashed border-border-strong p-5">
         <h2 className="flex items-center gap-2 text-sm font-semibold">
           <Sparkles className="size-4 text-accent" />
           AI show notes
         </h2>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+        <p className="mt-2 text-[13px] leading-relaxed text-muted-2">
           AI features aren&apos;t configured on this server yet.{" "}
           <Link href="/settings" className="text-accent hover:underline">
             Add your own API key
@@ -113,18 +113,18 @@ export function AiPanel({
   }
 
   return (
-    <section className="mt-8">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-subtle-foreground">
-          <Sparkles className="size-3.5 text-accent" />
-          AI show notes
+    <section className="rounded-app-lg border border-border bg-surface-sunken p-5">
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+        <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-accent">
+          <Sparkles className="size-3.5" />
+          Summary
         </h2>
         {usage && <QuotaBadge usage={usage} />}
       </div>
 
       {!showNotes && (
-        <div className="mt-3 rounded-xl border border-border bg-surface p-5">
-          <p className="text-sm leading-relaxed text-muted-foreground">
+        <div className="mt-3.5">
+          <p className="text-[13px] leading-relaxed text-muted-2">
             Generate a summary, key takeaways and chapter markers from this
             episode&apos;s audio — then ask it anything.
           </p>
@@ -139,7 +139,7 @@ export function AiPanel({
           <button
             onClick={generate}
             disabled={stage !== null}
-            className="mt-4 inline-flex h-10 items-center gap-2 rounded-[var(--radius-app)] bg-accent px-4 text-sm font-medium text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+            className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-app bg-accent px-4 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
           >
             {stage !== null ? (
               <>
@@ -155,7 +155,7 @@ export function AiPanel({
           </button>
 
           {stage !== null && (
-            <ol className="mt-4 flex gap-2 text-[11px]">
+            <ol className="mt-4 flex flex-wrap gap-1.5 text-[11px]">
               {STAGES.map((label, index) => (
                 <li
                   key={label}
@@ -193,15 +193,13 @@ export function AiPanel({
 
       {showNotes && (
         <>
-          <div className="mt-3 rounded-xl border border-border bg-surface p-5">
-            <div className="prose-sm whitespace-pre-line text-sm leading-relaxed text-foreground">
-              {showNotes}
-            </div>
-            <p className="mt-4 border-t border-border pt-3 text-[11px] text-subtle-foreground">
-              Generated from the episode audio. It can be wrong — check anything
-              that matters against the recording.
-            </p>
+          <div className="mt-3.5 whitespace-pre-line text-[13px] leading-relaxed text-ink-4">
+            {showNotes}
           </div>
+          <p className="mt-3.5 border-t border-border pt-3 text-[11px] leading-relaxed text-subtle-2">
+            Generated from the episode audio. It can be wrong — check anything
+            that matters against the recording.
+          </p>
 
           {hasTranscript && (
             <AskPanel episodeId={episodeId} episodeTitle={episodeTitle} />
@@ -230,10 +228,10 @@ function QuotaBadge({ usage }: { usage: Usage }) {
         "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
         left === 0
           ? "bg-danger/15 text-danger"
-          : "bg-surface-raised text-muted-foreground hover:text-foreground",
+          : "bg-surface-raised text-muted-2 hover:text-foreground",
       )}
     >
-      {left} of {usage.jobsLimit} free generations left today
+      {left} of {usage.jobsLimit} left today
     </Link>
   );
 }
@@ -285,25 +283,22 @@ function AskPanel({
   }
 
   return (
-    <div className="mt-4 rounded-xl border border-border bg-surface p-5">
-      <h3 className="flex items-center gap-2 text-sm font-semibold">
+    <div className="mt-4 border-t border-border pt-4">
+      <h3 className="flex items-center gap-2 text-[13px] font-semibold">
         <MessageCircleQuestion className="size-4 text-accent" />
         Ask about this episode
       </h3>
-      <p className="mt-1 text-xs text-muted-foreground">
-        Answers cite the moment they came from — tap a timestamp to jump there.
-      </p>
 
       {turns.length > 0 && (
-        <ul className="mt-4 space-y-3">
+        <ul className="mt-3.5 space-y-2.5">
           {turns.map((turn, index) => (
             <li
               key={index}
               className={cn(
-                "rounded-lg px-3 py-2 text-sm leading-relaxed",
+                "text-[13px] leading-relaxed",
                 turn.role === "user"
-                  ? "bg-accent-subtle text-foreground"
-                  : "bg-surface-raised text-foreground",
+                  ? "ml-4 rounded-[14px_14px_6px_14px] bg-accent-subtle px-3 py-2 text-foreground"
+                  : "mr-2 rounded-[14px_14px_14px_6px] border border-border-2 bg-surface px-3 py-2.5 text-ink-3",
               )}
             >
               {turn.role === "assistant" ? (
@@ -314,7 +309,7 @@ function AskPanel({
             </li>
           ))}
           {busy && (
-            <li className="flex items-center gap-2 px-3 text-sm text-muted-foreground">
+            <li className="flex items-center gap-2 text-[13px] text-muted">
               <Loader2 className="size-3.5 animate-spin" />
               Reading the transcript…
             </li>
@@ -322,20 +317,20 @@ function AskPanel({
         </ul>
       )}
 
-      <form onSubmit={ask} className="mt-4 flex gap-2">
+      <form onSubmit={ask} className="mt-3.5 flex gap-2">
         <input
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          placeholder={`What did they say about…?`}
+          placeholder="Ask anything — answers cite the tape"
           aria-label={`Ask a question about ${episodeTitle}`}
           maxLength={1000}
-          className="h-10 flex-1 rounded-[var(--radius-app)] border border-border bg-background px-3 text-sm placeholder:text-subtle-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
+          className="h-10 min-w-0 flex-1 rounded-app border border-border-input bg-surface px-3 text-[13px] placeholder:text-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
         />
         <button
           type="submit"
           disabled={busy || !question.trim()}
           aria-label="Ask"
-          className="grid size-10 shrink-0 place-items-center rounded-[var(--radius-app)] bg-accent text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          className="grid size-10 shrink-0 place-items-center rounded-app bg-accent text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
         >
           {busy ? (
             <Loader2 className="size-4 animate-spin" />
@@ -346,7 +341,7 @@ function AskPanel({
       </form>
 
       {error && (
-        <p role="alert" className="mt-2 text-sm text-danger">
+        <p role="alert" className="mt-2 text-[13px] text-danger">
           {error}
         </p>
       )}

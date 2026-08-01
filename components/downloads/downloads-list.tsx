@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { motion } from "motion/react";
 import { Download, HardDrive, Loader2, Play, Trash2 } from "lucide-react";
 import {
   formatBytes,
@@ -15,6 +16,7 @@ import {
 import { useDownloadStatus } from "@/lib/offline/download-status";
 import { usePlayer } from "@/lib/player/store";
 import { EmptyState } from "@/components/ui/page";
+import { press } from "@/lib/motion/gestures";
 import { formatDurationLong } from "@/lib/utils";
 
 /**
@@ -67,13 +69,16 @@ export function DownloadsList() {
 
   return (
     <div>
-      <ul className="space-y-1">
+      <StorageMeter episodes={used} storage={storage} count={items.length} />
+
+      <ul className="mt-5.5">
         {items.map((item) => (
           <li
             key={item.episodeId}
-            className="flex items-center gap-3 rounded-xl border border-border bg-surface p-2.5"
+            className="flex items-center gap-3.5 border-b border-border-4 px-1 py-4 last:border-0"
           >
-            <button
+            <motion.button
+              {...press}
               onClick={() =>
                 load({
                   id: item.episodeId,
@@ -93,29 +98,29 @@ export function DownloadsList() {
                 <Image
                   src={item.artworkUrl}
                   alt=""
-                  width={88}
-                  height={88}
-                  sizes="44px"
-                  className="size-11 rounded-lg object-cover"
+                  width={92}
+                  height={92}
+                  sizes="46px"
+                  className="size-[46px] rounded-[11px] object-cover"
                 />
               ) : (
-                <span className="grid size-11 place-items-center rounded-lg bg-accent-subtle text-accent">
+                <span className="grid size-[46px] place-items-center rounded-[11px] bg-accent-subtle text-accent">
                   <Download className="size-4" />
                 </span>
               )}
-              <span className="absolute inset-0 grid place-items-center rounded-lg bg-black/50 opacity-0 transition-opacity hover:opacity-100">
+              <span className="absolute inset-0 grid place-items-center rounded-[11px] bg-black/50 opacity-0 transition-opacity hover:opacity-100">
                 <Play className="size-4 fill-white text-white" />
               </span>
-            </button>
+            </motion.button>
 
             <div className="min-w-0 flex-1">
               <Link
                 href={`/episode/${item.episodeId}`}
-                className="block truncate text-sm font-medium hover:underline"
+                className="block truncate text-[13.5px] font-semibold hover:underline"
               >
                 {item.title}
               </Link>
-              <p className="truncate text-xs text-muted-foreground">
+              <p className="mt-0.5 truncate text-xs text-subtle-2">
                 {item.podcastTitle}
                 <span className="mx-1.5" aria-hidden>
                   ·
@@ -132,7 +137,8 @@ export function DownloadsList() {
               </p>
             </div>
 
-            <button
+            <motion.button
+              {...press}
               onClick={async () => {
                 // Keep the shared set in step, so a download button for this
                 // episode elsewhere in the app flips back immediately.
@@ -141,22 +147,74 @@ export function DownloadsList() {
                 void refresh();
               }}
               aria-label={`Delete download of ${item.title}`}
-              className="grid size-8 shrink-0 place-items-center rounded-lg text-subtle-foreground transition-colors hover:bg-surface-hover hover:text-danger"
+              className="grid size-8 shrink-0 place-items-center rounded-lg text-faint transition-colors hover:bg-surface-hover hover:text-danger"
             >
-              <Trash2 className="size-4" />
-            </button>
+              <Trash2 className="size-[17px]" strokeWidth={1.8} />
+            </motion.button>
           </li>
         ))}
       </ul>
-
-      <p className="mt-6 text-xs text-subtle-foreground">
-        {items.length} episode{items.length === 1 ? "" : "s"} using{" "}
-        {formatBytes(used)} on this device
-        {storage && storage.quota > 0 && (
-          <> — the browser allows about {formatBytes(storage.quota)} in total</>
-        )}
-        .
-      </p>
     </div>
+  );
+}
+
+/**
+ * What is on this device, against what the browser will allow.
+ *
+ * The quota is the browser's own estimate for this origin and it is neither a
+ * setting nor a promise — it moves with free disk space and with how recently
+ * the site was used. So the bar is drawn from measurements rather than from a
+ * plan, and it separates this app's audio from everything else the origin has
+ * stored, because those are the two numbers with different remedies: one is
+ * fixed by deleting an episode, the other is not.
+ */
+function StorageMeter({
+  episodes,
+  storage,
+  count,
+}: {
+  episodes: number;
+  storage: { usage: number; quota: number } | null;
+  count: number;
+}) {
+  const quota = storage?.quota ?? 0;
+  const other = Math.max(0, (storage?.usage ?? episodes) - episodes);
+
+  const pct = (value: number) => (quota > 0 ? Math.min(100, (value / quota) * 100) : 0);
+
+  return (
+    <div className="rounded-app-lg border border-border-2 bg-surface p-5">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="text-[13px] font-semibold">{formatBytes(episodes)} of audio</p>
+        {quota > 0 && (
+          <p className="text-[12.5px] tabular-nums text-subtle-2">
+            about {formatBytes(quota)} available
+          </p>
+        )}
+      </div>
+
+      <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-track">
+        <span className="bg-accent" style={{ width: `${pct(episodes)}%` }} />
+        <span className="bg-clay" style={{ width: `${pct(other)}%` }} />
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-4.5">
+        <Legend colour="bg-accent">
+          {count} episode{count === 1 ? "" : "s"} · {formatBytes(episodes)}
+        </Legend>
+        {other > 0 && (
+          <Legend colour="bg-clay">Transcripts and app data · {formatBytes(other)}</Legend>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Legend({ colour, children }: { colour: string; children: React.ReactNode }) {
+  return (
+    <span className="flex items-center gap-2 text-xs text-muted-2">
+      <span aria-hidden className={`size-2 rounded-[2px] ${colour}`} />
+      {children}
+    </span>
   );
 }

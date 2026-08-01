@@ -25,10 +25,10 @@ export default async function DiscoverPage() {
     <PageShell>
       <PageHeader
         title="Discover"
-        description="Searches Apple's catalogue and the independent Podcast Index at once."
+        description="Two catalogues plus any RSS feed you can paste. Nothing is buried in a menu."
       />
 
-      <div className="mt-8 space-y-10">
+      <div className="mt-7 space-y-10">
         <DiscoverPanel subscribedFeedUrls={rows.map((r) => r.podcast.feedUrl)} />
         <RecommendationsPanel />
       </div>

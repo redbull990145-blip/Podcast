@@ -50,12 +50,12 @@ export function RecommendationsPanel() {
 
   if (data.coldStart) {
     return (
-      <div className="rounded-xl border border-dashed border-border bg-surface/50 p-6 text-center">
+      <div className="rounded-app-lg border border-dashed border-border-strong bg-surface-sunken p-6 text-center">
         <span className="mx-auto grid size-10 place-items-center rounded-full bg-accent-subtle text-accent">
           <Compass className="size-5" />
         </span>
         <h3 className="mt-3 text-sm font-semibold">No recommendations yet</h3>
-        <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-muted-foreground">
+        <p className="mx-auto mt-1.5 max-w-md text-xs leading-relaxed text-muted-2">
           Follow a few shows or finish an episode, and suggestions will appear
           here — each one showing exactly which of your listening habits it came
           from.
@@ -68,12 +68,12 @@ export function RecommendationsPanel() {
 
   return (
     <section>
-      <div className="flex items-baseline justify-between gap-3 border-b border-border pb-3">
-        <h2 className="flex items-center gap-2 font-semibold tracking-tight">
+      <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-border pb-3.5">
+        <h2 className="flex items-center gap-2 text-[17px] font-semibold -tracking-[0.02em]">
           <Sparkles className="size-4 text-accent" />
           Suggested for you
         </h2>
-        <span className="text-xs text-subtle-foreground">
+        <span className="text-xs text-subtle-2">
           From your {formatList(data.categories.slice(0, 3))} listening
         </span>
       </div>
@@ -82,14 +82,14 @@ export function RecommendationsPanel() {
         variants={listContainer}
         initial="hidden"
         animate="visible"
-        className="mt-4 grid gap-3 sm:grid-cols-2"
+        className="mt-4 grid gap-3.5 lg:grid-cols-2"
       >
         {data.recommendations.map((rec) => (
           <RecommendationCard key={rec.feedUrl} rec={rec} />
         ))}
       </motion.ul>
 
-      <p className="mt-4 text-[11px] leading-relaxed text-subtle-foreground">
+      <p className="mt-4 text-[11px] leading-relaxed text-subtle-2">
         Ranked on this device from your own listening history — no external
         service is asked what you might like, and nothing about you is sent
         anywhere to produce this list.
@@ -172,19 +172,19 @@ function RecommendationCard({ rec }: { rec: Recommendation }) {
       // than fading out like something that merely timed out.
       exit={{ opacity: 0, x: -24, scale: 0.96, transition: TWEEN.normal }}
       {...liftCard}
-      className="flex gap-3 rounded-xl border border-border bg-surface p-3 transition-colors hover:border-border-strong"
+      className="flex gap-3.5 rounded-app-lg border border-border-2 bg-surface p-4 transition-colors hover:border-border-strong"
     >
       {rec.artworkUrl ? (
         <Image
           src={rec.artworkUrl}
           alt=""
-          width={128}
-          height={128}
-          sizes="64px"
-          className="size-16 shrink-0 rounded-lg object-cover"
+          width={136}
+          height={136}
+          sizes="68px"
+          className="size-17 shrink-0 rounded-[13px] object-cover shadow-[0_4px_12px_rgb(34_32_29_/_0.14)]"
         />
       ) : (
-        <span className="grid size-16 shrink-0 place-items-center rounded-lg bg-accent-subtle text-accent">
+        <span className="grid size-17 shrink-0 place-items-center rounded-[13px] bg-accent-subtle text-accent">
           <Rss className="size-6" />
         </span>
       )}
@@ -196,18 +196,16 @@ function RecommendationCard({ rec }: { rec: Recommendation }) {
             onClick={dismiss}
             aria-label={`Not interested in ${rec.title}`}
             title="Not interested"
-            className="-mr-1 -mt-1 grid size-7 shrink-0 place-items-center rounded-lg text-subtle-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
+            className="-mr-1 -mt-1 grid size-7 shrink-0 place-items-center rounded-lg text-subtle-2 transition-colors hover:bg-surface-hover hover:text-foreground"
           >
             <X className="size-3.5" />
           </button>
         </div>
 
-        {rec.author && (
-          <p className="truncate text-xs text-muted-foreground">{rec.author}</p>
-        )}
+        {rec.author && <p className="mt-1 truncate text-xs text-subtle-2">{rec.author}</p>}
 
         {rec.description && (
-          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-subtle-foreground">
+          <p className="mt-1.5 line-clamp-2 text-[12.5px] leading-relaxed text-muted-2">
             {stripHtml(rec.description)}
           </p>
         )}

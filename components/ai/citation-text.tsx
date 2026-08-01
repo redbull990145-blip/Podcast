@@ -24,9 +24,12 @@ function toSeconds(stamp: string): number {
 export function CitationText({
   text,
   episodeId,
+  /** Set inside Now Playing, whose backdrop is dark whatever the theme is. */
+  tone = "app",
 }: {
   text: string;
   episodeId: string;
+  tone?: "app" | "light";
 }) {
   const seek = usePlayer((s) => s.seek);
   const currentEpisodeId = usePlayer((s) => s.episode?.id);
@@ -54,7 +57,11 @@ export function CitationText({
             ? `Jump to ${stamp}`
             : "Play this episode to jump to the cited moment"
         }
-        className="mx-0.5 rounded bg-accent-subtle px-1.5 py-0.5 align-baseline text-[11px] font-medium tabular-nums text-accent transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
+        className={
+          tone === "light"
+            ? "mx-0.5 rounded-full bg-white/16 px-1.5 py-0.5 align-baseline text-[11px] font-medium tabular-nums text-white transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
+            : "mx-0.5 rounded bg-accent-subtle px-1.5 py-0.5 align-baseline text-[11px] font-medium tabular-nums text-accent transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
+        }
       >
         {stamp}
       </button>,

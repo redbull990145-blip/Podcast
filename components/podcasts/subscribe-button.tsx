@@ -9,10 +9,17 @@ export function SubscribeButton({
   podcastId,
   feedUrl,
   initiallySubscribed,
+  /**
+   * Set on the show page's tinted header, which is dark in both themes — so the
+   * button cannot take its colours from the palette the way it does everywhere
+   * else without becoming a dark button on a dark ground.
+   */
+  onDark = false,
 }: {
   podcastId: string;
   feedUrl: string;
   initiallySubscribed: boolean;
+  onDark?: boolean;
 }) {
   const router = useRouter();
   const [subscribed, setSubscribed] = useState(initiallySubscribed);
@@ -54,6 +61,13 @@ export function SubscribeButton({
       onClick={toggle}
       disabled={busy}
       variant={subscribed ? "secondary" : "primary"}
+      className={
+        onDark
+          ? subscribed
+            ? "border-white/30 bg-transparent text-white hover:border-white/50 hover:bg-white/10"
+            : "bg-[#f8f6f1] text-[#1c1b17] hover:bg-white"
+          : undefined
+      }
       onPointerEnter={() => setHovering(true)}
       onPointerLeave={() => setHovering(false)}
       onFocus={() => setHovering(true)}

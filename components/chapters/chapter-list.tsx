@@ -1,8 +1,11 @@
 "use client";
 
-import { Bookmark, Sparkles } from "lucide-react";
+import { motion } from "motion/react";
+import { Sparkles } from "lucide-react";
 import type { Chapter } from "@/lib/db/schema";
 import { usePlayer } from "@/lib/player/store";
+import { PlayingBars } from "@/components/ui/page";
+import { pressSubtle } from "@/lib/motion/gestures";
 import { cn, formatDuration } from "@/lib/utils";
 
 /**
@@ -34,11 +37,9 @@ export function ChapterList({
     : -1;
 
   return (
-    <section className="mt-8">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-subtle-foreground">
-          Chapters
-        </h2>
+    <section className="mt-9">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold -tracking-[0.01em]">Chapters</h2>
         {source === "ai_generated" && (
           <span className="inline-flex items-center gap-1 rounded-full bg-accent-subtle px-2 py-0.5 text-[10px] font-medium text-accent">
             <Sparkles className="size-3" />
@@ -47,20 +48,28 @@ export function ChapterList({
         )}
       </div>
 
-      <ol className="mt-3 space-y-0.5">
+      {/*
+        A ruled list rather than a stack of cards. Chapters are an index — the
+        eye runs down the timestamps looking for a number — and rules keep those
+        aligned in a column, which rounded rows with their own padding do not.
+      */}
+      <ol className="mt-3 border-t border-border">
         {chapters.map((chapter, index) => {
           const active = index === activeIndex;
           return (
             <li key={`${chapter.startTime}-${chapter.title}`}>
-              <button
+              <motion.button
+                // Only the enabled rows press. A disabled chapter row yielding
+                // under the finger would promise a seek that cannot happen.
+                {...(isThisEpisode ? pressSubtle : {})}
                 onClick={() => seek(chapter.startTime)}
                 disabled={!isThisEpisode}
                 className={cn(
-                  "flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors",
+                  "flex w-full items-center gap-3.5 border-b border-border-3 px-1 py-3.5 text-left transition-colors",
                   active
-                    ? "bg-accent-subtle text-accent"
+                    ? "text-accent"
                     : "hover:bg-surface-hover disabled:hover:bg-transparent",
-                  !isThisEpisode && "cursor-default opacity-70",
+                  !isThisEpisode && "cursor-default",
                 )}
                 title={
                   isThisEpisode
@@ -70,23 +79,24 @@ export function ChapterList({
               >
                 <span
                   className={cn(
-                    "shrink-0",
-                    active ? "text-accent" : "text-subtle-foreground",
+                    "w-11 shrink-0 text-xs tabular-nums",
+                    active ? "font-semibold text-accent" : "text-subtle-2",
                   )}
                 >
-                  <Bookmark
-                    className="size-3.5"
-                    strokeWidth={active ? 2.5 : 1.75}
-                    fill={active ? "currentColor" : "none"}
-                  />
-                </span>
-                <span className="min-w-0 flex-1 truncate text-sm">
-                  {chapter.title}
-                </span>
-                <span className="shrink-0 text-xs tabular-nums text-subtle-foreground">
                   {formatDuration(chapter.startTime)}
                 </span>
-              </button>
+
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 truncate text-sm",
+                    active ? "font-medium" : "text-ink-2",
+                  )}
+                >
+                  {chapter.title}
+                </span>
+
+                {active && <PlayingBars className="shrink-0" />}
+              </motion.button>
             </li>
           );
         })}

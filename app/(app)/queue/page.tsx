@@ -11,13 +11,13 @@ export default async function QueuePage() {
   if (!user) redirect("/login");
 
   return (
-    <PageShell>
+    <PageShell className="max-w-[820px]">
       <PageHeader
         title="Up Next"
-        description="Drag the handle to reorder, or focus it and use space then the arrow keys. Changes appear on your other devices within seconds."
+        description="Drag the handle to reorder, or focus it and use space then the arrow keys. It syncs across your devices within seconds."
       />
 
-      <div className="mt-8">
+      <div className="mt-6">
         <QueueList userId={user.id} />
       </div>
     </PageShell>
