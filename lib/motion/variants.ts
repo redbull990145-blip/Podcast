@@ -38,7 +38,13 @@ export const fade: Variants = {
  */
 export const popover: Variants = {
   hidden: { opacity: 0, scale: 0.96, y: 4 },
-  visible: { opacity: 1, scale: 1, y: 0, transition: SPRING.pop },
+  visible: {
+    opacity: 1,
+    scale: 1,
+    y: 0,
+    // Spring the movement, tween the fade — see the note on `fadeUp` above.
+    transition: { ...SPRING.pop, opacity: TWEEN.normal },
+  },
   exit: { opacity: 0, scale: 0.97, y: 2, transition: TWEEN.fast },
 };
 
@@ -52,7 +58,12 @@ export const sheet: Variants = {
 /** Centred modal dialogs. */
 export const dialog: Variants = {
   hidden: { opacity: 0, scale: 0.94, y: 12 },
-  visible: { opacity: 1, scale: 1, y: 0, transition: SPRING.sheet },
+  visible: {
+    opacity: 1,
+    scale: 1,
+    y: 0,
+    transition: { ...SPRING.sheet, opacity: TWEEN.normal },
+  },
   exit: { opacity: 0, scale: 0.97, y: 6, transition: TWEEN.fast },
 };
 
@@ -73,11 +84,18 @@ export const backdrop: Variants = {
 export const listContainer: Variants = {
   hidden: {},
   visible: { transition: { staggerChildren: 0.025, delayChildren: 0.02 } },
+  /*
+   * The whole list leaves together rather than un-staggering row by row. A
+   * reversed cascade on the way out makes the user wait through an animation
+   * for something they have already decided to leave, and it is the one moment
+   * where the stagger stops reading as "these arrived together".
+   */
+  exit: { opacity: 0, transition: TWEEN.fast },
 };
 
 export const listItem: Variants = {
   hidden: { opacity: 0, y: 6 },
-  visible: { opacity: 1, y: 0, transition: SPRING.pop },
+  visible: { opacity: 1, y: 0, transition: { ...SPRING.pop, opacity: TWEEN.normal } },
 };
 
 /**

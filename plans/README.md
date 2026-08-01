@@ -8,9 +8,14 @@ Note: this environment's copy of the `improve-animations` skill was missing its 
 
 | Plan | Finding | Status |
 | --- | --- | --- |
-| [001-captions-skeleton-reduced-motion.md](001-captions-skeleton-reduced-motion.md) | Captions-loading skeleton ignores both reduced-motion mechanisms and duplicates the app's own `.skeleton` pattern | Not started |
-| [002-spring-opacity-token-split.md](002-spring-opacity-token-split.md) | `popover`/`dialog`/`listItem` variants spring opacity instead of tweening it, against the system's own documented rule | Not started |
-| [003-episode-row-checkmark-origin.md](003-episode-row-checkmark-origin.md) | "Played" checkmark badge grows from `scale: 0`, the app's own documented anti-pattern | Not started |
+| [001-captions-skeleton-reduced-motion.md](001-captions-skeleton-reduced-motion.md) | Captions-loading skeleton ignores both reduced-motion mechanisms and duplicates the app's own `.skeleton` pattern | **DONE** |
+| [002-spring-opacity-token-split.md](002-spring-opacity-token-split.md) | `popover`/`dialog`/`listItem` variants spring opacity instead of tweening it, against the system's own documented rule | **DONE** |
+| [003-episode-row-checkmark-origin.md](003-episode-row-checkmark-origin.md) | "Played" checkmark badge grows from `scale: 0`, the app's own documented anti-pattern | **DONE** |
+
+### Deviations from the plans as written
+
+- **001** kept the placeholder's dark `bg-white/10` instead of inheriting `Skeleton`'s `bg-surface-raised`, which is a light sand and wrong on Now Playing's permanently-dark backdrop. The shared `.skeleton` sweep was also tinted per-instance: it mixed 7% of `--foreground`, which in light mode is near-black and therefore invisible against that panel. `.skeleton` now exposes `--skeleton-sheen` for exactly this case. `Skeleton` gained the `style` passthrough the plan specified.
+- **003** used `scale: 0.5` as specified, and additionally split opacity onto `TWEEN.fast`, for the same reason as 002 — the plan predated that change and would have left this one call site springing opacity.
 
 ## Recommended execution order
 

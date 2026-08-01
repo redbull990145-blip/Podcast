@@ -124,10 +124,18 @@ export const EpisodeRow = memo(function EpisodeRow({
                     title="Played"
                     className="mt-0.5 text-success"
                     aria-label="Played"
-                    initial={{ scale: 0, opacity: 0 }}
+                    /*
+                      0.5 rather than 0. Growing from nothing is the stock
+                      "web animation" tell this app's own popover variant warns
+                      against — but this is a 16px status glyph, not a menu, so
+                      the 0.96 that reads as "unfolding" at popover size would
+                      be invisible here. Half size still arrives; it just
+                      arrives as something that was already there.
+                    */
+                    initial={{ scale: 0.5, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0, opacity: 0 }}
-                    transition={SPRING.pop}
+                    exit={{ scale: 0.5, opacity: 0 }}
+                    transition={{ ...SPRING.pop, opacity: TWEEN.fast }}
                   >
                     <CheckCircle2 className="size-4" />
                   </motion.span>
