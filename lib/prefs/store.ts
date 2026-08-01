@@ -15,12 +15,25 @@ import { create } from "zustand";
  */
 
 import type { EpisodeFilter } from "@/lib/episodes/filters";
+import type { Intensity } from "@/lib/artwork/types";
 
 export type { EpisodeFilter };
 
 type PrefsState = {
   powerMode: boolean;
   episodeFilter: EpisodeFilter;
+  /**
+   * How much the Now Playing artwork moves while an episode plays.
+   *
+   * A view preference in exactly the sense this store is for, and it belongs
+   * here rather than in the database for the same reason power mode does:
+   * toggling should be instant and should work before any server round-trip.
+   *
+   * Note this is *not* the accessibility control. `prefers-reduced-motion` is
+   * read separately and overrides this unconditionally — someone who has asked
+   * the OS for less motion gets none regardless of what is saved here.
+   */
+  artworkMotion: Intensity;
   /** Whether the keyboard shortcut reference is open. */
   shortcutsOpen: boolean;
   /** False until localStorage has been read, so SSR and hydration agree. */
@@ -28,17 +41,22 @@ type PrefsState = {
 
   setPowerMode: (on: boolean) => void;
   setEpisodeFilter: (filter: EpisodeFilter) => void;
+  setArtworkMotion: (intensity: Intensity) => void;
   setShortcutsOpen: (open: boolean) => void;
   hydrate: () => void;
 };
 
 const STORAGE_KEY = "cadence-prefs";
 
-function persist(state: Pick<PrefsState, "powerMode" | "episodeFilter">) {
+function persist(state: Pick<PrefsState, "powerMode" | "episodeFilter" | "artworkMotion">) {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ powerMode: state.powerMode, episodeFilter: state.episodeFilter }),
+      JSON.stringify({
+        powerMode: state.powerMode,
+        episodeFilter: state.episodeFilter,
+        artworkMotion: state.artworkMotion,
+      }),
     );
   } catch {
     // Private browsing and full storage both land here; a lost preference is
@@ -52,6 +70,7 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   // value is applied in an effect via hydrate().
   powerMode: false,
   episodeFilter: "all",
+  artworkMotion: "medium",
   shortcutsOpen: false,
   hydrated: false,
 
@@ -63,6 +82,7 @@ export const usePrefs = create<PrefsState>((set, get) => ({
       set({
         powerMode: parsed.powerMode === true,
         episodeFilter: isFilter(parsed.episodeFilter) ? parsed.episodeFilter : "all",
+        artworkMotion: isIntensity(parsed.artworkMotion) ? parsed.artworkMotion : "medium",
         hydrated: true,
       });
     } catch {
@@ -83,10 +103,21 @@ export const usePrefs = create<PrefsState>((set, get) => ({
     persist(get());
   },
 
+  setArtworkMotion(artworkMotion) {
+    set({ artworkMotion });
+    persist(get());
+  },
+
   setShortcutsOpen(shortcutsOpen) {
     set({ shortcutsOpen });
   },
 }));
+
+function isIntensity(value: unknown): value is Intensity {
+  return (
+    value === "off" || value === "subtle" || value === "medium" || value === "expressive"
+  );
+}
 
 function isFilter(value: unknown): value is EpisodeFilter {
   return (
