@@ -9,11 +9,11 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "Cadence",
     description:
       "A fast, private podcast player with AI show notes, real cross-device sync, and no lock-in.",
-    start_url: "/library",
+    start_url: "/home",
     display: "standalone",
     orientation: "portrait",
-    background_color: "#15161c",
-    theme_color: "#15161c",
+    background_color: "#0c0c0d",
+    theme_color: "#0c0c0d",
     categories: ["entertainment", "music", "news"],
     icons: [
       {

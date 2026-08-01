@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 /** Routes that require an authenticated user. */
 const PROTECTED_PREFIXES = [
+  "/home",
   "/library",
   "/discover",
   "/queue",
@@ -70,7 +71,7 @@ export async function updateSession(request: NextRequest) {
 
   if (user && (pathname === "/login" || pathname === "/signup")) {
     const url = request.nextUrl.clone();
-    url.pathname = "/library";
+    url.pathname = "/home";
     url.search = "";
     return NextResponse.redirect(url);
   }

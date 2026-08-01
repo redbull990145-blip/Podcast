@@ -47,7 +47,7 @@ const FEATURES = [
 
 export default async function LandingPage() {
   // Signed-in visitors should land in the app, not on the pitch.
-  if (await getUser()) redirect("/library");
+  if (await getUser()) redirect("/home");
 
   return (
     <div className="min-h-dvh">
@@ -132,7 +132,10 @@ export default async function LandingPage() {
               {FEATURES.map(({ Icon, title, body }) => (
                 <li
                   key={title}
-                  className="group rounded-2xl border border-border bg-surface p-6 transition-all duration-200 hover:border-border-strong hover:shadow-[var(--shadow-lifted)]"
+                  // Named properties rather than `all`: `all` also transitions
+                  // whatever else happens to change on this element, which on a
+                  // hover is a promise nobody checked.
+                  className="group rounded-2xl border border-border bg-surface p-6 transition-[border-color,box-shadow] duration-200 hover:border-border-strong hover:shadow-[var(--shadow-lifted)]"
                 >
                   <span className="grid size-10 place-items-center rounded-xl bg-accent-subtle text-accent">
                     <Icon className="size-5" strokeWidth={1.75} />

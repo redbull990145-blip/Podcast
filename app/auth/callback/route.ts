@@ -8,9 +8,9 @@ import { createClient } from "@/lib/supabase/server";
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = request.nextUrl;
   const code = searchParams.get("code");
-  const rawNext = searchParams.get("next") ?? "/library";
+  const rawNext = searchParams.get("next") ?? "/home";
   // Only ever redirect to a path on our own origin.
-  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/library";
+  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/home";
 
   if (!code) {
     return NextResponse.redirect(`${origin}/login?error=missing_code`);

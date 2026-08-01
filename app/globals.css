@@ -9,36 +9,116 @@
  * Semantic names only — components never reference a raw colour. Light and dark
  * are defined as two complete sets so neither is an afterthought.
  *
- * oklch keeps perceived lightness consistent across hues, which is what stops
- * the accent from looking muddy against dark surfaces.
+ * The palette is matte on purpose: no pure white and no pure black anywhere.
+ * A ground of #F4F1EC instead of #FFF means artwork — which is the only
+ * saturated thing on most of these screens — sits *on* a surface rather than
+ * floating in a void, and the greys read as warm paper rather than as unpainted
+ * UI. Dark is the same idea inverted: #0C0C0D rather than #000 so that shadow
+ * and elevation still have somewhere to go.
+ *
+ * Text runs as one eight-step emphasis ramp (ink → faint) rather than the usual
+ * three. Screens here stack a lot of secondary metadata — show name, duration,
+ * "34 min left", publish date — and with only three levels those all collapse
+ * onto the same grey and compete with the title. The three legacy role names
+ * alias into the ramp so nothing has to be rewritten to benefit.
+ *
+ * Hex rather than oklch: these are the exact values the design specifies, and
+ * an exact match to the reference is worth more here than the interpolation
+ * niceties, since nothing derives colours at runtime.
  */
 
 :root {
-  --background: oklch(0.994 0.002 265);
-  --surface: oklch(1 0 0);
-  --surface-raised: oklch(0.985 0.003 265);
-  --surface-hover: oklch(0.965 0.005 265);
+  --background: #f4f1ec;
+  --surface: #faf8f4;
+  /* Sunken — sections that recede from the page rather than lift off it. */
+  --surface-sunken: #f0ece4;
+  --surface-raised: #ede8df;
+  --surface-strong: #e7e2d9;
+  --surface-hover: #f8f5f0;
+  /* Unfilled part of any progress or meter bar. */
+  --track: #eae5dc;
 
-  --foreground: oklch(0.18 0.012 265);
-  --muted-foreground: oklch(0.52 0.016 265);
-  --subtle-foreground: oklch(0.65 0.014 265);
+  --border: #e4ded3;
+  --border-2: #e7e1d7;
+  --border-3: #e9e3d9;
+  --border-4: #ede7dd;
+  --border-input: #e2dcd1;
+  --border-strong: #d8d0c2;
+  --border-strong-2: #dcd5c8;
 
-  --border: oklch(0.918 0.006 265);
-  --border-strong: oklch(0.86 0.008 265);
+  --ink: #22201d;
+  --ink-2: #39352f;
+  --ink-3: #4a463f;
+  --ink-4: #5f5950;
+  --muted: #6b655c;
+  --muted-2: #7c7568;
+  --subtle: #8b8478;
+  --subtle-2: #a29a8c;
+  --faint: #b0a89a;
+  --faint-2: #b9b0a1;
+  --faint-3: #c2baab;
 
-  --accent: oklch(0.556 0.208 287);
-  --accent-hover: oklch(0.5 0.213 287);
-  --accent-foreground: oklch(0.99 0 0);
-  --accent-subtle: oklch(0.955 0.025 287);
+  --foreground: var(--ink);
+  --muted-foreground: var(--muted);
+  --subtle-foreground: var(--subtle);
 
-  --success: oklch(0.62 0.15 155);
-  --warning: oklch(0.72 0.16 75);
-  --danger: oklch(0.58 0.2 25);
+  --accent: #43604f;
+  --accent-hover: #33493c;
+  --accent-foreground: #f7f5f0;
+  --accent-subtle: #e3e9e3;
+  --accent-subtle-2: #dce3dc;
+  --accent-subtle-3: #d5dfd5;
+  --accent-subtle-4: #e9eee9;
+
+  /* Warm secondary. Carries downloads, indie badges and anything destructive-
+     adjacent, so the forest accent never has to mean two different things. */
+  --clay: #9a5f42;
+  --clay-ink: #8b5334;
+  --clay-subtle: #f2e7df;
+
+  --success: #5c7a63;
+  --warning: #9c7430;
+  --danger: #a24a3c;
+
+  /*
+   * Glass, for the floating top bar.
+   *
+   * A blur alone reads as a smudge. What makes frosted glass legible as a
+   * material is the edge: a bright inset line along the top where light catches
+   * the bevel, a darker one along the bottom, and a hairline ring holding the
+   * whole shape against whatever scrolls underneath.
+   */
+  --glass-bg: linear-gradient(
+    180deg,
+    rgb(252 251 248 / 0.52) 0%,
+    rgb(244 241 236 / 0.34) 100%
+  );
+  --glass-border: rgb(255 255 255 / 0.66);
+  --glass-ring: rgb(34 32 29 / 0.07);
+  --glass-highlight: rgb(255 255 255 / 0.85);
+  --glass-lowlight: rgb(255 255 255 / 0.18);
+  --glass-pill: rgb(255 255 255 / 0.72);
+  --glass-hover: rgb(255 255 255 / 0.38);
+  --glass-shadow: 0 1px 2px rgb(34 32 29 / 0.05), 0 14px 34px rgb(34 32 29 / 0.13);
+
+  /* Docked player. Higher opacity than the top bar — text scrolls behind it. */
+  --bar-bg: rgb(250 248 244 / 0.94);
 
   --radius: 0.75rem;
+  --radius-md: 0.875rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
 
-  --shadow-soft: 0 1px 2px oklch(0.2 0.02 265 / 0.04), 0 4px 16px oklch(0.2 0.02 265 / 0.06);
-  --shadow-lifted: 0 2px 4px oklch(0.2 0.02 265 / 0.06), 0 12px 32px oklch(0.2 0.02 265 / 0.1);
+  --shadow-soft: 0 1px 2px rgb(34 32 29 / 0.04), 0 8px 24px rgb(34 32 29 / 0.05);
+  --shadow-lifted: 0 2px 4px rgb(34 32 29 / 0.05), 0 10px 26px rgb(34 32 29 / 0.07);
+  /*
+   * Artwork gets its own shadow with a coloured second layer — a soft accent
+   * glow spreading past the drop shadow. A cover is the one genuinely saturated
+   * object on the page; letting a little of it bleed onto the ground is what
+   * makes it read as lit rather than as pasted on.
+   */
+  --shadow-art: 0 10px 26px rgb(34 32 29 / 0.14), 0 0 44px rgb(67 96 79 / 0.22);
+  --shadow-accent: 0 1px 2px rgb(34 32 29 / 0.1), 0 6px 16px rgb(67 96 79 / 0.22);
 
   /*
    * Motion.
@@ -61,62 +141,154 @@
   --duration-slow: 380ms;
 }
 
+/*
+ * Dark is neutral where light is warm.
+ *
+ * Carrying the sand hue into dark was tried and looked like a stain: at low
+ * lightness that much yellow reads as an aged screen rather than as a warm
+ * material. The accent and the clay keep their warmth and do the work instead,
+ * which is also what stops the dark theme from being a uniformly grey box.
+ */
 .dark {
-  --background: oklch(0.145 0.014 268);
-  --surface: oklch(0.185 0.016 268);
-  --surface-raised: oklch(0.215 0.018 268);
-  --surface-hover: oklch(0.245 0.02 268);
+  --background: #0c0c0d;
+  --surface: #151517;
+  --surface-sunken: #121214;
+  --surface-raised: #1b1b1e;
+  --surface-strong: #18181b;
+  --surface-hover: #19191c;
+  --track: #232327;
 
-  --foreground: oklch(0.972 0.004 265);
-  --muted-foreground: oklch(0.7 0.016 265);
-  --subtle-foreground: oklch(0.58 0.016 265);
+  --border: #27272b;
+  --border-2: #232327;
+  --border-3: #212125;
+  --border-4: #1e1e22;
+  --border-input: #2c2c31;
+  --border-strong: #3c3c43;
+  --border-strong-2: #34343a;
 
-  --border: oklch(0.275 0.017 268);
-  --border-strong: oklch(0.35 0.02 268);
+  --ink: #f3f2f1;
+  --ink-2: #e4e3e2;
+  --ink-3: #d2d1d0;
+  --ink-4: #bcbbba;
+  --muted: #a5a4a4;
+  --muted-2: #959494;
+  --subtle: #868585;
+  --subtle-2: #767575;
+  --faint: #676666;
+  --faint-2: #5a5959;
+  --faint-3: #4d4c4c;
 
-  --accent: oklch(0.685 0.185 288);
-  --accent-hover: oklch(0.74 0.175 288);
-  --accent-foreground: oklch(0.145 0.014 268);
-  --accent-subtle: oklch(0.26 0.06 288);
+  --accent: #8fb19a;
+  --accent-hover: #a6c2ae;
+  --accent-foreground: #0c0c0d;
+  --accent-subtle: #1e2620;
+  --accent-subtle-2: #252d27;
+  --accent-subtle-3: #2c352e;
+  --accent-subtle-4: #191f1b;
 
-  --success: oklch(0.7 0.16 155);
-  --warning: oklch(0.78 0.15 75);
-  --danger: oklch(0.68 0.19 25);
+  --clay: #c4886a;
+  --clay-ink: #d69a78;
+  --clay-subtle: #2a1f19;
 
-  --shadow-soft: 0 1px 2px oklch(0 0 0 / 0.3), 0 4px 16px oklch(0 0 0 / 0.28);
-  --shadow-lifted: 0 2px 4px oklch(0 0 0 / 0.35), 0 12px 32px oklch(0 0 0 / 0.45);
+  --success: #7fa487;
+  --warning: #d7ac6a;
+  --danger: #e08f7e;
+
+  --glass-bg: linear-gradient(
+    180deg,
+    rgb(58 58 63 / 0.42) 0%,
+    rgb(16 16 18 / 0.34) 100%
+  );
+  --glass-border: rgb(243 242 241 / 0.15);
+  --glass-ring: rgb(0 0 0 / 0.55);
+  --glass-highlight: rgb(243 242 241 / 0.2);
+  --glass-lowlight: rgb(0 0 0 / 0.28);
+  --glass-pill: rgb(243 242 241 / 0.14);
+  --glass-hover: rgb(243 242 241 / 0.07);
+  --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 18px 42px rgb(0 0 0 / 0.6);
+
+  --bar-bg: rgb(12 12 13 / 0.94);
+
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.36);
+  --shadow-lifted: 0 2px 4px rgb(0 0 0 / 0.45), 0 12px 32px rgb(0 0 0 / 0.5);
+  --shadow-art: 0 10px 26px rgb(0 0 0 / 0.5), 0 0 44px rgb(143 177 154 / 0.16);
+  --shadow-accent: 0 1px 2px rgb(0 0 0 / 0.4), 0 6px 16px rgb(143 177 154 / 0.18);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
   --color-surface-raised: var(--surface-raised);
+  --color-surface-strong: var(--surface-strong);
   --color-surface-hover: var(--surface-hover);
+  --color-track: var(--track);
 
   --color-foreground: var(--foreground);
   --color-muted-foreground: var(--muted-foreground);
   --color-subtle-foreground: var(--subtle-foreground);
 
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+  --color-muted: var(--muted);
+  --color-muted-2: var(--muted-2);
+  --color-subtle: var(--subtle);
+  --color-subtle-2: var(--subtle-2);
+  --color-faint: var(--faint);
+  --color-faint-2: var(--faint-2);
+  --color-faint-3: var(--faint-3);
+
   --color-border: var(--border);
+  --color-border-2: var(--border-2);
+  --color-border-3: var(--border-3);
+  --color-border-4: var(--border-4);
+  --color-border-input: var(--border-input);
   --color-border-strong: var(--border-strong);
+  --color-border-strong-2: var(--border-strong-2);
 
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent-subtle: var(--accent-subtle);
+  --color-accent-subtle-2: var(--accent-subtle-2);
+  --color-accent-subtle-3: var(--accent-subtle-3);
+  --color-accent-subtle-4: var(--accent-subtle-4);
+
+  --color-clay: var(--clay);
+  --color-clay-ink: var(--clay-ink);
+  --color-clay-subtle: var(--clay-subtle);
+
+  --color-glass-pill: var(--glass-pill);
+  --color-glass-hover: var(--glass-hover);
+  --color-glass-border: var(--glass-border);
+  --color-glass-ring: var(--glass-ring);
 
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
 
   --radius-app: var(--radius);
+  --radius-app-md: var(--radius-md);
+  --radius-app-lg: var(--radius-lg);
+  --radius-app-xl: var(--radius-xl);
 
   --shadow-soft: var(--shadow-soft);
   --shadow-lifted: var(--shadow-lifted);
+  --shadow-art: var(--shadow-art);
+  --shadow-accent: var(--shadow-accent);
+  --shadow-glass: var(--glass-shadow);
 
+  /*
+   * Instrument Sans, loaded from our own origin via next/font — see
+   * app/layout.tsx. The fallback list matters more than usual here because the
+   * face is narrow: falling back to a wide default would reflow every truncated
+   * title on the page, so the stack stays on the tighter system faces.
+   */
   --font-sans:
-    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
-    Arial, "Noto Sans", sans-serif;
+    var(--font-instrument-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   --font-mono:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
     monospace;
@@ -182,6 +354,69 @@
 
 @layer components {
   /*
+   * Frosted glass, used by the floating top bar.
+   *
+   * `saturate` alongside the blur is what separates this from a grey scrim:
+   * blurring alone averages the colours underneath toward neutral, so a vivid
+   * cover scrolling past the bar turns to mud. Pushing saturation back up keeps
+   * a hint of what is behind it, which is the entire reason for the material.
+   *
+   * The two inset lines are the bevel — bright along the top edge where light
+   * would catch, dim along the bottom — and the outer ring holds the shape when
+   * whatever scrolls underneath happens to match the glass itself.
+   */
+  .glass-panel {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      var(--glass-shadow),
+      inset 0 1px 0 var(--glass-highlight),
+      inset 0 -1px 0 var(--glass-lowlight),
+      0 0 0 1px var(--glass-ring);
+  }
+
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .glass-panel {
+      -webkit-backdrop-filter: blur(26px) saturate(180%);
+      backdrop-filter: blur(26px) saturate(180%);
+    }
+  }
+
+  /*
+   * Three-bar level meter marking whatever is currently playing — on the
+   * current chapter, on the queue's top row.
+   *
+   * It animates scaleY from a common baseline rather than height so it stays a
+   * compositor-only change: these sit inside lists that are otherwise static,
+   * and animating height would put a layout pass on every frame for a 13px
+   * decoration. The offsets are deliberately not a neat fraction of the
+   * duration — evenly spaced bars sync up into a wave that reads as a loading
+   * spinner rather than as audio.
+   */
+  .eq-bar {
+    transform-origin: bottom;
+    animation: eq-bar 1.1s var(--ease-in-out) infinite;
+  }
+
+  .eq-bar:nth-child(2) {
+    animation-delay: 0.22s;
+  }
+
+  .eq-bar:nth-child(3) {
+    animation-delay: 0.44s;
+  }
+
+  @keyframes eq-bar {
+    0%,
+    100% {
+      transform: scaleY(0.35);
+    }
+    50% {
+      transform: scaleY(1);
+    }
+  }
+
+  /*
    * Loading placeholders.
    *
    * A sheen travelling across the block rather than the whole block pulsing.
@@ -193,6 +428,14 @@
   .skeleton {
     position: relative;
     overflow: hidden;
+    /*
+     * Overridable, because one placeholder lives somewhere the theme does not
+     * reach: the transcript's loading state sits inside Now Playing, which is
+     * dark whatever the theme is. There the default — 7% of the *theme's* ink,
+     * which is near-black in light mode — is a dark smear on a dark bar. That
+     * surface sets this to a white sheen instead.
+     */
+    --skeleton-sheen: color-mix(in oklab, var(--foreground) 7%, transparent);
   }
 
   .skeleton::after {
@@ -203,7 +446,7 @@
     background-image: linear-gradient(
       90deg,
       transparent,
-      color-mix(in oklab, var(--foreground) 7%, transparent),
+      var(--skeleton-sheen),
       transparent
     );
     animation: skeleton-sweep 1.6s var(--ease-in-out) infinite;
@@ -389,6 +632,35 @@
    * light ones rather than washing everything toward grey, which is what
    * keeps the effect reading as texture instead of as a haze over the colour.
    */
+  /*
+   * Very slow drift on the Now Playing backdrop.
+   *
+   * The colour fields are blurred to 46px and the layer is inset past every
+   * edge, so nothing about this is legible as movement — what you notice is
+   * that the light is not quite where it was a minute ago. That is the entire
+   * intent: a static gradient reads as a printed backdrop, and anything fast
+   * enough to actually see would compete with the artwork it sits behind.
+   *
+   * 26 seconds with a scale floor above 1 keeps the inset edges outside the
+   * viewport for the whole cycle, so the blur never reveals a hard boundary.
+   * Transform only — the expensive blur is rasterised once and then moved by
+   * the compositor. Honours the artwork-motion preference, which the host
+   * passes down, and `prefers-reduced-motion` kills it outright.
+   */
+  .now-playing-drift {
+    animation: now-playing-drift 26s var(--ease-in-out) infinite;
+  }
+
+  @keyframes now-playing-drift {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0) scale(1.04);
+    }
+    50% {
+      transform: translate3d(-2.2%, 1.6%, 0) scale(1.1);
+    }
+  }
+
   .now-playing-grain {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
     background-size: 180px 180px;

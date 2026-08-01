@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
-import { Geist } from "next/font/google";
+import { Geist, Instrument_Sans } from "next/font/google";
 import { MotionProvider } from "@/components/providers/motion-provider";
 import "./globals.css";
 
@@ -22,6 +22,27 @@ const geist = Geist({
   display: "swap",
 });
 
+/**
+ * Instrument Sans, the interface face.
+ *
+ * Narrow for a grotesque, with a large x-height and short descenders — which is
+ * why it was chosen over the system stack. Nearly every list on these screens
+ * is a title over a metadata line inside a fixed-width card, so the win is
+ * measured in how many characters survive before an ellipsis, and this face
+ * fits appreciably more per line at the same optical size.
+ *
+ * Loaded from our own origin for the same reasons as Geist above. The variable
+ * weight axis covers 400–700, which is every weight the interface uses; the
+ * italic axis comes along because the headings on the dashboard set show names
+ * in italic and a synthesised oblique on a face this narrow is visibly skewed
+ * rather than drawn.
+ */
+const instrumentSans = Instrument_Sans({
+  subsets: ["latin"],
+  variable: "--font-instrument-sans",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
   title: {
     default: "Cadence — podcasts, properly",
@@ -39,9 +60,11 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  // Matches --background in globals.css, so the browser chrome and the page
+  // are the same colour rather than meeting at a visible seam.
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#fdfdfe" },
-    { media: "(prefers-color-scheme: dark)", color: "#15161c" },
+    { media: "(prefers-color-scheme: light)", color: "#f4f1ec" },
+    { media: "(prefers-color-scheme: dark)", color: "#0c0c0d" },
   ],
   width: "device-width",
   initialScale: 1,
@@ -75,7 +98,11 @@ const themeScript = `
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={geist.variable} suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`${instrumentSans.variable} ${geist.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         <Script
           id="cadence-theme"

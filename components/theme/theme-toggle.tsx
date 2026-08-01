@@ -12,15 +12,25 @@ const OPTIONS: { value: Theme; label: string; Icon: typeof Sun }[] = [
   { value: "system", label: "System", Icon: Monitor },
 ];
 
-/** Three-way segmented control. "System" is a real option, not a hidden default. */
-export function ThemeToggle() {
+/**
+ * Three-way segmented control. "System" is a real option, not a hidden default.
+ *
+ * The selected option is marked by a raised plate rather than by a filled
+ * accent disc. This sits inside the glass top bar, where a saturated accent
+ * chip would be the loudest thing on the page and compete with the artwork —
+ * and it reads as a physical switch, which a coloured dot does not.
+ */
+export function ThemeToggle({ className }: { className?: string }) {
   const { theme, setTheme } = useTheme();
 
   return (
     <div
       role="radiogroup"
       aria-label="Colour theme"
-      className="inline-flex items-center gap-0.5 rounded-full border border-border bg-surface p-0.5"
+      className={cn(
+        "inline-flex items-center gap-0.5 rounded-app border border-border-strong bg-glass-pill p-[3px] shadow-[inset_0_1px_0_var(--glass-highlight)]",
+        className,
+      )}
     >
       {OPTIONS.map(({ value, label, Icon }) => {
         const active = theme === value;
@@ -35,22 +45,21 @@ export function ThemeToggle() {
             whileTap={{ scale: 0.9 }}
             transition={SPRING.snappy}
             className={cn(
-              "relative grid size-7 place-items-center rounded-full transition-colors",
-              active
-                ? "text-accent-foreground"
-                : "text-muted-foreground hover:bg-surface-hover hover:text-foreground",
+              "relative grid size-[30px] place-items-center rounded-[9px] transition-colors",
+              active ? "text-ink-2" : "text-ink-4 hover:text-foreground",
             )}
           >
-            {/* The selected disc slides across the three options. */}
+            {/* The plate slides across the three options rather than blinking
+                out under one and in under the next. */}
             {active && (
               <motion.span
                 layoutId="theme-selected"
                 aria-hidden
                 transition={SPRING.pop}
-                className="absolute inset-0 -z-10 rounded-full bg-accent"
+                className="absolute inset-0 -z-10 rounded-[9px] bg-surface shadow-[0_1px_2px_rgb(34_32_29_/_0.1)]"
               />
             )}
-            <Icon className="size-3.5" strokeWidth={2} />
+            <Icon className="size-3.5" strokeWidth={1.9} />
           </motion.button>
         );
       })}

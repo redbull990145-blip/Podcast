@@ -10,7 +10,7 @@ export type AuthState = { error?: string; message?: string };
 /** Keep redirects on our own origin — `next` comes from a query string. */
 function safeNext(raw: FormDataEntryValue | null): string {
   const next = typeof raw === "string" ? raw : "";
-  return next.startsWith("/") && !next.startsWith("//") ? next : "/library";
+  return next.startsWith("/") && !next.startsWith("//") ? next : "/home";
 }
 
 export async function signIn(_prev: AuthState, formData: FormData): Promise<AuthState> {
