@@ -15,6 +15,7 @@ export const runtime = "nodejs";
  */
 const ALLOWED_PROVIDERS = [
   "gemini",
+  "nvidia",
   "openrouter",
   "deepseek",
   "openai",

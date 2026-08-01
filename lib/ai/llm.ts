@@ -1,4 +1,4 @@
-import type { LlmConfig } from "./config";
+import type { LlmConfig, LlmProvider } from "./config";
 import type { Chapter, TranscriptSegment } from "@/lib/db/schema";
 
 /**
@@ -123,62 +123,101 @@ async function chatOnce(
   }
 }
 
+/** What answered, so callers can record the truth rather than the intent. */
+export type ChatSuccess<T> = {
+  ok: true;
+  text: string;
+  value: T;
+  provider: LlmProvider;
+  model: string;
+};
+
+export type ChatResult<T> = ChatSuccess<T> | { ok: false; error: string };
+
 /**
- * Tries each model in the config's fallback chain in order.
+ * Tries every model of every configured provider, in order, until one answers
+ * usefully.
  *
- * OpenRouter's free-variant models each have their own separate rate limit, so
- * one being exhausted does not mean the free tier is exhausted — it means the
- * next model in the list probably works. An API-key rejection is not
- * model-specific and stops the chain immediately rather than burning through
- * every candidate for the same reason.
+ * The chain spans providers because their limits are unrelated. Each free tier
+ * has its own separate ceiling, so Gemini refusing a request says nothing about
+ * whether NVIDIA will — and the same is true one level down, where OpenRouter's
+ * free variants each carry their own per-model limit. Exhausting one is a
+ * reason to continue, not a reason to fail.
  *
- * `parse` extends that same logic past the HTTP layer. A model can answer 200
- * OK and still be useless to the caller — a reasoning model that thinks until
- * it runs out of room, or one that ignores "JSON only" and writes an essay.
- * That is a property of the model, not the request, so it is exactly as
- * retryable as a 429 and is treated the same way. Callers that only need prose
- * omit it and take the first successful response.
+ * What is *not* worth continuing past, within a provider, is a rejected key:
+ * that answer will be identical for every model behind it, so the rest of that
+ * provider is skipped and the next one is tried instead.
+ *
+ * `parse` extends the same logic past the HTTP layer. A model can answer 200 OK
+ * and still be useless — a reasoning model that thinks until it runs out of
+ * room, or one that ignores "JSON only" and writes an essay. That is a property
+ * of the model, not the request, so it is exactly as retryable as a 429.
+ * Callers that only need prose omit it and take the first successful response.
  */
 async function chat<T = string>(
-  config: LlmConfig,
+  chain: LlmConfig[],
   messages: ChatMessage[],
   options: {
     maxTokens?: number;
     temperature?: number;
     parse?: (text: string) => T | null;
   } = {},
-): Promise<{ ok: true; text: string; value: T } | { ok: false; error: string }> {
-  const candidates = config.models.length > 0 ? config.models : [config.model];
-  let last: { ok: false; error: string; status?: number } | null = null;
+): Promise<ChatResult<T>> {
+  let last: { error: string } | null = null;
 
-  for (const model of candidates) {
-    const result = await chatOnce(config, model, messages, options);
+  for (const config of chain) {
+    const candidates = config.models.length > 0 ? config.models : [config.model];
 
-    if (result.ok) {
-      if (!options.parse) {
-        return { ok: true, text: result.text, value: result.text as T };
+    for (const model of candidates) {
+      const result = await chatOnce(config, model, messages, options);
+
+      if (result.ok) {
+        if (!options.parse) {
+          return {
+            ok: true,
+            text: result.text,
+            value: result.text as T,
+            provider: config.provider,
+            model,
+          };
+        }
+
+        const value = options.parse(result.text);
+        if (value !== null) {
+          return {
+            ok: true,
+            text: result.text,
+            value,
+            provider: config.provider,
+            model,
+          };
+        }
+
+        // Unusable answer. Log what it actually said — without this the only
+        // symptom is a generic failure with no way to tell which model misbehaved.
+        console.error(
+          "LLM answer could not be used, trying next model",
+          `${config.provider}/${model}`,
+          result.truncated ? "(truncated: ran out of tokens)" : "",
+          result.text.slice(0, 300),
+        );
+        last = { error: "The AI returned something we couldn't read." };
+        continue;
       }
 
-      const value = options.parse(result.text);
-      if (value !== null) return { ok: true, text: result.text, value };
+      last = { error: result.error };
 
-      // Unusable answer. Log what it actually said — without this the only
-      // symptom is a generic failure with no way to tell which model misbehaved.
-      console.error(
-        "LLM answer could not be used, trying next model",
-        model,
-        result.truncated ? "(truncated: ran out of tokens)" : "",
-        result.text.slice(0, 300),
-      );
-      last = { ok: false, error: "The AI returned something we couldn't read." };
-      continue;
+      // A rejected key is the provider's answer for all of its models.
+      if (result.status === 401 || result.status === 403) break;
+      // Anything else not worth retrying on a sibling model — a 500, say —
+      // is still worth retrying on a different provider entirely.
+      if (result.status != null && !isRetryableAcrossModels(result.status)) break;
     }
-
-    last = result;
-    if (result.status === 401 || result.status === 403) break;
-    if (result.status != null && !isRetryableAcrossModels(result.status)) break;
   }
 
+  if (chain.length === 0) {
+    return { ok: false, error: "No AI provider is configured on this server." };
+  }
   return { ok: false, error: last?.error ?? "The AI service returned an error." };
 }
 
@@ -204,13 +243,13 @@ function withTimestamps(segments: TranscriptSegment[]): string {
 // ---------------------------------------------------------------------------
 
 export async function generateShowNotes(
-  config: LlmConfig,
+  chain: LlmConfig[],
   episodeTitle: string,
   podcastTitle: string,
   transcript: string,
 ) {
   return chat(
-    config,
+    chain,
     [
       {
         role: "system",
@@ -245,7 +284,7 @@ ${truncate(transcript)}`,
 // ---------------------------------------------------------------------------
 
 export async function generateChapters(
-  config: LlmConfig,
+  chain: LlmConfig[],
   episodeTitle: string,
   segments: TranscriptSegment[],
 ): Promise<{ ok: true; chapters: Chapter[] } | { ok: false; error: string }> {
@@ -256,7 +295,7 @@ export async function generateChapters(
   const duration = segments[segments.length - 1]?.end ?? Infinity;
 
   const result = await chat<Chapter[]>(
-    config,
+    chain,
     [
       {
         role: "system",
@@ -424,7 +463,7 @@ function coerceTitle(obj: Record<string, unknown>): string {
 // ---------------------------------------------------------------------------
 
 export async function answerQuestion(
-  config: LlmConfig,
+  chain: LlmConfig[],
   episodeTitle: string,
   segments: TranscriptSegment[],
   transcript: string,
@@ -436,7 +475,7 @@ export async function answerQuestion(
   const body = segments.length > 0 ? withTimestamps(segments) : transcript;
 
   return chat(
-    config,
+    chain,
     [
       {
         role: "system",

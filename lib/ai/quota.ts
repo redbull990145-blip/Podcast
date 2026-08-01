@@ -6,7 +6,7 @@ import {
   byokLlmConfig,
   byokSttConfig,
   dailyQuota,
-  defaultLlmConfig,
+  defaultLlmChain,
   defaultSttConfig,
   type AiTier,
   type HostedSttProvider,
@@ -26,7 +26,12 @@ import {
 export type QuotaKind = "jobs" | "qa";
 
 export type TierDecision =
-  | { allowed: true; tier: AiTier; llm: LlmConfig; stt: SttConfig | null }
+  /**
+   * `llm` is the whole fallback chain, tried in order, not one chosen provider.
+   * Free tiers have unrelated ceilings, so exhausting one is a reason to try
+   * the next rather than to fail the request.
+   */
+  | { allowed: true; tier: AiTier; llm: LlmConfig[]; stt: SttConfig | null }
   | { allowed: false; reason: string; used: number; limit: number };
 
 /** UTC day, so the reset time is the same everywhere rather than per-timezone. */
@@ -34,26 +39,35 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-async function getUserKey(
+/** Every key this user has stored, in the given preference order. */
+async function getUserKeys(
   userId: string,
   providers: string[],
-): Promise<{ provider: string; key: string } | null> {
+): Promise<{ provider: string; key: string }[]> {
   const rows = await db.query.userApiKeys.findMany({
     where: eq(userApiKeys.userId, userId),
   });
 
+  const found: { provider: string; key: string }[] = [];
   for (const provider of providers) {
     const row = rows.find((r) => r.provider === provider);
     if (!row) continue;
     try {
-      return { provider, key: decryptApiKey(row.encryptedKey) };
+      found.push({ provider, key: decryptApiKey(row.encryptedKey) });
     } catch {
       // A key that no longer decrypts (rotated secret, corrupted row) should
       // fall through to the free tier rather than break the feature.
       continue;
     }
   }
-  return null;
+  return found;
+}
+
+async function getUserKey(
+  userId: string,
+  providers: string[],
+): Promise<{ provider: string; key: string } | null> {
+  return (await getUserKeys(userId, providers))[0] ?? null;
 }
 
 export async function getUsage(userId: string) {
@@ -80,28 +94,32 @@ export async function resolveTier(
   userId: string,
   kind: QuotaKind,
 ): Promise<TierDecision> {
-  const userLlm = await getUserKey(userId, [
+  // All of them, so someone who has added two keys gets failover between their
+  // own providers — and never silently falls through to an operator-funded one,
+  // which would bill the wrong person.
+  const userLlm = await getUserKeys(userId, [
     "gemini",
+    "nvidia",
     "openrouter",
     "deepseek",
     "openai",
     "anthropic",
   ]);
 
-  if (userLlm) {
+  if (userLlm.length > 0) {
     const userStt = await getUserKey(userId, ["groq", "openai"]);
     return {
       allowed: true,
       tier: "byok",
-      llm: byokLlmConfig(userLlm.provider as LlmProvider, userLlm.key),
+      llm: userLlm.map((k) => byokLlmConfig(k.provider as LlmProvider, k.key)),
       stt: userStt
         ? byokSttConfig(userStt.provider as HostedSttProvider, userStt.key)
         : defaultSttConfig(),
     };
   }
 
-  const llm = defaultLlmConfig();
-  if (!llm) {
+  const llm = defaultLlmChain();
+  if (llm.length === 0) {
     return {
       allowed: false,
       reason:

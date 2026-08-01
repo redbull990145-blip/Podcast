@@ -227,17 +227,22 @@ export async function POST(request: NextRequest) {
   );
   if (!result.ok) return fail(result.error);
 
+  // The model that answered, not the one at the head of the chain — with
+  // failover across providers those are routinely different, and the stored
+  // attribution is worthless if it records the intent instead of the fact.
+  const model = `${result.provider}/${result.model}`;
+
   await db
     .insert(summaries)
     .values({
       episodeId,
       kind: "show_notes",
       text: result.text,
-      model: `${funded.llm.provider}/${funded.llm.model}`,
+      model,
     })
     .onConflictDoUpdate({
       target: [summaries.episodeId, summaries.kind],
-      set: { text: result.text, model: `${funded.llm.provider}/${funded.llm.model}` },
+      set: { text: result.text, model },
     });
 
   await finish(job.id);
@@ -245,7 +250,7 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     text: result.text,
-    model: `${funded.llm.provider}/${funded.llm.model}`,
+    model,
     tier: funded.tier,
   });
 }

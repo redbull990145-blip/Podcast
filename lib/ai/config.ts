@@ -15,6 +15,7 @@ export type AiTier = "default" | "byok";
 
 export type LlmProvider =
   | "gemini"
+  | "nvidia"
   | "openrouter"
   | "deepseek"
   | "openai"
@@ -147,10 +148,38 @@ function geminiModelChain(): string[] {
   return envModelChain("AI_GEMINI_MODELS") ?? DEFAULT_GEMINI_MODELS;
 }
 
+/**
+ * NVIDIA NIM, via build.nvidia.com's hosted endpoints.
+ *
+ * Ids come from GET https://integrate.api.nvidia.com/v1/models, which needs no
+ * key — so unlike the other two catalogues here, this list could be checked
+ * before a key existed. What could not be checked is how these models behave
+ * on a real transcript; if one turns out to reason its way past the token
+ * budget the way the OpenRouter free models did, the chain simply moves on.
+ *
+ * Instruct models first, largest first, for the same reason as everywhere else
+ * in this file: a model that answers directly beats one that thinks first when
+ * the reply has to be JSON.
+ */
+const DEFAULT_NVIDIA_MODELS = [
+  "meta/llama-3.3-70b-instruct",
+  "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+  "mistralai/mistral-medium-3.5-128b",
+  "meta/llama-3.1-70b-instruct",
+];
+
+function nvidiaModelChain(): string[] {
+  return envModelChain("AI_NVIDIA_MODELS") ?? DEFAULT_NVIDIA_MODELS;
+}
+
 const LLM_ENDPOINTS: Record<LlmProvider, { baseUrl: string; defaultModel: string }> = {
   gemini: {
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
     defaultModel: DEFAULT_GEMINI_MODELS[0],
+  },
+  nvidia: {
+    baseUrl: "https://integrate.api.nvidia.com/v1",
+    defaultModel: DEFAULT_NVIDIA_MODELS[0],
   },
   // Free-tier models during development. See openrouterModelChain() for the
   // full fallback list actually used — this single default is only the
@@ -195,6 +224,7 @@ const STT_ENDPOINTS: Record<HostedSttProvider, { baseUrl: string; defaultModel: 
 /** Which env var funds each provider's operator-funded tier. */
 const LLM_KEY_ENV: Record<LlmProvider, string> = {
   gemini: "GEMINI_API_KEY",
+  nvidia: "NVIDIA_API_KEY",
   openrouter: "OPENROUTER_API_KEY",
   deepseek: "DEEPSEEK_API_KEY",
   openai: "OPENAI_API_KEY",
@@ -202,63 +232,91 @@ const LLM_KEY_ENV: Record<LlmProvider, string> = {
 };
 
 /**
- * Preference order when AI_DEFAULT_PROVIDER doesn't name one.
+ * The order providers are tried in, not a choice between them.
  *
- * Gemini first: its free allowance is the most generous of these, its context
- * window swallows a three-hour transcript whole, and it answers without the
- * reasoning-token overhead that makes the OpenRouter free chain unreliable for
- * structured output.
+ * Every provider here is a peer. Each free tier has its own separate ceiling,
+ * so one being exhausted says nothing about the next — which makes running out
+ * on Gemini a reason to continue on NVIDIA, not a reason to fail. Ordering is
+ * therefore about which is nicest to land on first, not about which is "the"
+ * provider:
+ *
+ *  - gemini: largest free allowance, context window that swallows a three-hour
+ *    transcript, and it answers directly instead of spending the token budget
+ *    thinking.
+ *  - nvidia: large instruct models on a free developer tier.
+ *  - openrouter: several free models, but each on a small per-model limit, and
+ *    the catalogue rotates underneath you.
+ *  - deepseek / openai: paid. Last because reaching them costs real money, so
+ *    they should only ever be a backstop for the free tiers above.
+ *
+ * Override with AI_PROVIDER_ORDER (comma-separated) to reorder or to leave a
+ * provider out of the chain entirely while keeping its key in the environment.
  */
-const LLM_PROVIDER_PREFERENCE: LlmProvider[] = [
+const LLM_PROVIDER_ORDER: LlmProvider[] = [
   "gemini",
+  "nvidia",
   "openrouter",
   "deepseek",
   "openai",
 ];
 
-function configuredLlmProvider(): LlmProvider | null {
-  const configured = process.env.AI_DEFAULT_PROVIDER?.toLowerCase();
-  return configured && configured in LLM_KEY_ENV
-    ? (configured as LlmProvider)
-    : null;
+function isLlmProvider(value: string): value is LlmProvider {
+  return value in LLM_KEY_ENV;
+}
+
+/**
+ * Resolves the order to try providers in.
+ *
+ * AI_DEFAULT_PROVIDER is still honoured, but only as "put this one first" —
+ * it no longer excludes the others, because a provider that has hit its daily
+ * limit needs somewhere to fall through to.
+ */
+function llmProviderOrder(): LlmProvider[] {
+  const explicit = envModelChain("AI_PROVIDER_ORDER")
+    ?.map((p) => p.toLowerCase())
+    .filter(isLlmProvider);
+  if (explicit && explicit.length > 0) return explicit;
+
+  const first = process.env.AI_DEFAULT_PROVIDER?.toLowerCase();
+  if (first && isLlmProvider(first)) {
+    return [first, ...LLM_PROVIDER_ORDER.filter((p) => p !== first)];
+  }
+  return LLM_PROVIDER_ORDER;
 }
 
 function modelChainFor(provider: LlmProvider): string[] {
   if (provider === "gemini") return geminiModelChain();
+  if (provider === "nvidia") return nvidiaModelChain();
   if (provider === "openrouter") return openrouterModelChain();
   return [process.env.AI_DEFAULT_MODEL || LLM_ENDPOINTS[provider].defaultModel];
 }
 
+function configFor(provider: LlmProvider, apiKey: string): LlmConfig {
+  const models = modelChainFor(provider);
+  return {
+    provider,
+    baseUrl: LLM_ENDPOINTS[provider].baseUrl,
+    model: models[0],
+    models,
+    apiKey,
+  };
+}
+
 /**
- * Resolves the LLM config for the operator-funded tier, or null if unconfigured.
+ * Every configured provider, in the order they should be tried.
  *
- * AI_DEFAULT_PROVIDER still wins when set, but naming a provider whose key is
- * missing no longer disables AI outright — the preference order below is tried
- * instead. Before this, adding a key for anything other than the one hard-coded
- * name left the feature reporting itself as unconfigured, with the key sitting
- * right there in the environment.
+ * Returns a chain rather than a winner. Previously this picked one provider and
+ * a request that exhausted it simply failed, even with three other keys sitting
+ * unused in the environment — the fallback logic existed, but only reached
+ * between models of the single chosen provider.
  */
-export function defaultLlmConfig(): LlmConfig | null {
-  const preferred = configuredLlmProvider();
-  const order = preferred
-    ? [preferred, ...LLM_PROVIDER_PREFERENCE.filter((p) => p !== preferred)]
-    : LLM_PROVIDER_PREFERENCE;
-
-  for (const provider of order) {
+export function defaultLlmChain(): LlmConfig[] {
+  const chain: LlmConfig[] = [];
+  for (const provider of llmProviderOrder()) {
     const apiKey = process.env[LLM_KEY_ENV[provider]];
-    if (!apiKey) continue;
-
-    const models = modelChainFor(provider);
-    return {
-      provider,
-      baseUrl: LLM_ENDPOINTS[provider].baseUrl,
-      model: models[0],
-      models,
-      apiKey,
-    };
+    if (apiKey) chain.push(configFor(provider, apiKey));
   }
-
-  return null;
+  return chain;
 }
 
 /** Resolves the speech-to-text config for the operator-funded tier. */
@@ -346,7 +404,7 @@ export function byokSttConfig(provider: HostedSttProvider, apiKey: string): SttC
 
 /** True when the operator has configured enough for the free tier to work. */
 export function isDefaultTierAvailable(): boolean {
-  return defaultLlmConfig() !== null;
+  return defaultLlmChain().length > 0;
 }
 
 export function isDefaultTranscriptionAvailable(): boolean {

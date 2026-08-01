@@ -27,6 +27,12 @@ const PROBES: Partial<Record<Provider, { url: string; headers: (key: string) => 
     url: "https://generativelanguage.googleapis.com/v1beta/openai/models",
     headers: (key) => ({ authorization: `Bearer ${key}` }),
   },
+  nvidia: {
+    // NIM's catalogue is public, so this only proves the key is *accepted* —
+    // an invalid one still 401s here, which is the thing being tested.
+    url: "https://integrate.api.nvidia.com/v1/models",
+    headers: (key) => ({ authorization: `Bearer ${key}` }),
+  },
   openrouter: {
     url: "https://openrouter.ai/api/v1/key",
     headers: (key) => ({ authorization: `Bearer ${key}` }),

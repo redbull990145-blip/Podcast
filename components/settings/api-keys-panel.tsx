@@ -16,6 +16,12 @@ const PROVIDERS = [
     help: "Gemini. Generous free tier.",
   },
   {
+    id: "nvidia",
+    label: "NVIDIA NIM",
+    kind: "text",
+    help: "Llama and Nemotron. Free developer tier.",
+  },
+  {
     id: "openrouter",
     label: "OpenRouter",
     kind: "text",
