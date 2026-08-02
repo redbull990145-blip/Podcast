@@ -8,6 +8,7 @@ import {
   rateLimitMessage,
   timelineCoversAudio,
 } from "./transcribe";
+import { frameSeconds, prepareChunk } from "./mp3";
 
 describe("planChunks", () => {
   it("returns a single range when the file fits in one chunk", () => {
@@ -105,6 +106,43 @@ describe("mergeSegments", () => {
       { start: 2, end: 3, text: "tw" },
       { start: 3, end: 4, text: "o" },
     ]);
+  });
+
+  it("prefers the measured audio duration over where speech stopped", () => {
+    // The drift bug. Chunk 0 holds 10s of audio but the speaker stops at 2s and
+    // the rest is a music bed, so the transcript alone says "2 seconds" and
+    // places chunk 1 eight seconds early.
+    const merged = mergeSegments([
+      { segments: [{ start: 0, end: 2, text: "one" }], words: [], seconds: 10 },
+      { segments: [{ start: 0, end: 2, text: "two" }], words: [], seconds: 10 },
+    ]);
+
+    expect(merged.map((s) => s.start)).toEqual([0, 10]);
+  });
+
+  it("does not let the error accumulate across many boundaries", () => {
+    // Same shape, nine chunks — a three-hour episode. Without measured
+    // durations each boundary loses 8s and the last chunk lands 64s early.
+    const chunks = Array.from({ length: 9 }, (_, i) => ({
+      segments: [{ start: 0, end: 2, text: `line ${i}` }],
+      words: [],
+      seconds: 10,
+    }));
+
+    expect(mergeSegments(chunks).map((s) => s.start)).toEqual([
+      0, 10, 20, 30, 40, 50, 60, 70, 80,
+    ]);
+  });
+
+  it("falls back to the transcript when the container could not be measured", () => {
+    // Unparseable audio still has to produce a timeline; a small accumulating
+    // error beats stacking every chunk at zero.
+    const merged = mergeSegments([
+      { segments: [{ start: 0, end: 2, text: "one" }], words: [], seconds: null },
+      { segments: [{ start: 0, end: 2, text: "two" }], words: [], seconds: null },
+    ]);
+
+    expect(merged.map((s) => s.start)).toEqual([0, 2]);
   });
 
   it("places each chunk purely by how long the ones before it measured", () => {
@@ -377,5 +415,95 @@ describe("rateLimitMessage", () => {
     const message = rateLimitMessage(headersOf({}));
     expect(message).toContain("used up for now");
     expect(message).not.toContain("about");
+  });
+});
+
+/**
+ * End-to-end arithmetic of the fix, over the real chunking path.
+ *
+ * Builds a synthetic VBR episode, splits it exactly as `transcribeMp3Chunked`
+ * would, prepares each chunk the way `fetchChunk` does, and checks that the
+ * durations the timeline is built from add up to the real length of the audio.
+ *
+ * This is the test that would have caught the original bug: the failure was
+ * never in one function, it was in the sum across boundaries.
+ */
+describe("chunked timeline arithmetic", () => {
+  const KBPS = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0];
+  const FRAME_SECONDS = 1152 / 44100;
+
+  function frameAt(bitrateIndex: number): Uint8Array {
+    const length = Math.floor((144 * KBPS[bitrateIndex] * 1000) / 44100);
+    const bytes = new Uint8Array(length);
+    bytes[0] = 0xff;
+    bytes[1] = 0xfb;
+    bytes[2] = (bitrateIndex << 4) | 0x00;
+    bytes[3] = 0x00;
+    return bytes;
+  }
+
+  /** A variable-bitrate stream, so byte position never implies time. */
+  function episode(frames: number): { bytes: Uint8Array; seconds: number } {
+    const parts: Uint8Array[] = [];
+    for (let i = 0; i < frames; i += 1) {
+      // Cycles 96 / 128 / 192 / 320 kbps — identical durations, different sizes.
+      parts.push(frameAt([7, 9, 11, 14][i % 4]));
+    }
+    const total = parts.reduce((n, p) => n + p.length, 0);
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const p of parts) {
+      bytes.set(p, offset);
+      offset += p.length;
+    }
+    return { bytes, seconds: frames * FRAME_SECONDS };
+  }
+
+  it("reconstructs the true episode length across many chunk boundaries", () => {
+    const { bytes, seconds } = episode(4000);
+    const ranges = planChunks(bytes.length, 100_000);
+
+    // Enough boundaries to make an accumulating error obvious.
+    expect(ranges.length).toBeGreaterThan(8);
+
+    const measured = ranges.map(({ start, end }, i) =>
+      frameSeconds(prepareChunk(bytes.subarray(start, end), i === 0)),
+    );
+
+    expect(measured.every((s) => s !== null)).toBe(true);
+    const sum = measured.reduce((n: number, s) => n + (s ?? 0), 0);
+
+    // Exact: every frame in the file is counted in exactly one chunk, so the
+    // boundaries contribute no error at all — not "a little", none.
+    expect(sum).toBeCloseTo(seconds, 9);
+  });
+
+  it("beats measuring by where speech stopped, which is what drifted", () => {
+    const { bytes, seconds } = episode(4000);
+    const ranges = planChunks(bytes.length, 100_000);
+
+    // Each chunk's speech ends two seconds before its audio does — a music bed,
+    // an outro, a pause. This is what Whisper's last word reports.
+    const chunks = ranges.map(({ start, end }, i) => {
+      const measured = frameSeconds(prepareChunk(bytes.subarray(start, end), i === 0))!;
+      const spoken = Math.max(0, measured - 2);
+      return {
+        segments: [{ start: 0, end: spoken, text: `chunk ${i}` }],
+        words: [],
+        seconds: measured,
+      };
+    });
+
+    const fixed = mergeSegments(chunks);
+    // Same chunks, but with the measurement withheld — the old behaviour.
+    const drifting = mergeSegments(chunks.map((c) => ({ ...c, seconds: null })));
+
+    const lastFixed = fixed[fixed.length - 1].start;
+    const lastDrifting = drifting[drifting.length - 1].start;
+
+    // The old path places the final chunk two seconds early per boundary.
+    expect(lastDrifting).toBeLessThan(lastFixed - 2 * (ranges.length - 2));
+    // The new one lands exactly where the audio says it should.
+    expect(lastFixed).toBeCloseTo(seconds - chunks[chunks.length - 1].seconds!, 9);
   });
 });

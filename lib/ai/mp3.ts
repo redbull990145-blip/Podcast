@@ -35,6 +35,9 @@ export type Mp3Frame = {
   offset: number;
   /** Total frame size in bytes, including the 4-byte header. */
   length: number;
+  /** Output samples this frame decodes to: 1152 for MPEG1, 576 for MPEG2/2.5. */
+  samples: number;
+  sampleRate: number;
 };
 
 /**
@@ -73,7 +76,9 @@ export function parseFrameHeader(bytes: Uint8Array, offset: number): Mp3Frame | 
   const length = Math.floor((coefficient * bitrate) / sampleRate) + padding;
   if (length < 4) return null;
 
-  return { offset, length };
+  // The coefficient is samples/8 — the same constant the length formula uses,
+  // read the other way round.
+  return { offset, length, samples: coefficient * 8, sampleRate };
 }
 
 /**
@@ -159,6 +164,73 @@ export function audioStartOffset(bytes: Uint8Array): number {
   // Drop the VBR header frame; the next frame is where the audio really starts.
   const second = findFrame(bytes, first.offset + first.length);
   return second ? second.offset : first.offset + first.length;
+}
+
+/**
+ * How far to hunt for the next header after one fails to parse.
+ *
+ * Frames in a well-formed file are contiguous, so this only comes into play
+ * around embedded junk — a stray tag, a splice point from the host's ad
+ * stitcher. Bounded so a corrupt region degrades to "stop measuring here"
+ * rather than scanning the rest of the chunk byte by byte.
+ */
+const RESYNC_LIMIT = 64 * 1024;
+
+/**
+ * Exact playback duration of a run of MP3 frames, in seconds.
+ *
+ * This is what a chunk's position on the episode timeline has to be built from.
+ * The obvious alternative — asking Whisper where its last word landed — is only
+ * the chunk's duration if the chunk happens to end on speech, and it never
+ * does: every boundary falls somewhere in a music bed, a pause or an outro, and
+ * that trailing time is silently lost. Because a boundary can only ever *lose*
+ * time, the error is one-directional and accumulates, so captions run
+ * progressively early and a three-hour episode ends up seconds out. See
+ * plans/005-caption-sync-accuracy.md.
+ *
+ * Summing frame headers has none of that. Each header declares its own bitrate
+ * and sample rate, so the answer is exact for VBR as well as CBR, and it needs
+ * no decoding — just a header read and a skip.
+ *
+ * A frame cut in half by the end of the range is counted here in full, which is
+ * what makes the sum across boundaries exact rather than merely close. The
+ * frame's header is in this chunk, so this chunk is where it is counted; the
+ * next chunk starts at the following header, because `prepareChunk` aligns to
+ * the first *parseable* frame and the orphaned body fragment has no header of
+ * its own to be found by. So every frame in the file is counted exactly once.
+ *
+ * Returns null when there are no parseable frames at all, so the caller can
+ * fall back rather than place a chunk at zero.
+ */
+export function frameSeconds(bytes: Uint8Array): number | null {
+  const first = parseFrameHeader(bytes, 0) ?? findFrame(bytes, 0);
+  if (!first) return null;
+
+  let offset = first.offset;
+  let seconds = 0;
+  let counted = 0;
+
+  while (offset + 4 <= bytes.length) {
+    const frame = parseFrameHeader(bytes, offset);
+
+    if (!frame) {
+      const next = findFrame(bytes, offset + 1, RESYNC_LIMIT);
+      if (!next) break;
+      offset = next.offset;
+      continue;
+    }
+
+    seconds += frame.samples / frame.sampleRate;
+    counted += 1;
+
+    // Cut mid-frame. Counted above, because the header is here and the next
+    // chunk cannot see the orphaned body — nothing else will count it.
+    if (frame.offset + frame.length > bytes.length) break;
+
+    offset += frame.length;
+  }
+
+  return counted > 0 ? seconds : null;
 }
 
 /**

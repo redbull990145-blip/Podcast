@@ -1,9 +1,11 @@
 import { colabSttConfig, type SttConfig } from "./config";
 import type { TranscriptSegment, TranscriptWord } from "@/lib/db/schema";
 import { collapseLoops } from "@/lib/transcript/repetition";
-import { prepareChunk } from "./mp3";
+import { publisherHeaders } from "@/lib/user-agent";
+import { frameSeconds, prepareChunk } from "./mp3";
 import {
   buildM4A,
+  groupSeconds,
   parseAudioTrack,
   planSampleGroups,
   readBoxes,
@@ -103,6 +105,19 @@ type ChunkResult = {
   segments: TranscriptSegment[];
   /** Per-word timings for this chunk, chunk-relative (start from 0). */
   words: TranscriptWord[];
+  /**
+   * Measured playback duration of this chunk's audio, when the container could
+   * be parsed for it. This — not what Whisper transcribed — is what places the
+   * following chunks on the timeline. See `chunkDuration` for why.
+   */
+  seconds?: number | null;
+};
+
+/** One chunk's audio, with the duration measured off the container. */
+type PreparedChunk = {
+  blob: Blob;
+  /** Null when the bytes couldn't be parsed; the caller then falls back. */
+  seconds: number | null;
 };
 
 const TOO_LONG_ERROR =
@@ -179,14 +194,24 @@ export function planChunks(
 }
 
 /**
- * The real duration of one chunk's audio, as Whisper heard it.
+ * How much of a chunk Whisper transcribed, in seconds.
  *
- * Within a chunk Whisper's timings are accurate and start from zero, so the end
- * of the latest thing it transcribed is how long that slice of audio actually
- * played for — regardless of the file's bitrate or any advertising stitched in.
+ * A lower bound on the chunk's real duration, and only that — it is where the
+ * last word landed, which equals the length of the audio only when the chunk
+ * happens to end on speech. It never does: boundaries fall in music beds,
+ * pauses and outros, and everything after the final word is invisible here.
+ *
+ * That makes it the wrong ruler for placing the *next* chunk. Because a
+ * boundary can only lose time and never gain it, the error is one-directional
+ * and accumulates, so captions run progressively early and the drift grows with
+ * the length of the episode — measured at seconds by the end of a three-hour
+ * show. `frameSeconds` and `groupSeconds` measure the container instead, and
+ * `mergeSegments` prefers them; this remains only as the fallback for audio
+ * neither of them could parse, where a small accumulating error still beats
+ * having no timeline at all.
  *
  * Words are the finer clock, but older Whisper variants return only segments;
- * either is trustworthy, so prefer the later of the two.
+ * either is usable, so prefer the later of the two.
  */
 export function chunkDuration(chunk: { segments: TranscriptSegment[]; words: TranscriptWord[] }): number {
   const lastSegment = chunk.segments.reduce((max, s) => Math.max(max, s.end), 0);
@@ -251,23 +276,31 @@ function assignWords(
  * Shifts every chunk's segments and words onto one timeline and merges them.
  *
  * Each chunk is a contiguous byte range of the served audio, played back to
- * back. Whisper reports each chunk's timings from zero, and `chunkDuration`
- * measures exactly how long that slice was — so chunk *i* starts at the sum of
- * the durations of every chunk before it. That sum is exact: it does not depend
- * on the file's bitrate or on the feed's reported duration, which is why a
- * stitched-in ad can no longer accumulate error across the episode.
+ * back, and Whisper reports each chunk's timings from zero. So chunk *i* starts
+ * at the sum of the durations of every chunk before it, and the whole transcript
+ * is only as well aligned as that sum.
+ *
+ * The durations come from the container — MP3 frame headers or the MP4 sample
+ * table — which is exact for VBR as well as CBR and owes nothing to the feed's
+ * declared duration. Whisper's own output is the fallback for audio neither
+ * parser could read; see `chunkDuration` for why it is a fallback and not the
+ * primary, and plans/005-caption-sync-accuracy.md for what it cost.
  *
  * After offsetting, words are grouped into the line they are spoken in (so each
  * line carries the per-word timings its fill needs), segments are ordered, and
  * the odd duplicate a frame of overlap at a cut point can produce is dropped.
  */
 export function mergeSegments(chunks: ChunkResult[]): TranscriptSegment[] {
-  // Cumulative start time for each chunk, computed from measured durations.
+  // Cumulative start time for each chunk, from the measured audio where the
+  // container gave it up and from the transcript where it didn't.
   const startTimes: number[] = [];
   let cumulative = 0;
   for (const chunk of chunks) {
     startTimes.push(cumulative);
-    cumulative += chunkDuration(chunk);
+    cumulative +=
+      typeof chunk.seconds === "number" && chunk.seconds > 0
+        ? chunk.seconds
+        : chunkDuration(chunk);
   }
 
   type Item = {
@@ -353,7 +386,7 @@ async function probeAudio(
     // extra over the round trip and lets us sniff MP3-vs-MP4 magic bytes at
     // the same time, which decides whether the file can be chunked.
     const response = await fetch(url, {
-      headers: { range: "bytes=0-127" },
+      headers: publisherHeaders({ range: "bytes=0-127" }),
       signal: combined,
     });
 
@@ -398,12 +431,19 @@ async function fetchChunk(
   end: number,
   isFirst: boolean,
   signal?: AbortSignal,
-): Promise<Blob> {
+): Promise<PreparedChunk> {
   const bytes = await fetchRange(url, start, end, CHUNK_FETCH_TIMEOUT_MS, signal);
   const prepared = prepareChunk(bytes, isFirst);
-  // Re-wrap the view's bytes: a subarray shares its parent's buffer, and the
-  // Blob constructor's type only accepts a plain ArrayBuffer view.
-  return new Blob([prepared.slice().buffer], { type: "audio/mpeg" });
+  return {
+    // Re-wrap the view's bytes: a subarray shares its parent's buffer, and the
+    // Blob constructor's type only accepts a plain ArrayBuffer view.
+    blob: new Blob([prepared.slice().buffer], { type: "audio/mpeg" }),
+    // Measured on the prepared bytes rather than the raw range, so it is the
+    // duration of exactly the audio the provider is about to hear — the leading
+    // partial frame, and the first chunk's ID3 tag and Xing header, are already
+    // gone and must not be counted.
+    seconds: frameSeconds(prepared),
+  };
 }
 
 /**
@@ -833,7 +873,7 @@ async function transcribeWhole(
 ): Promise<TranscriptionResult> {
   let audio: Blob;
   try {
-    const response = await fetch(audioUrl, { signal });
+    const response = await fetch(audioUrl, { headers: publisherHeaders(), signal });
     if (!response.ok) return { ok: false, error: "Couldn't download the episode audio." };
     audio = await response.blob();
   } catch (err) {
@@ -878,7 +918,7 @@ async function transcribeWhole(
  */
 async function transcribeChunks(
   count: number,
-  makeChunk: (index: number, signal?: AbortSignal) => Promise<Blob>,
+  makeChunk: (index: number, signal?: AbortSignal) => Promise<PreparedChunk>,
   config: SttConfig,
   signal?: AbortSignal,
 ): Promise<TranscriptionResult> {
@@ -900,8 +940,8 @@ async function transcribeChunks(
       }
 
       try {
-        const blob = await makeChunk(index, signal);
-        const transcribed = await transcribeBlob(blob, config, signal);
+        const chunk = await makeChunk(index, signal);
+        const transcribed = await transcribeBlob(chunk.blob, config, signal);
         if (!transcribed.ok) {
           failure ??= transcribed.error;
           return;
@@ -909,6 +949,7 @@ async function transcribeChunks(
         results[index] = {
           segments: transcribed.segments,
           words: transcribed.words,
+          seconds: chunk.seconds,
         };
       } catch (err) {
         if (err instanceof Error && err.name === "AbortError") {
@@ -998,14 +1039,19 @@ async function buildMp4Chunk(
   track: Mp4AudioTrack,
   group: { start: number; end: number },
   signal?: AbortSignal,
-): Promise<Blob> {
+): Promise<PreparedChunk> {
   const range = sampleRange(track.samples, group.start, group.end);
   const data = await fetchRange(audioUrl, range.start, range.end, CHUNK_FETCH_TIMEOUT_MS, signal);
 
   const samples = track.samples.slice(group.start, group.end);
   const file = buildM4A(track, samples, data, range.start);
 
-  return new Blob([file.slice().buffer], { type: "audio/mp4" });
+  return {
+    blob: new Blob([file.slice().buffer], { type: "audio/mp4" }),
+    // Exact, unlike the MP3 side: a group is a whole number of samples and each
+    // one declares its own duration, so nothing is left over at the boundary.
+    seconds: groupSeconds(track, group),
+  };
 }
 
 /**
@@ -1089,7 +1135,7 @@ async function fetchRange(
   try {
     const response = await fetch(url, {
       // `end` is exclusive here but inclusive in an HTTP range header.
-      headers: { range: `bytes=${start}-${end - 1}` },
+      headers: publisherHeaders({ range: `bytes=${start}-${end - 1}` }),
       signal: combined,
     });
     if (!response.ok) throw new Error(`range fetch failed: ${response.status}`);

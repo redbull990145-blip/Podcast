@@ -11,6 +11,9 @@ Note: this environment's copy of the `improve-animations` skill was missing its 
 | [001-captions-skeleton-reduced-motion.md](001-captions-skeleton-reduced-motion.md) | Captions-loading skeleton ignores both reduced-motion mechanisms and duplicates the app's own `.skeleton` pattern | **DONE** |
 | [002-spring-opacity-token-split.md](002-spring-opacity-token-split.md) | `popover`/`dialog`/`listItem` variants spring opacity instead of tweening it, against the system's own documented rule | **DONE** |
 | [003-episode-row-checkmark-origin.md](003-episode-row-checkmark-origin.md) | "Played" checkmark badge grows from `scale: 0`, the app's own documented anti-pattern | **DONE** |
+| [005-caption-sync-accuracy.md](005-caption-sync-accuracy.md) | Caption drift is upstream, not in the renderer: chunk offsets are derived from transcribed content rather than audio duration, so error accumulates across every chunk boundary | **§1 DONE**, §2-4 TODO |
+
+Note: 005 is not from the animation audit — it came from a separate investigation into caption synchronisation.
 
 ### Deviations from the plans as written
 

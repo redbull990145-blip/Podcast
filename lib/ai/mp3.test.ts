@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   audioStartOffset,
   findFrame,
+  frameSeconds,
   id3v2Length,
   parseFrameHeader,
   prepareChunk,
@@ -58,7 +59,12 @@ function concat(...parts: Uint8Array[]): Uint8Array {
 
 describe("parseFrameHeader", () => {
   it("computes the frame length of a 128kbps 44.1kHz MPEG1 frame", () => {
-    expect(parseFrameHeader(frame(), 0)).toEqual({ offset: 0, length: FRAME_LENGTH });
+    expect(parseFrameHeader(frame(), 0)).toEqual({
+      offset: 0,
+      length: FRAME_LENGTH,
+      samples: 1152,
+      sampleRate: 44100,
+    });
   });
 
   it("accounts for the padding bit", () => {
@@ -195,5 +201,60 @@ describe("prepareChunk", () => {
     const bytes = new Uint8Array(300).fill(0x42);
     expect(prepareChunk(bytes, true)).toEqual(bytes);
     expect(prepareChunk(bytes, false)).toEqual(bytes);
+  });
+});
+
+/** One MPEG1 Layer III frame at 44.1kHz: 1152 samples. */
+const FRAME_SECONDS = 1152 / 44100;
+
+/** A frame at an arbitrary bitrate index, for building VBR streams. */
+function frameAt(bitrateIndex: number): Uint8Array {
+  const kbps = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0];
+  const length = Math.floor((144 * kbps[bitrateIndex] * 1000) / 44100);
+  const bytes = new Uint8Array(length);
+  bytes[0] = 0xff;
+  bytes[1] = 0xfb;
+  bytes[2] = (bitrateIndex << 4) | 0x00;
+  bytes[3] = 0x00;
+  return bytes;
+}
+
+describe("frameSeconds", () => {
+  it("sums the real duration of a run of frames", () => {
+    const bytes = concat(...Array.from({ length: 100 }, () => frame()));
+    expect(frameSeconds(bytes)).toBeCloseTo(FRAME_SECONDS * 100, 9);
+  });
+
+  it("is exact for a variable-bitrate stream", () => {
+    // Every frame is a different size in bytes and identical in duration, which
+    // is the whole reason bitrate can't be used to measure a VBR file.
+    const bytes = concat(frameAt(5), frameAt(9), frameAt(14), frameAt(2), frameAt(11));
+    expect(frameSeconds(bytes)).toBeCloseTo(FRAME_SECONDS * 5, 9);
+  });
+
+  it("counts a frame cut in half by the end of the range", () => {
+    // Its header is here, and the next chunk starts at the following header
+    // because the orphaned body has none to be found by — so this is the one
+    // place it can be counted, and counting it is what makes the sum exact.
+    const bytes = concat(frame(), frame(), frame().subarray(0, 100));
+    expect(frameSeconds(bytes)).toBeCloseTo(FRAME_SECONDS * 3, 9);
+  });
+
+  it("skips a leading ID3 tag by resyncing to the first real frame", () => {
+    const bytes = concat(id3Tag(500), frame(), frame());
+    expect(frameSeconds(bytes)).toBeCloseTo(FRAME_SECONDS * 2, 9);
+  });
+
+  it("returns null when there is no parseable audio", () => {
+    expect(frameSeconds(new Uint8Array(4096).fill(0x42))).toBeNull();
+    expect(frameSeconds(new Uint8Array(0))).toBeNull();
+  });
+
+  it("measures a chunk independently of how much of it is speech", () => {
+    // The bug this exists to prevent: a chunk ending in silence or music is
+    // exactly as long as one ending on a word, and only the container knows it.
+    const speech = concat(...Array.from({ length: 40 }, () => frame()));
+    const silence = concat(...Array.from({ length: 60 }, () => frame()));
+    expect(frameSeconds(concat(speech, silence))).toBeCloseTo(FRAME_SECONDS * 100, 9);
   });
 });

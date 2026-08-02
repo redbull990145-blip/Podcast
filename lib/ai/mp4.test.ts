@@ -3,6 +3,7 @@ import {
   buildM4A,
   buildSampleTable,
   findBox,
+  groupSeconds,
   parseAudioTrack,
   planSampleGroups,
   readBoxes,
@@ -381,5 +382,50 @@ describe("parseAudioTrack", () => {
 
     expect(parsed).not.toBeNull();
     expect(parsed!.timescale).toBe(48000);
+  });
+});
+
+describe("groupSeconds", () => {
+  /** AAC's usual 1024 samples per frame at 44.1kHz. */
+  const track = {
+    timescale: 44100,
+    samples: Array.from({ length: 100 }, (_, i) => ({
+      offset: i * 400,
+      size: 400,
+      duration: 1024,
+    })),
+  };
+
+  it("is exact, because every sample declares its own duration", () => {
+    expect(groupSeconds(track, { start: 0, end: 100 })).toBeCloseTo(
+      (1024 * 100) / 44100,
+      9,
+    );
+  });
+
+  it("measures a group by its audio, not by where speech stopped", () => {
+    // The same bug as the MP3 side: a group ending in silence is exactly as
+    // long as one ending on a word.
+    expect(groupSeconds(track, { start: 40, end: 100 })).toBeCloseTo(
+      (1024 * 60) / 44100,
+      9,
+    );
+  });
+
+  it("handles variable sample durations", () => {
+    const varied = {
+      timescale: 1000,
+      samples: [
+        { offset: 0, size: 10, duration: 100 },
+        { offset: 10, size: 10, duration: 250 },
+        { offset: 20, size: 10, duration: 400 },
+      ],
+    };
+    expect(groupSeconds(varied, { start: 0, end: 3 })).toBeCloseTo(0.75, 9);
+  });
+
+  it("returns null rather than 0 when there is nothing to measure", () => {
+    expect(groupSeconds(track, { start: 5, end: 5 })).toBeNull();
+    expect(groupSeconds({ timescale: 0, samples: [] }, { start: 0, end: 0 })).toBeNull();
   });
 });

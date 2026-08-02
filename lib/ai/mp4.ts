@@ -340,6 +340,33 @@ export function planSampleGroups(
   return groups;
 }
 
+/**
+ * Exact playback duration of a group of samples, in seconds.
+ *
+ * The sample table carries a per-sample duration in timescale units, so unlike
+ * the MP3 side this is exact with nothing left over — the group is a whole
+ * number of samples and every one of them declares its own length.
+ *
+ * This is what places the group on the episode timeline. Deriving that position
+ * from where Whisper's last word landed instead loses whatever silence or music
+ * the group ended on, and because a boundary can only lose time the error
+ * accumulates forwards through the episode. See
+ * plans/005-caption-sync-accuracy.md.
+ */
+export function groupSeconds(
+  track: Pick<Mp4AudioTrack, "samples" | "timescale">,
+  group: { start: number; end: number },
+): number | null {
+  if (!(track.timescale > 0)) return null;
+
+  let units = 0;
+  for (let i = group.start; i < group.end; i += 1) {
+    units += track.samples[i]?.duration ?? 0;
+  }
+
+  return units > 0 ? units / track.timescale : null;
+}
+
 /** The byte span of the source file a group of samples occupies. */
 export function sampleRange(
   samples: Mp4Sample[],
