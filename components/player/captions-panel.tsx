@@ -20,8 +20,10 @@ import {
 } from "motion/react";
 import { RotateCcw, Sparkles } from "lucide-react";
 import type { TranscriptSegment } from "@/lib/db/schema";
-import { getAudio, usePlayer } from "@/lib/player/store";
+import { usePlayer } from "@/lib/player/store";
+import { captionTime, subscribeClock } from "@/lib/player/playback-clock";
 import { activeSegmentIndex, captionLines } from "@/lib/player/captions";
+import { repairTranscript } from "@/lib/player/transcript-integrity";
 import {
   captionWords,
   centreOffset,
@@ -227,8 +229,18 @@ function VirtualTranscript({
    * captionLines. Memoised on identity because the row height table, the
    * windowing and the fill loop all key off this array, and a new one every
    * render would re-measure the whole transcript.
+   *
+   * Repaired before it is split. `captionLines` and everything downstream of it
+   * assume a timeline that only moves forwards, and a transcript stored before
+   * `repairTranscript` existed — or fetched live from a publisher's feed, which
+   * bypasses the write path entirely — has never been checked against that.
+   * `repairTranscript` returns the input by reference when nothing was wrong,
+   * so the common case costs one pass and allocates nothing.
    */
-  const segments = useMemo(() => captionLines(provided), [provided]);
+  const segments = useMemo(
+    () => captionLines(repairTranscript(provided).segments),
+    [provided],
+  );
 
   /**
    * How far the captions have to be shifted to match this download.
@@ -645,13 +657,27 @@ function VirtualTranscript({
 /**
  * Drives the progressive fill on the line currently being spoken.
  *
- * Reads the audio element directly rather than the store: the store updates on
- * `timeupdate`, which browsers fire about four times a second, and a fill that
- * steps four times a second is exactly the stutter this is meant to avoid.
- *
  * The whole loop writes one CSS custom property on one element, so nothing here
- * touches React or triggers layout. It runs only while audio is actually
- * moving; while paused the value is written once and left alone.
+ * touches React or triggers layout.
+ *
+ * ## A layout effect, not an effect
+ *
+ * This has to write the first fill value *before* the browser paints the newly
+ * active line. `--caption-fill` defaults to 0 and the word attributes start
+ * unset, so a line that is rendered and painted before this runs shows every
+ * word in the unspoken colour for that frame — a white line blinking grey at
+ * every boundary. With lines now a phrase each that is a flicker every few
+ * seconds. `useEffect` fires after paint and cannot avoid it; `useLayoutEffect`
+ * fires before, so the line's first painted frame already carries the sweep it
+ * should have.
+ *
+ * ## One clock, sampled once
+ *
+ * The per-frame callback comes from `subscribeClock`, the same source and the
+ * same sample the active-line index is derived from. Running a second frame
+ * loop here — which is what this did — meant the two could straddle a line
+ * boundary within one frame and paint a fill computed against a segment that
+ * was no longer the active one.
  */
 function useKaraokeFill(
   segments: TranscriptSegment[],
@@ -660,12 +686,7 @@ function useKaraokeFill(
   reduceMotion: boolean,
   offset: number,
 ) {
-  const isPlaying = usePlayer((s) => s.isPlaying);
-  // Constant while playing, so this never causes a render mid-playback; while
-  // paused it changes on a seek, which is exactly when the fill must catch up.
-  const pausedTime = usePlayer((s) => (s.isPlaying ? 0 : s.currentTime));
-
-  useEffect(() => {
+  useLayoutEffect(() => {
     const segment = segments[activeIndex];
     if (!segment) return;
 
@@ -692,15 +713,7 @@ function useKaraokeFill(
       }
     };
 
-    const paint = () => {
-      // The element is the finer clock, but only once it actually has media
-      // loaded — an element with no source reports 0 forever, which would peg
-      // the fill at empty rather than falling back to the store.
-      const audio = getAudio();
-      const playback =
-        audio && audio.currentSrc
-          ? audio.currentTime
-          : usePlayer.getState().currentTime;
+    const paint = (playback: number) => {
       const time = toTranscriptTime(playback, offset);
       // A plain number, not a percentage: the word being swept turns it into
       // its own local fill in CSS, which divides by that word's own width.
@@ -714,25 +727,15 @@ function useKaraokeFill(
       }
     };
 
-    paint();
-    if (!isPlaying || reduceMotion) return;
+    // Reduced motion gets the finished line and no loop at all: a sweep is
+    // precisely the moving thing the preference asks not to see.
+    if (reduceMotion) {
+      paint(captionTime());
+      return;
+    }
 
-    // The store as well as the frame loop, for the same reason as
-    // useActiveSegment: an unfocused window throttles rAF to about 1fps, and a
-    // fill that only repaints once a second reads as broken rather than smooth.
-    // `timeupdate` keeps arriving regardless, so the two together degrade to
-    // four steps a second instead of one.
-    const unsubscribe = usePlayer.subscribe(paint);
-
-    let raf = requestAnimationFrame(function tick() {
-      paint();
-      raf = requestAnimationFrame(tick);
-    });
-    return () => {
-      cancelAnimationFrame(raf);
-      unsubscribe();
-    };
-  }, [segments, activeIndex, rangeStart, isPlaying, pausedTime, reduceMotion, offset]);
+    return subscribeClock(paint);
+  }, [segments, activeIndex, rangeStart, reduceMotion, offset]);
 }
 
 /**
@@ -779,29 +782,23 @@ function useSettledDuration(duration: number): number {
 /**
  * Tracks which line is being spoken.
  *
- * Reads the audio element every frame, for the same reason the fill does — and
- * it has to be the *same* clock as the fill, or the two disagree about which
- * line is current. This used to run off the store, which republishes position
- * on `timeupdate`, and browsers fire that about four times a second: every line
- * became current up to a quarter of a second after it was actually spoken.
- * Measured across eighteen line changes on a real episode, a median of 185ms
- * late and never better than 80ms.
+ * Driven by `subscribeClock`, which is also what drives the fill — and it has
+ * to be the *same* clock, sampled once, or the two disagree about which line is
+ * current for a frame at every boundary. See lib/player/playback-clock.ts for
+ * why that is one shared loop rather than two careful ones, and for why the
+ * clock is not simply `audio.currentTime`.
  *
- * That was invisible while a "line" was thirty seconds of Whisper's output and
- * boundaries were rare. Now that lines are a phrase each (see captionLines)
- * there is a boundary every few seconds, and at every one of them the highlight
- * stalled at the end of the finished line before jumping — which is exactly
- * what being out of sync looks like.
+ * This used to run off the store, which republishes position on `timeupdate`,
+ * and browsers fire that about four times a second: every line became current
+ * up to a quarter of a second after it was actually spoken. Measured across
+ * eighteen line changes on a real episode, a median of 185ms late and never
+ * better than 80ms. That was invisible while a "line" was thirty seconds of
+ * Whisper's output and boundaries were rare. Now that lines are a phrase each
+ * (see captionLines) there is a boundary every few seconds, and at every one of
+ * them the highlight stalled at the end of the finished line before jumping —
+ * which is exactly what being out of sync looks like.
  *
- * Both clocks drive it, which is not belt and braces — they fail in opposite
- * conditions. `requestAnimationFrame` is the precise one, but browsers throttle
- * it hard when the window isn't focused: measured here at 1fps in an unfocused
- * window, which on its own would be a full second late, worse than the store it
- * replaced. The store keeps publishing on `timeupdate` regardless of focus, so
- * it holds the floor at a quarter-second whenever the frame loop is being
- * starved. Whichever fires first moves the line; the other finds nothing to do.
- *
- * The work is cheap enough to run either way: one `activeSegmentIndex` call
+ * The work is cheap enough to run every frame: one `activeSegmentIndex` call
  * resuming from the previous answer, which is a constant-time check during
  * playback, and React is only told anything when the line actually changes.
  */
@@ -810,7 +807,6 @@ function useActiveSegment(
   offset: number,
 ): number {
   const [activeIndex, setActiveIndex] = useState(-1);
-  const isPlaying = usePlayer((s) => s.isPlaying);
 
   useEffect(() => {
     if (!segments || segments.length === 0) {
@@ -819,15 +815,7 @@ function useActiveSegment(
     }
 
     let previous = -1;
-    const update = () => {
-      // The element, but only once it has media — one with no source reports 0
-      // forever, which would peg every line to the first.
-      const audio = getAudio();
-      const playback =
-        audio && audio.currentSrc
-          ? audio.currentTime
-          : usePlayer.getState().currentTime;
-
+    return subscribeClock((playback) => {
       const next = activeSegmentIndex(
         segments,
         toTranscriptTime(playback, offset),
@@ -837,23 +825,8 @@ function useActiveSegment(
         previous = next;
         setActiveIndex(next);
       }
-    };
-
-    update();
-    // Also covers seeking while paused, which is the only way the answer can
-    // change with no frame loop running.
-    const unsubscribe = usePlayer.subscribe(update);
-    if (!isPlaying) return unsubscribe;
-
-    let raf = requestAnimationFrame(function tick() {
-      update();
-      raf = requestAnimationFrame(tick);
     });
-    return () => {
-      cancelAnimationFrame(raf);
-      unsubscribe();
-    };
-  }, [segments, offset, isPlaying]);
+  }, [segments, offset]);
 
   return activeIndex;
 }

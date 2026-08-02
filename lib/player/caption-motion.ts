@@ -106,14 +106,17 @@ function wordKey(text: string): string {
 }
 
 /**
- * Whether two keys are the same spoken word.
+ * Whether two keys are plausibly the same spoken word, allowing for a provider
+ * that split a contraction or clipped a suffix.
  *
- * Exact match, or one being a prefix of the other — which covers a provider
- * that split a contraction or clipped a suffix. The three-character floor is
- * there so short function words can't swallow longer ones: without it "a"
- * matches "and" and the whole line shifts by one from that point on.
+ * Deliberately loose, and only ever consulted after an exact match has been
+ * ruled out for the whole window — see `alignTimings`. On its own this rule is
+ * not safe to take the first hit from: the three-character floor stops "a"
+ * swallowing "and", but it does nothing about "the" swallowing "there", "our"
+ * swallowing "ours", "her"/"here", "one"/"ones", "was"/"wasn't" or "for"/"form".
+ * Those are common enough words that one of them appears in most paragraphs.
  */
-function sameWord(a: string, b: string): boolean {
+function looksLikeSameWord(a: string, b: string): boolean {
   if (a === b) return true;
   const [short, long] = a.length <= b.length ? [a, b] : [b, a];
   return short.length >= 3 && long.startsWith(short);
@@ -136,6 +139,23 @@ const ALIGN_LOOKAHEAD = 3;
  * highlight on a different word from the one being said. Tokens with no match
  * are left null for the caller to interpolate; a timing with no token is simply
  * skipped.
+ *
+ * ## Exact matches win the whole window before any fuzzy one is considered
+ *
+ * The window is scanned twice, and the order is the point. Taking the first
+ * position that merely *looks* like a match is how a token acquires the timing
+ * of a different word: with tokens `… the answer …` against timings
+ * `… there, the, answer …`, "the" tests against "there" first,
+ * `looksLikeSameWord` accepts it on the prefix rule, and the cursor advances
+ * past the real "the". Every later word on the line inherits the shift, and
+ * because the anchors are forced monotonic downstream the error cannot correct
+ * itself — it reads as a run of words highlighting slightly early.
+ *
+ * The two lists are the same speech in the same order, so if the true match is
+ * anywhere it is inside the window. Preferring it costs one extra pass over at
+ * most four entries and removes the entire class of false anchor. The fuzzy
+ * rule then does what it was actually for: catching a contraction or a clipped
+ * suffix in the cases where nothing matched exactly.
  */
 function alignTimings(
   tokens: string[],
@@ -153,12 +173,26 @@ function alignTimings(
     if (!key) continue;
 
     const limit = Math.min(timings.length, next + 1 + ALIGN_LOOKAHEAD);
+
+    let match = -1;
     for (let j = next; j < limit; j += 1) {
-      if (timingKeys[j] && sameWord(tokenKeys[i], timingKeys[j])) {
-        anchors[i] = timings[j];
-        next = j + 1;
+      if (timingKeys[j] === key) {
+        match = j;
         break;
       }
+    }
+    if (match === -1) {
+      for (let j = next; j < limit; j += 1) {
+        if (timingKeys[j] && looksLikeSameWord(key, timingKeys[j])) {
+          match = j;
+          break;
+        }
+      }
+    }
+
+    if (match !== -1) {
+      anchors[i] = timings[match];
+      next = match + 1;
     }
   }
 

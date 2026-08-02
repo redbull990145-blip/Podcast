@@ -1,6 +1,7 @@
 import { colabSttConfig, type SttConfig } from "./config";
 import type { TranscriptSegment, TranscriptWord } from "@/lib/db/schema";
 import { collapseLoops } from "@/lib/transcript/repetition";
+import { repairTranscript } from "@/lib/player/transcript-integrity";
 import { publisherHeaders } from "@/lib/user-agent";
 import { frameSeconds, prepareChunk } from "./mp3";
 import {
@@ -362,7 +363,18 @@ export function mergeSegments(chunks: ChunkResult[]): TranscriptSegment[] {
     merged.push(segment);
   }
 
-  return merged;
+  /*
+   * The last step before this becomes the stored timeline.
+   *
+   * Chunk boundaries are exactly where the invariants break: each chunk's
+   * timings are shifted by the *measured* duration of everything before it, and
+   * a measurement that lands a frame long puts the first line of a chunk before
+   * the last line of the one it follows. Every consumer downstream — the active
+   * line scan, the word anchoring, the fill — assumes that cannot happen. Fixing
+   * it once here means it cannot, rather than each of them being separately
+   * careful about it and disagreeing.
+   */
+  return repairTranscript(merged).segments;
 }
 
 // ---------------------------------------------------------------------------

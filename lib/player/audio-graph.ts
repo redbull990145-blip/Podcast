@@ -140,6 +140,35 @@ export function isGraphAttachedTo(element: HTMLAudioElement): boolean {
   return graph?.element === element;
 }
 
+/**
+ * Seconds of delay the output path adds after `audio.currentTime`, or 0 when
+ * nothing can measure it.
+ *
+ * Both halves are real and both are needed. `baseLatency` is what this graph
+ * costs to process a block; `outputLatency` is what the platform holds in its
+ * own buffer before the DAC — on desktop tens of milliseconds, on Android
+ * routinely more. Captions keyed to the decoder position lead the sound by
+ * their sum.
+ *
+ * Reported by Chrome and Firefox; `outputLatency` is absent in Safari, where
+ * `baseLatency` alone is still better than nothing and the missing half is
+ * simply not corrected for. Read live rather than cached because the platform
+ * revises it when the output device changes — plugging in Bluetooth headphones
+ * mid-episode is the case that matters, and it is exactly when the delay jumps.
+ */
+export function graphOutputLatency(): number {
+  if (!graph) return 0;
+  const { context } = graph;
+  const base = typeof context.baseLatency === "number" ? context.baseLatency : 0;
+  const output =
+    typeof (context as AudioContext & { outputLatency?: number }).outputLatency ===
+    "number"
+      ? (context as AudioContext & { outputLatency: number }).outputLatency
+      : 0;
+  const total = base + output;
+  return Number.isFinite(total) && total > 0 ? total : 0;
+}
+
 /** Tears the graph down entirely, for when the element goes back to plain playback. */
 export function teardownGraph() {
   stopSilenceEngine();
