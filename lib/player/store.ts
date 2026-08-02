@@ -245,7 +245,7 @@ function loadPrefs(): Pick<
   }
 }
 
-function savePrefs(state: PlayerState) {
+function writePrefs(state: PlayerState) {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(
@@ -265,6 +265,44 @@ function savePrefs(state: PlayerState) {
   } catch {
     // Storage can be full or blocked; preferences are not worth failing over.
   }
+}
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingState: PlayerState | null = null;
+
+/**
+ * Persists preferences, coalescing bursts into one write.
+ *
+ * `localStorage.setItem` is synchronous and blocks the main thread, and both
+ * volume and speed are dragged — a pointer at 120Hz was issuing 120 stringify +
+ * write pairs a second straight down the middle of the drag, which is what made
+ * the volume slider stutter under the cursor. Nothing reads these back except
+ * `loadPrefs` at store construction, so the write is free to trail the state.
+ */
+function savePrefs(state: PlayerState) {
+  if (typeof window === "undefined") return;
+  pendingState = state;
+  if (saveTimer) return;
+  saveTimer = setTimeout(flushPrefs, 250);
+}
+
+function flushPrefs() {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  if (!pendingState) return;
+  writePrefs(pendingState);
+  pendingState = null;
+}
+
+// A tab can be discarded without ever firing `visibilitychange`, so the last
+// few hundred milliseconds of a drag would otherwise be lost on close.
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", flushPrefs);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushPrefs();
+  });
 }
 
 export const usePlayer = create<PlayerState & PlayerActions>((set, get) => ({

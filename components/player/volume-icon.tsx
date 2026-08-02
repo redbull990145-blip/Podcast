@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { SPRING } from "@/lib/motion/config";
 import { cn } from "@/lib/utils";
@@ -37,7 +38,7 @@ export function arcCount(level: number): number {
   return 1;
 }
 
-export function VolumeIcon({
+function VolumeIconImpl({
   level,
   className,
 }: {
@@ -95,3 +96,21 @@ export function VolumeIcon({
     </svg>
   );
 }
+
+/**
+ * Only the arc count is ever drawn, so only the arc count is worth re-rendering
+ * for.
+ *
+ * The level behind it changes continuously while the volume slider is dragged —
+ * sixty-odd times a second — and each of those was re-rendering an
+ * `AnimatePresence` with up to four motion children, which is real prop-diffing
+ * work landing in the middle of the one gesture that cannot afford it. Across a
+ * full sweep this renders four times instead of hundreds, and because the
+ * comparison is over exactly what the component draws, nothing on screen
+ * differs.
+ */
+export const VolumeIcon = memo(
+  VolumeIconImpl,
+  (prev, next) =>
+    arcCount(prev.level) === arcCount(next.level) && prev.className === next.className,
+);
