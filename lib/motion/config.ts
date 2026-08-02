@@ -50,6 +50,25 @@ export const SPRING = {
   sheet: { type: "spring", stiffness: 280, damping: 32, mass: 0.9 } satisfies Transition,
 
   /**
+   * Shared-element morphs — a cover travelling from the player bar into the
+   * full-screen player, and back.
+   *
+   * This is a different problem from `sheet`, which is why it is not that.
+   * A sheet is a slab of chrome arriving: the eye does not track any point on
+   * it, so a hair of overshoot at the end reads as weight. A morphing cover is
+   * a single recognisable object crossing most of the screen while quadrupling
+   * in size, and the eye tracks it the entire way — which means an overshoot is
+   * not felt as weight but seen as the artwork visibly bouncing off the edge of
+   * the layout it just landed in.
+   *
+   * So this is the one spring in the set damped *to* critical rather than just
+   * under it. The character comes from mass instead: 1.1 against `sheet`'s 0.9
+   * makes it leave slightly more slowly, which is what sells a large object
+   * moving rather than a small one moving far.
+   */
+  morph: { type: "spring", stiffness: 260, damping: 36, mass: 1.1 } satisfies Transition,
+
+  /**
    * The transcript's travel between lines.
    *
    * Measured off Spotify's lyrics view frame by frame rather than guessed at.

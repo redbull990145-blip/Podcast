@@ -36,6 +36,17 @@ type PrefsState = {
   artworkMotion: Intensity;
   /** Whether the keyboard shortcut reference is open. */
   shortcutsOpen: boolean;
+  /**
+   * Whether the command palette is open.
+   *
+   * Here rather than in a component because three unrelated places open it —
+   * the ⌘K handler, the top bar's search field and the mobile nav — and lifting
+   * it into the layout would have made every one of them prop-drill through
+   * chrome that has nothing else to do with search. Not persisted, for the same
+   * reason `shortcutsOpen` is not: an overlay that reopens itself on the next
+   * page load is a bug, not a restored preference.
+   */
+  paletteOpen: boolean;
   /** False until localStorage has been read, so SSR and hydration agree. */
   hydrated: boolean;
 
@@ -43,6 +54,7 @@ type PrefsState = {
   setEpisodeFilter: (filter: EpisodeFilter) => void;
   setArtworkMotion: (intensity: Intensity) => void;
   setShortcutsOpen: (open: boolean) => void;
+  setPaletteOpen: (open: boolean) => void;
   hydrate: () => void;
 };
 
@@ -72,6 +84,7 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   episodeFilter: "all",
   artworkMotion: "medium",
   shortcutsOpen: false,
+  paletteOpen: false,
   hydrated: false,
 
   hydrate() {
@@ -111,6 +124,13 @@ export const usePrefs = create<PrefsState>((set, get) => ({
   setShortcutsOpen(shortcutsOpen) {
     set({ shortcutsOpen });
   },
+
+  setPaletteOpen(paletteOpen) {
+    // The two overlays are mutually exclusive: the shortcut reference is
+    // reachable *from* the palette, and leaving both mounted would trap focus
+    // between two dialogs with no way back to the page.
+    set({ paletteOpen, shortcutsOpen: paletteOpen ? false : get().shortcutsOpen });
+  },
 }));
 
 function isIntensity(value: unknown): value is Intensity {
@@ -127,6 +147,11 @@ function isFilter(value: unknown): value is EpisodeFilter {
 
 /** Shared so the help overlay and the handler can never drift apart. */
 export const SHORTCUTS: { keys: string; description: string; powerOnly?: boolean }[] = [
+  // Deliberately not power-only. It is the one shortcut a newcomer benefits
+  // from without knowing anything else about the app, because it is search
+  // before it is a command list — and it is the key every other application
+  // with a palette has trained people to try.
+  { keys: "⌘K", description: "Search and jump anywhere" },
   { keys: "Space", description: "Play or pause" },
   { keys: "→", description: "Skip forward" },
   { keys: "←", description: "Skip back" },

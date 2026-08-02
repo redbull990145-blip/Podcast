@@ -12,6 +12,7 @@ import { PlayerBar } from "@/components/player/player-bar";
 import { NowPlayingHost } from "@/components/player/now-playing-host";
 import { PrefsHydrator } from "@/components/power-mode/power-mode-toggle";
 import { KeyboardShortcuts } from "@/components/power-mode/keyboard-shortcuts";
+import { CommandPaletteHost } from "@/components/command/command-palette-host";
 
 /**
  * Authenticated shell.
@@ -56,6 +57,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <PlayerBar />
           <NowPlayingHost />
           <MobileNav />
+          {/* Code-split: nothing of it is fetched until ⌘K is first pressed. */}
+          <CommandPaletteHost />
           {/* Headless: owns the audio element, position sync and OS controls. */}
           <PlayerProvider />
           {/* Headless: restores stored UI preferences, owns the shortcut layer. */}

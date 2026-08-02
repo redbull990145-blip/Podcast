@@ -3,19 +3,29 @@
 import Image from "next/image";
 import { motion } from "motion/react";
 import { Rss } from "lucide-react";
-import { usePlayer, type PlayableEpisode } from "@/lib/player/store";
+import { usePlayer } from "@/lib/player/store";
+import {
+  playableFromContinueItem,
+  progressFraction,
+  remainingSeconds,
+} from "@/lib/player/resume";
+import { SPRING } from "@/lib/motion/config";
 import { liftCard } from "@/lib/motion/gestures";
 import { listContainer, listItem } from "@/lib/motion/variants";
 import type { ContinueItem } from "@/lib/stats/listening";
 import { formatDurationLong } from "@/lib/utils";
 
 /**
- * The three things most recently left unfinished.
+ * The things most recently left unfinished, after the first.
  *
  * Each card resumes at the saved position on click rather than opening the
  * episode page — someone who left an episode half-finished wants to be back in
  * it, not to read about it. The episode page is one level in, from the title on
  * the show page.
+ *
+ * The most recent of these is rendered above as `ResumeHero`, so this list
+ * receives the tail. That split is why the grid is sized for two or three
+ * rather than exactly three.
  */
 export function ContinueRow({ items }: { items: ContinueItem[] }) {
   return (
@@ -35,23 +45,11 @@ export function ContinueRow({ items }: { items: ContinueItem[] }) {
 function ContinueCard({ item }: { item: ContinueItem }) {
   const load = usePlayer((s) => s.load);
 
-  const duration = item.durationSeconds ?? 0;
-  const percent =
-    duration > 0 ? Math.min(100, Math.round((item.positionSeconds / duration) * 100)) : 0;
-  const remaining = duration > 0 ? duration - item.positionSeconds : 0;
+  const fraction = progressFraction(item);
+  const remaining = remainingSeconds(item);
 
   function resume() {
-    const playable: PlayableEpisode = {
-      id: item.episodeId,
-      title: item.title,
-      enclosureUrl: item.enclosureUrl,
-      durationSeconds: item.durationSeconds,
-      artworkUrl: item.artworkUrl,
-      podcastId: item.podcastId,
-      podcastTitle: item.podcastTitle,
-      categories: item.categories,
-    };
-    load(playable, item.positionSeconds);
+    load(playableFromContinueItem(item), item.positionSeconds);
   }
 
   return (
@@ -59,7 +57,7 @@ function ContinueCard({ item }: { item: ContinueItem }) {
       <button
         onClick={resume}
         aria-label={`Resume ${item.title}`}
-        className="flex w-full flex-col gap-3 rounded-app-lg border border-border-2 bg-surface p-4 text-left transition-colors hover:border-border-strong"
+        className="elev-card flex w-full flex-col gap-3 rounded-app-lg p-4 text-left transition-colors hover:border-border-strong"
       >
         <span className="flex items-start gap-3">
           {item.artworkUrl ? (
@@ -88,10 +86,18 @@ function ContinueCard({ item }: { item: ContinueItem }) {
         </span>
 
         <span className="flex items-center gap-2.5">
+          {/*
+            scaleX rather than width. `progressFraction` returns 0–1 already, so
+            there is no percentage to divide here — the conversion that plans
+            011 and 013 got wrong by dropping a `/100` has been moved into one
+            tested function instead of being repeated at each call site.
+          */}
           <span className="h-1 flex-1 overflow-hidden rounded-full bg-track">
-            <span
-              className="block h-full rounded-full bg-accent"
-              style={{ width: `${percent}%` }}
+            <motion.span
+              initial={{ scaleX: 0 }}
+              animate={{ scaleX: fraction }}
+              transition={SPRING.progress}
+              className="block h-full origin-left rounded-full bg-accent"
             />
           </span>
           <span className="shrink-0 text-[11px] tabular-nums text-subtle">

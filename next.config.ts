@@ -74,7 +74,18 @@ const nextConfig: NextConfig = {
   experimental: {
     // Turns the barrel imports into direct ones. lucide-react alone is a few
     // thousand modules, which dev has to walk on every cold route compile.
-    optimizePackageImports: ["lucide-react", "@tanstack/react-query", "dexie"],
+    //
+    // `motion` and `radix-ui` are here for the same reason and were the two
+    // largest omissions: `motion` is imported by more files than anything else
+    // in the app, and `radix-ui` is a single package re-exporting every
+    // primitive, so an unoptimised import of one dialog pulls the whole set.
+    optimizePackageImports: [
+      "lucide-react",
+      "@tanstack/react-query",
+      "dexie",
+      "motion",
+      "radix-ui",
+    ],
   },
 };
 

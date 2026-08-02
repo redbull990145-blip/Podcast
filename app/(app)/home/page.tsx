@@ -7,26 +7,35 @@ import { getDashboardStats } from "@/lib/stats/listening";
 import { PageShell } from "@/components/ui/page";
 import { Greeting } from "@/components/home/greeting";
 import { StatCards } from "@/components/home/stat-cards";
+import { ResumeHero } from "@/components/home/resume-hero";
 import { ContinueRow } from "@/components/home/continue-row";
 import { RecommendedRow } from "@/components/home/recommended-row";
 
 export const metadata: Metadata = { title: "Home" };
 
+/**
+ * `href`/`action` are optional because not every section has somewhere further
+ * to go — the week's figures are complete on this page and there is no stats
+ * screen to link to. A "See all" pointing back at the same numbers is worse
+ * than no link.
+ */
 function SectionHeading({
   title,
   href,
   action,
 }: {
   title: React.ReactNode;
-  href: string;
-  action: string;
+  href?: string;
+  action?: string;
 }) {
   return (
     <div className="mt-11 flex items-baseline justify-between gap-4">
-      <h2 className="text-[19px] font-semibold -tracking-[0.02em]">{title}</h2>
-      <Link href={href} className="shrink-0 text-[13px] font-medium">
-        {action}
-      </Link>
+      <h2 className="text-heading font-semibold">{title}</h2>
+      {href && action && (
+        <Link href={href} className="shrink-0 text-meta font-medium">
+          {action}
+        </Link>
+      )}
     </div>
   );
 }
@@ -42,8 +51,19 @@ export default async function HomePage() {
     user.email?.split("@")[0] ??
     "you";
 
+  /*
+   * The most-unfinished episode is promoted out of the list into the hero, and
+   * the rest of the list follows it.
+   *
+   * The ordering of this page changed here, and the reason is worth recording:
+   * it used to run greeting → statistics → continue → suggestions, which put a
+   * report on last week's listening above the episode the person had stopped
+   * half-way through. Statistics are retrospective. They are a pleasant thing
+   * to find and they have never once caused anyone to press play, so they now
+   * sit below both of the things that can.
+   */
   const { continueListening, streakDays } = stats;
-  const nextUp = continueListening[0];
+  const [nextUp, ...alsoUnfinished] = continueListening;
 
   return (
     <PageShell>
@@ -53,9 +73,15 @@ export default async function HomePage() {
           <h1 className="mt-2.5 text-[30px] font-semibold leading-[1.1] -tracking-[0.03em] sm:text-[38px]">
             Welcome back, {firstName}
           </h1>
-          <p className="mt-2.5 text-pretty text-[15px] text-muted">
+          {/*
+            The subtitle no longer names the unfinished episode, because the
+            hero directly below now shows it with its artwork, its progress and
+            a button. Saying the title twice in two adjacent blocks made the
+            page read as though it were insisting.
+          */}
+          <p className="mt-2.5 text-pretty text-body text-muted">
             {nextUp
-              ? `You're partway through ${nextUp.title}.`
+              ? "Ready when you are."
               : "Nothing half-finished — a clean slate to start something on."}
           </p>
         </div>
@@ -75,17 +101,20 @@ export default async function HomePage() {
         )}
       </div>
 
-      <StatCards stats={stats} />
+      {nextUp && <ResumeHero item={nextUp} />}
 
-      {continueListening.length > 0 && (
+      {alsoUnfinished.length > 0 && (
         <>
-          <SectionHeading title="Continue listening" href="/queue" action="Open queue" />
-          <ContinueRow items={continueListening} />
+          <SectionHeading title="Also unfinished" href="/queue" action="Open queue" />
+          <ContinueRow items={alsoUnfinished} />
         </>
       )}
 
       <SectionHeading title="Suggested for you" href="/discover" action="More like this" />
       <RecommendedRow />
+
+      <SectionHeading title="Your week" />
+      <StatCards stats={stats} />
     </PageShell>
   );
 }

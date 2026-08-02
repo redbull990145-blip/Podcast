@@ -4,7 +4,7 @@ import type { DashboardStats } from "@/lib/stats/listening";
 
 function Card({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-app-lg border border-border-2 bg-surface p-5">
+    <div className="elev-card rounded-app-lg p-5">
       <SectionLabel>{label}</SectionLabel>
       {children}
     </div>
@@ -50,7 +50,7 @@ export function StatCards({ stats }: { stats: DashboardStats }) {
   const peak = Math.max(...daily.map((d) => d.seconds), 1);
 
   return (
-    <div className="mt-8 grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="mt-4 grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
       <Card label="This week">
         <Figure value={formatHours(weekSeconds)} unit="hrs" />
 
