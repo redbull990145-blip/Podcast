@@ -69,17 +69,42 @@
   --border-strong: #d8d0c2;
   --border-strong-2: #dcd5c8;
 
+  /*
+   * The eight-step emphasis ramp.
+   *
+   * The seven steps below `ink-4` were darkened by 13% for contrast. Measured
+   * against the worst ground they ever land on — `--surface-sunken` #f0ece4,
+   * not the page background, since a panel is the darker of the two — the ramp
+   * was failing where it was carrying real text:
+   *
+   *   muted-2  3.87 → 4.85   descriptions under a title      now AA
+   *   subtle   3.14 → 4.00   notes, "1h 8m left"             was FAIL at any size
+   *   subtle-2 2.36 → 3.06   show names under episode titles was FAIL at any size
+   *
+   * The inks are untouched: all four already cleared 5.8 and darkening them
+   * would have closed the gap to `muted` that separates a title from the line
+   * under it.
+   *
+   * The bottom of the ramp still does not reach 4.5, and it cannot. The AA floor
+   * on this ground sits at roughly #706a60, which leaves one narrow band of
+   * grey for what is currently four distinct steps — pushing `subtle-2` to 4.5
+   * lands it on #706b61, a single hex off `subtle`, and the ramp stops being a
+   * ramp. So the rest of the fix is at the call sites: text that is content
+   * rather than decoration was moved up a step (see `ContinueRow`), and what
+   * remains on `faint` is genuinely peripheral — dot-separated metadata that
+   * restates something already on screen.
+   */
   --ink: #22201d;
   --ink-2: #39352f;
   --ink-3: #4a463f;
   --ink-4: #5f5950;
-  --muted: #6b655c;
-  --muted-2: #7c7568;
-  --subtle: #8b8478;
-  --subtle-2: #a29a8c;
-  --faint: #b0a89a;
-  --faint-2: #b9b0a1;
-  --faint-3: #c2baab;
+  --muted: #5d5850;
+  --muted-2: #6c665a;
+  --subtle: #797368;
+  --subtle-2: #8d867a;
+  --faint: #999286;
+  --faint-2: #a1998c;
+  --faint-3: #a9a295;
 
   --foreground: var(--ink);
   --muted-foreground: var(--muted);
@@ -106,20 +131,47 @@
   /*
    * Glass, for the floating top bar.
    *
-   * A blur alone reads as a smudge. What makes frosted glass legible as a
-   * material is the edge: a bright inset line along the top where light catches
-   * the bevel, a darker one along the bottom, and a hairline ring holding the
-   * whole shape against whatever scrolls underneath.
+   * The bar used to be frosted: a wide blur, a warm fill and a two-line bevel.
+   * These describe something else — a solid, polished slab, transposed from the
+   * `MeshTransmissionMaterial` parameters that React Bits' FluidGlass renders in
+   * WebGL (transmission 1, roughness 0, ior 1.15, thickness 10, chromatic
+   * aberration 0.1, anisotropy 0.01, white attenuation over a short distance).
+   *
+   * Those are physical quantities and CSS has no refraction, so each one is
+   * carried by the cue it actually produces on screen. See `.fluid-glass` for
+   * where each token lands and why that mapping is the honest one:
+   *
+   *   transmission 1 / roughness 0  → clear body, sharp specular  (--fg-fill, --fg-specular)
+   *   ior 1.15                      → light bending in at the rim (--fg-refraction)
+   *   thickness 10                  → how far in that rim reaches  (--fg-thickness)
+   *   chromatic aberration 0.1      → opposed hue fringes          (--fg-fringe-*)
+   *   anisotropy 0.01               → a smeared, directional sheen (--fg-sheen)
+   *   attenuation, white @ 0.25     → the vertical falloff in the fill
    */
-  --glass-bg: linear-gradient(
+  --fg-blur: 20px;
+  --fg-saturate: 185%;
+  --fg-brightness: 1.04;
+
+  /* Attenuation: white, and over a short distance, so it accumulates quickly
+     toward both faces and thins out through the middle of the slab. */
+  --fg-fill: linear-gradient(
     180deg,
-    rgb(252 251 248 / 0.52) 0%,
-    rgb(244 241 236 / 0.34) 100%
+    rgb(255 255 255 / 0.46) 0%,
+    rgb(252 251 248 / 0.26) 46%,
+    rgb(246 243 238 / 0.38) 100%
   );
-  --glass-border: rgb(255 255 255 / 0.66);
+
+  --fg-sheen: rgb(255 255 255 / 0.6);
+  --fg-edge: rgb(255 255 255 / 0.72);
+  --fg-specular: rgb(255 255 255 / 0.92);
+  --fg-lowlight: rgb(255 255 255 / 0.2);
+  --fg-refraction: rgb(255 255 255 / 0.42);
+  --fg-thickness: 10px;
+  --fg-fringe-cool: rgb(96 166 255 / 0.26);
+  --fg-fringe-warm: rgb(255 138 173 / 0.22);
+
   --glass-ring: rgb(34 32 29 / 0.07);
   --glass-highlight: rgb(255 255 255 / 0.85);
-  --glass-lowlight: rgb(255 255 255 / 0.18);
   --glass-pill: rgb(255 255 255 / 0.72);
   --glass-hover: rgb(255 255 255 / 0.38);
   --glass-shadow: 0 1px 2px rgb(34 32 29 / 0.05), 0 14px 34px rgb(34 32 29 / 0.13);
@@ -227,6 +279,15 @@
   --border-strong: #3c3c43;
   --border-strong-2: #34343a;
 
+  /*
+   * Deliberately not shifted alongside the light ramp, because dark did not
+   * have light's problem. Measured on `--surface-raised` #1b1b1e, `muted` is
+   * 6.91, `muted-2` 5.97 and `subtle` 4.93 — every step carrying text already
+   * clears AA. Only `subtle-2` (3.85) and the faint tail fall short, and there
+   * is no room to lift them: `subtle-2` needs #858484 to reach 4.6, which is
+   * one hex off `subtle`. Same conclusion as light, reached from the other end
+   * — the fix for those is the call site, not the token.
+   */
   --ink: #f3f2f1;
   --ink-2: #e4e3e2;
   --ink-3: #d2d1d0;
@@ -255,15 +316,39 @@
   --warning: #d7ac6a;
   --danger: #e08f7e;
 
-  --glass-bg: linear-gradient(
+  /*
+   * The same slab, lit from a dark room.
+   *
+   * Two of these move in the opposite direction from the light theme rather
+   * than just getting darker. `--fg-brightness` goes *up*: transmission 1 means
+   * the material passes light rather than blocking it, and on #0c0c0d a pane
+   * that only tints reads as an opaque bar, so the backdrop has to be lifted
+   * for anything to look like it is coming through. And the fringes keep almost
+   * all of their strength — chromatic aberration is the one cue here that is
+   * pure hue rather than luminance, so it survives the dark background intact
+   * and does most of the work the specular does in light.
+   */
+  --fg-blur: 22px;
+  --fg-saturate: 165%;
+  --fg-brightness: 1.14;
+
+  --fg-fill: linear-gradient(
     180deg,
-    rgb(58 58 63 / 0.42) 0%,
-    rgb(16 16 18 / 0.34) 100%
+    rgb(88 88 96 / 0.34) 0%,
+    rgb(30 30 34 / 0.24) 46%,
+    rgb(16 16 18 / 0.38) 100%
   );
-  --glass-border: rgb(243 242 241 / 0.15);
+
+  --fg-sheen: rgb(243 242 241 / 0.22);
+  --fg-edge: rgb(243 242 241 / 0.16);
+  --fg-specular: rgb(243 242 241 / 0.3);
+  --fg-lowlight: rgb(0 0 0 / 0.32);
+  --fg-refraction: rgb(243 242 241 / 0.11);
+  --fg-fringe-cool: rgb(96 166 255 / 0.22);
+  --fg-fringe-warm: rgb(255 138 173 / 0.18);
+
   --glass-ring: rgb(0 0 0 / 0.55);
   --glass-highlight: rgb(243 242 241 / 0.2);
-  --glass-lowlight: rgb(0 0 0 / 0.28);
   --glass-pill: rgb(243 242 241 / 0.14);
   --glass-hover: rgb(243 242 241 / 0.07);
   --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 18px 42px rgb(0 0 0 / 0.6);
@@ -339,7 +424,6 @@
 
   --color-glass-pill: var(--glass-pill);
   --color-glass-hover: var(--glass-hover);
-  --color-glass-border: var(--glass-border);
   --color-glass-ring: var(--glass-ring);
 
   --color-success: var(--success);
@@ -482,51 +566,165 @@
 
 @layer components {
   /*
-   * Frosted glass, used by the floating top bar.
+   * The floating top bar's material: a slab of polished glass.
+   *
+   * The parameters come from React Bits' FluidGlass, which is a WebGL component
+   * — a `MeshTransmissionMaterial` that renders the scene to an offscreen
+   * buffer and refracts that buffer through a mesh. None of that is portable to
+   * a nav bar over live DOM: there is no texture of the page to refract, and
+   * producing one would mean rasterising every scroll frame to feed a canvas
+   * that then has to sit *behind* real, focusable nav controls.
+   *
+   * So the material is rebuilt out of the cues those parameters produce, which
+   * is the part that was actually wanted. Every layer below names the parameter
+   * it stands in for.
    *
    * `saturate` alongside the blur is what separates this from a grey scrim:
    * blurring alone averages the colours underneath toward neutral, so a vivid
    * cover scrolling past the bar turns to mud. Pushing saturation back up keeps
    * a hint of what is behind it, which is the entire reason for the material.
-   *
-   * The two inset lines are the bevel — bright along the top edge where light
-   * would catch, dim along the bottom — and the outer ring holds the shape when
-   * whatever scrolls underneath happens to match the glass itself.
    */
-  .glass-panel {
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
+  .fluid-glass {
+    /*
+     * Where the sheen is centred, 0–100% across the bar. The top bar writes
+     * this from the pointer; it is declared here so the material is complete on
+     * its own — on touch, and before the first pointermove, the light simply
+     * sits in the middle.
+     */
+    --fg-sweep: 50%;
+
+    position: relative;
+    border-radius: var(--radius-xl);
+
+    background:
+      /*
+       * anisotropy 0.01 — an anisotropic highlight is a smear rather than a
+       * point, so this is a wide ellipse whose centre sits *above* the bar:
+       * only the lower lobe lands on the glass, which is what makes it read as
+       * one raking light source rather than as a painted blob.
+       */
+      radial-gradient(
+          125% 165% at var(--fg-sweep) -34%,
+          var(--fg-sheen) 0%,
+          transparent 58%
+        )
+        border-box,
+      var(--fg-fill) border-box;
+
+    border: 1px solid var(--fg-edge);
+
     box-shadow:
-      inset 0 1px 0 var(--glass-highlight),
-      inset 0 -1px 0 var(--glass-lowlight),
-      0 0 0 1px var(--glass-ring);
+      /* roughness 0 — a polished face returns a hard specular line, not a
+         gradient, so the top edge stays a crisp 1px. */
+      inset 0 1px 0 var(--fg-specular),
+      inset 0 -1px 0 var(--fg-lowlight),
+      /*
+       * ior 1.15 over thickness 10 — light entering off-axis bends toward the
+       * normal and piles up just inside the rim. The negative spread is what
+       * makes this a band hugging the edge instead of a wash over the whole
+       * bar; the blur radius is the thickness, so the two read as one property.
+       */
+        inset 0 0 var(--fg-thickness) -2px var(--fg-refraction),
+      /*
+       * chromaticAberration 0.1 — dispersion splits the rim into two hues that
+       * land on *opposite* edges, because they are the same image displaced in
+       * opposite directions. Hence the mirrored offsets rather than a coloured
+       * border, which is what a single-hue ring would look like.
+       */
+        inset 1.5px 1.5px 2.5px -1px var(--fg-fringe-cool),
+      inset -1.5px -1.5px 2.5px -1px var(--fg-fringe-warm),
+      /* Holds the shape when whatever scrolls underneath happens to match the
+         glass itself. */
+        0 0 0 1px var(--glass-ring);
   }
 
   /*
-   * The bar's drop shadow, split out of `.glass-panel` so it can be faded
+   * The bar's drop shadow, split out of `.fluid-glass` so it can be faded
    * independently of the material it belongs to.
    *
-   * The bevel and the ring above are properties of the glass itself and are
-   * always true. A drop shadow is a claim about *distance from what is behind
-   * it*, and at the top of an unscrolled page there is nothing behind it — the
-   * shadow lands on empty background and reads as a seam ruled across the
+   * The bevel, the rim and the ring above are properties of the glass itself
+   * and are always true. A drop shadow is a claim about *distance from what is
+   * behind it*, and at the top of an unscrolled page there is nothing behind it
+   * — the shadow lands on empty background and reads as a seam ruled across the
    * screen rather than as a floating bar.
    *
    * It is a separate element rather than an animated `box-shadow` because
    * interpolating a shadow means re-rasterising the blur every frame, on the
-   * one element in the app that already carries a 26px backdrop-filter.
+   * one element in the app that already carries a 20px backdrop-filter.
    * Cross-fading a second layer's opacity is a compositor operation and the
    * blur is rasterised once.
+   *
+   * It carries its own radius because it has to be the same silhouette as the
+   * glass — a rounded-rect shadow behind a squircle shows at the corners.
    */
-  .glass-lift {
+  .fluid-glass-lift {
+    border-radius: var(--radius-xl);
     box-shadow: var(--glass-shadow);
   }
 
   @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-    .glass-panel {
-      -webkit-backdrop-filter: blur(26px) saturate(180%);
-      backdrop-filter: blur(26px) saturate(180%);
+    .fluid-glass {
+      -webkit-backdrop-filter: blur(var(--fg-blur)) saturate(var(--fg-saturate))
+        brightness(var(--fg-brightness));
+      backdrop-filter: blur(var(--fg-blur)) saturate(var(--fg-saturate))
+        brightness(var(--fg-brightness));
     }
+  }
+
+  /*
+   * The superellipse.
+   *
+   * `corner-shape: squircle` is the only way to get one without giving
+   * something else up. The alternatives — `clip-path: path()` or a mask — cut
+   * the element rather than reshaping it, which would take the border, the
+   * backdrop-filter's clip and the outward drop shadow with them, and would
+   * need re-solving on every resize because neither accepts a percentage
+   * corner. `corner-shape` reshapes the box, so all four keep working.
+   *
+   * A squircle at a given radius reads visibly tighter than the circular arc it
+   * replaces — the curve starts later and turns harder — so the radius goes up
+   * along with it to hold the same corner weight. This is the whole reason the
+   * radius lives on these classes rather than on a `rounded-*` utility at the
+   * call site: the two values are one decision and have to change together.
+   *
+   * Where `corner-shape` is unsupported the declarations are skipped as a unit
+   * and the bar keeps the circular --radius-xl corner above. That is a real
+   * difference rather than a polyfill gap, and it is the right trade: the
+   * fallback is the shape the bar already had.
+   */
+  @supports (corner-shape: squircle) {
+    .fluid-glass,
+    .fluid-glass-lift {
+      border-radius: 1.625rem;
+      corner-shape: squircle;
+    }
+  }
+
+  /*
+   * A horizontally scrolling row of cards.
+   *
+   * The scrollbar is hidden rather than styled. Normally that is a bad trade —
+   * a hidden scrollbar removes the affordance that says "there is more" — but
+   * it is only acceptable here because the row is deliberately laid out so a
+   * card is always cut off at the right edge, and a half-visible card is a
+   * stronger and more specific affordance than a 4px track. Keyboard access is
+   * unaffected: the container is focusable and arrow keys scroll it, which is
+   * what the visible scrollbar was providing to non-pointer users.
+   *
+   * `scroll-snap-type: x proximity` rather than `mandatory`: mandatory fights
+   * a flick that was meant to travel several cards, yanking it back to the
+   * nearest edge. Proximity only tidies up a scroll that already stopped near
+   * one.
+   */
+  .card-scroller {
+    display: flex;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+  }
+
+  .card-scroller > * {
+    scroll-snap-align: start;
   }
 
   /*
@@ -955,4 +1153,25 @@
     scrollbar-width: thin;
     scrollbar-color: var(--border-strong) transparent;
   }
+}
+
+/*
+ * The card carousels opt out of the rule above.
+ *
+ * This has to sit here, unlayered and after it, rather than with the rest of
+ * `.card-scroller` in the components layer — where it was, and where it did
+ * nothing. Layer order outranks specificity: an unlayered `*` beats a layered
+ * `.card-scroller` even though the class is a hundred times more specific, so
+ * the row kept its scrollbar and the only way to see it was to look.
+ *
+ * Hiding it is only defensible because the row is laid out to always cut a card
+ * off at the right edge, which says "there is more" better than a 4px track
+ * does. See `.card-scroller` for the rest of that argument.
+ */
+.card-scroller {
+  scrollbar-width: none;
+}
+
+.card-scroller::-webkit-scrollbar {
+  display: none;
 }

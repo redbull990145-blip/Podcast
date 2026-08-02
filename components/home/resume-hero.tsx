@@ -12,7 +12,7 @@ import {
   remainingSeconds,
 } from "@/lib/player/resume";
 import { SPRING, TWEEN } from "@/lib/motion/config";
-import { fadeUp } from "@/lib/motion/variants";
+import { dashboardBlock } from "@/lib/motion/variants";
 import { pressPrimary, pressSubtle } from "@/lib/motion/gestures";
 import type { ContinueItem } from "@/lib/stats/listening";
 import { formatDurationLong } from "@/lib/utils";
@@ -37,7 +37,14 @@ import { formatDurationLong } from "@/lib/utils";
  * its ordinary layout otherwise. A hero explaining that you have not started
  * anything is a worse first impression than no hero.
  */
-export function ResumeHero({ item }: { item: ContinueItem }) {
+export function ResumeHero({
+  item,
+  delay = 0,
+}: {
+  item: ContinueItem;
+  /** Position in Home's entrance cascade, in seconds. See `cascade`. */
+  delay?: number;
+}) {
   const load = usePlayer((s) => s.load);
 
   /*
@@ -76,12 +83,29 @@ export function ResumeHero({ item }: { item: ContinueItem }) {
 
   return (
     <motion.section
-      variants={fadeUp}
+      /*
+       * Its own animation root, told when to start rather than orchestrated
+       * from above — see the note on `cascade` for why.
+       *
+       * `dashboardBlock` rather than `fadeUp` because the two differ only in
+       * travel (15px against 8), and this is one of the large blocks that
+       * distinction exists for. See the note on `dashboardBlock`.
+       */
+      variants={dashboardBlock}
+      custom={delay}
       initial="hidden"
       animate="visible"
       style={tint}
       aria-labelledby="resume-hero-title"
-      className="elev-raised tint-ring relative mt-6 overflow-hidden rounded-app-xl"
+      /*
+       * No top margin. It used to carry `mt-6` for the gap under the greeting,
+       * which stopped working when Home became two columns: a margin on this
+       * element sits *inside* its grid area, so it pushed the hero down 24px
+       * while the stats beside it stayed at the top of the same row. The gap is
+       * now a bottom margin on the greeting, which extends row 1 and therefore
+       * moves both columns together.
+       */
+      className="elev-raised tint-ring relative overflow-hidden rounded-app-xl"
     >
       {/* The cover's own colour, bled into the panel behind it. */}
       <div aria-hidden className="tint-wash pointer-events-none absolute inset-0" />

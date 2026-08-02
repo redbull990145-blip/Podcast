@@ -154,9 +154,19 @@ function Artwork({
   );
 }
 
+/**
+ * Padded wider than it looks like it needs to be.
+ *
+ * A pill's rounded ends eat into the space either side of the text: at a 24px
+ * height the cap curves back through the first and last glyph's column, so the
+ * `NEW` sits closer to the edge than the measured 10px suggests. The
+ * uppercase tracking makes it worse by pushing the final letter further right
+ * than its advance width implies. 12px is where the optical gap matches the
+ * vertical one.
+ */
 function NewBadge({ count }: { count: number }) {
   return (
-    <span className="absolute left-3 top-3 rounded-full bg-[rgb(250_248_244_/_0.92)] px-2.5 py-1 text-[10.5px] font-semibold tracking-[0.04em] text-accent">
+    <span className="absolute left-3 top-3 rounded-full bg-[rgb(250_248_244_/_0.92)] px-3 py-1 text-[10.5px] font-semibold tracking-[0.04em] text-accent">
       {count === 1 ? "NEW" : `${count} NEW`}
     </span>
   );
@@ -181,7 +191,7 @@ function GridCard({ show }: { show: LibraryShow }) {
             {show.title}
           </span>
           {show.author && (
-            <span className="mt-1 block truncate text-xs text-subtle-2">
+            <span className="mt-1 block truncate text-xs text-muted-2">
               {show.author}
             </span>
           )}

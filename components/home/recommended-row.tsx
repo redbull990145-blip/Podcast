@@ -88,7 +88,7 @@ export function RecommendedRow() {
                 {show.title}
               </span>
               {show.author && (
-                <span className="mt-0.5 block truncate text-[11.5px] text-subtle-2">
+                <span className="mt-0.5 block truncate text-[11.5px] text-muted-2">
                   {show.author}
                 </span>
               )}
