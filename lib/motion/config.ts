@@ -66,6 +66,22 @@ export const SPRING = {
    */
   transcript: { type: "spring", stiffness: 150, damping: 20, mass: 0.9 } satisfies Transition,
 
+  /**
+   * Progress fills driven by playback position.
+   *
+   * Position is republished about four times a second, so a fill that moved only
+   * when the value did would visibly step. A slow, softly-damped spring turns
+   * those steps back into continuous travel — the same job, and for now the same
+   * numbers, as `transcript`.
+   *
+   * It is a separate token because the reasons differ. Every figure in
+   * `transcript` was measured against text being read mid-sentence, and none of
+   * that constrains a 2px bar. Splitting them means the transcript can be
+   * re-tuned on its own evidence without silently dragging every progress bar
+   * along behind it.
+   */
+  progress: { type: "spring", stiffness: 150, damping: 20, mass: 0.9 } satisfies Transition,
+
   /*
    * There is deliberately no spring for caption emphasis. Dimming, blurring and
    * shrinking the neighbouring lines is a CSS transition on `.caption-line` in

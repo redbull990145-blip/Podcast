@@ -135,7 +135,7 @@ export default async function LandingPage() {
                   // Named properties rather than `all`: `all` also transitions
                   // whatever else happens to change on this element, which on a
                   // hover is a promise nobody checked.
-                  className="group rounded-2xl border border-border bg-surface p-6 transition-[border-color,box-shadow] duration-200 hover:border-border-strong hover:shadow-[var(--shadow-lifted)]"
+                  className="group rounded-2xl border border-border bg-surface p-6 transition-[border-color,box-shadow] duration-[var(--duration-normal)] hover:border-border-strong hover:shadow-[var(--shadow-lifted)]"
                 >
                   <span className="grid size-10 place-items-center rounded-xl bg-accent-subtle text-accent">
                     <Icon className="size-5" strokeWidth={1.75} />

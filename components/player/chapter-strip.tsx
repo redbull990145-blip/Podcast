@@ -136,7 +136,7 @@ export function ChapterStrip({ episodeId }: { episodeId: string }) {
           className="h-full origin-left rounded-full bg-white/40"
           initial={false}
           animate={{ scaleX: progress }}
-          transition={SPRING.transcript}
+          transition={SPRING.progress}
           style={{ transformOrigin: "left" }}
         />
       </div>

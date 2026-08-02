@@ -54,7 +54,7 @@ export function Button({
       transition={SPRING.snappy}
       className={cn(
         "inline-flex items-center justify-center rounded-[var(--radius-app)] font-medium",
-        "transition-colors duration-150",
+        "transition-colors duration-[var(--duration-fast)]",
         "disabled:pointer-events-none disabled:opacity-50",
         VARIANTS[variant],
         SIZES[size],

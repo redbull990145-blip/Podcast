@@ -59,7 +59,7 @@ export function ArtworkMotionControl() {
           // rather than the saved one, so nothing claims to be selected yet.
           aria-pressed={hydrated && value === choice.value}
           className={cn(
-            "rounded-full px-2.5 py-1 text-xs font-medium transition-colors duration-200 ease-[var(--ease-out)]",
+            "rounded-full px-2.5 py-1 text-xs font-medium transition-colors duration-[var(--duration-normal)] ease-[var(--ease-out)]",
             hydrated && value === choice.value
               ? "bg-accent text-accent-foreground"
               : "text-muted-foreground hover:text-foreground",

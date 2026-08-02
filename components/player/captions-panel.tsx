@@ -542,7 +542,7 @@ function VirtualTranscript({
                 aria-label={`Jump to ${formatDuration(segment.start)}`}
                 className={cn(
                   "flex w-full rounded-xl px-2 py-2.5 text-left",
-                  "transition-colors duration-300 hover:bg-white/[0.06]",
+                  "transition-colors duration-[var(--duration-normal)] hover:bg-white/[0.06]",
                 )}
               >
                 {/*

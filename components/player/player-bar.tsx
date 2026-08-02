@@ -5,7 +5,7 @@ import { useEffect } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ChevronUp, X } from "lucide-react";
 import { usePlayer } from "@/lib/player/store";
-import { SPRING, TWEEN } from "@/lib/motion/config";
+import { DURATION, SPRING, TWEEN } from "@/lib/motion/config";
 import { press, pressPrimary, pressSubtle } from "@/lib/motion/gestures";
 import { SpeedControl } from "./speed-control";
 import { VolumeControl } from "./volume-control";
@@ -146,7 +146,7 @@ export function PlayerBar() {
           // someone closes the player they want it gone, not eased away.
           initial={{ y: "110%" }}
           animate={{ y: 0, transition: SPRING.sheet }}
-          exit={{ y: "110%", transition: { duration: 0.24, ease: [0.4, 0, 1, 1] } }}
+          exit={{ y: "110%", transition: { duration: DURATION.normal, ease: [0.4, 0, 1, 1] } }}
           className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-40 border-t border-border bg-[var(--bar-bg)] backdrop-blur-xl lg:bottom-0"
         >
           {/*

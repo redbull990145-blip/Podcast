@@ -125,9 +125,17 @@ export function DownloadButton({
       {icon}
       {state === "downloading" && percent > 0 && (
         <span className="absolute -bottom-0.5 left-1/2 h-0.5 w-5 -translate-x-1/2 overflow-hidden rounded-full bg-border">
+          {/*
+            Transitioned, unlike the other progress fills in the app, because
+            this one's value genuinely changes while it is on screen: chunks
+            complete at irregular sizes, so raw updates jump the bar several
+            percent at a time. Across 20px that is a 3px hop that reads as a
+            glitch rather than as progress. The tween turns the same events into
+            travel, which is the one thing a progress bar is for.
+          */}
           <span
-            className="block h-full bg-accent"
-            style={{ width: `${percent}%` }}
+            className="block h-full origin-left bg-accent transition-transform duration-[var(--duration-normal)] ease-[var(--ease-out)]"
+            style={{ transform: `scaleX(${percent / 100})` }}
           />
         </span>
       )}

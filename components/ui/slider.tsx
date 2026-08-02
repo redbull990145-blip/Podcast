@@ -184,7 +184,11 @@ export function Slider({
           className={cn(
             "-ml-1.5 block size-3 rounded-full shadow-[var(--shadow-soft)]",
             colours.fill,
-            "scale-0 transition-transform duration-150 ease-[var(--ease-spring)]",
+            // Half size, not zero. Growing from nothing is the stock
+            // web-animation tell the popover variant's note calls out, and
+            // --ease-spring overshoots — from zero that reads as the dot
+            // springing into existence rather than swelling under the pointer.
+            "scale-50 transition-transform duration-[var(--duration-fast)] ease-[var(--ease-spring)]",
             "group-hover/slider:scale-100 group-focus-within/slider:scale-100",
             isDragging && "scale-100",
           )}

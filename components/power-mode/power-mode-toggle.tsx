@@ -39,7 +39,7 @@ export function PowerModeToggle() {
       whileTap={hydrated ? { scale: 0.95 } : undefined}
       transition={SPRING.snappy}
       className={cn(
-        "relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 ease-[var(--ease-out)] disabled:opacity-50",
+        "relative h-7 w-12 shrink-0 rounded-full transition-colors duration-[var(--duration-normal)] ease-[var(--ease-out)] disabled:opacity-50",
         powerMode ? "bg-accent" : "bg-border-strong",
       )}
     >

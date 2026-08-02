@@ -4,6 +4,7 @@ import { useState } from "react";
 import { motion } from "motion/react";
 import { RotateCcw, RotateCw } from "lucide-react";
 import { SPRING } from "@/lib/motion/config";
+import { press, pressSubtle } from "@/lib/motion/gestures";
 import { cn } from "@/lib/utils";
 
 /**
@@ -38,9 +39,13 @@ export function SkipButton({
 
   return (
     <motion.button
-      whileHover={{ scale: 1.08 }}
-      whileTap={{ scale: 0.9 }}
-      transition={SPRING.snappy}
+      /*
+        Bundled by size, per the rule in gestures.ts: a larger target needs less
+        travel to read as the same press. One hardcoded pair for both sizes had
+        the 48px Now Playing button moving further than the 36px docked one —
+        and further than `press` gives the icon buttons sitting beside it.
+      */
+      {...(large ? pressSubtle : press)}
       onClick={() => {
         setTurns((n) => n + (direction === "forward" ? 1 : -1));
         onClick();

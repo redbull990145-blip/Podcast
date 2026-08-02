@@ -292,6 +292,12 @@ export function NowPlaying() {
             Music does. It is the clearest possible signal of playback state and
             it costs one composited transform.
 
+            `snappy` rather than `sheet`: this is a toggle, not travel. The sheet
+            spring carries mass 0.9 so that a full-screen slide does not feel
+            weightless, and spending that on a 6% nudge makes the artwork visibly
+            trail the button that triggered it — on the control pressed more than
+            any other in the app.
+
             Sized against the viewport's *height* as well as its width: capped
             only by width, a short laptop window pushes the transport off the
             bottom, and a tall one leaves the cover stranded and small.
@@ -304,7 +310,7 @@ export function NowPlaying() {
           >
             <motion.div
               animate={{ scale: isPlaying ? 1 : 0.94 }}
-              transition={SPRING.sheet}
+              transition={SPRING.snappy}
               className={
                 panelOpen
                   ? "w-[min(30vw,min(38vh,360px))]"

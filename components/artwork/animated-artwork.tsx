@@ -165,7 +165,7 @@ export function AnimatedArtwork({
         <div
           aria-hidden
           className={cn(
-            "pointer-events-none absolute inset-0 transition-opacity duration-500 ease-out",
+            "pointer-events-none absolute inset-0 transition-opacity duration-[var(--duration-slow)] ease-out",
             drawn ? "opacity-100" : "opacity-0",
           )}
         >

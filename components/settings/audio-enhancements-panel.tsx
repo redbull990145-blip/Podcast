@@ -158,7 +158,7 @@ function SkipChoice({
           onClick={() => onChange(seconds)}
           aria-pressed={value === seconds}
           className={cn(
-            "rounded-full px-2.5 py-1 text-xs font-medium tabular-nums transition-colors duration-200 ease-[var(--ease-out)]",
+            "rounded-full px-2.5 py-1 text-xs font-medium tabular-nums transition-colors duration-[var(--duration-normal)] ease-[var(--ease-out)]",
             value === seconds
               ? "bg-accent text-accent-foreground"
               : "text-muted-foreground hover:text-foreground",
@@ -186,7 +186,7 @@ function Switch({
       aria-checked={checked}
       onClick={() => onChange(!checked)}
       className={cn(
-        "relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 ease-[var(--ease-out)]",
+        "relative h-7 w-12 shrink-0 rounded-full transition-colors duration-[var(--duration-normal)] ease-[var(--ease-out)]",
         checked ? "bg-accent" : "bg-border-strong",
       )}
     >
@@ -194,7 +194,7 @@ function Switch({
       <span
         aria-hidden
         className={cn(
-          "absolute left-1 top-1 size-5 rounded-full bg-white shadow transition-transform duration-200 ease-[var(--ease-spring)]",
+          "absolute left-1 top-1 size-5 rounded-full bg-white shadow transition-transform duration-[var(--duration-normal)] ease-[var(--ease-spring)]",
           checked ? "translate-x-5" : "translate-x-0",
         )}
       />

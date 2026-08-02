@@ -150,10 +150,16 @@ export function OpmlPanel() {
             aria-valuemin={0}
             aria-valuemax={progress.total}
           >
+            {/*
+              scaleX rather than width: width is a layout property, so animating
+              it re-lays-out the bar and its ancestors on every step. A transform
+              stays on the compositor, which is the rule the rest of the app
+              follows — see the note at the top of lib/motion/variants.ts.
+            */}
             <div
-              className="h-full bg-accent transition-[width] duration-300"
+              className="h-full origin-left bg-accent transition-transform duration-[var(--duration-normal)] ease-[var(--ease-out)]"
               style={{
-                width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%`,
+                transform: `scaleX(${progress.total ? progress.done / progress.total : 0})`,
               }}
             />
           </div>

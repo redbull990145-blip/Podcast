@@ -5,6 +5,7 @@ import {
   motion,
   useMotionValue,
   useMotionValueEvent,
+  useReducedMotion,
   useTransform,
 } from "motion/react";
 import { useEffect, useRef, type ReactNode } from "react";
@@ -80,6 +81,19 @@ export function ElasticSlider({
   formatValue?: (value: number) => string;
   showValue?: boolean;
 }) {
+  /*
+   * `MotionConfig reducedMotion="user"` does not reach this component. It gates
+   * animation *props* on `motion.*` elements, and everything here is driven
+   * through motion values that this file sets directly — so the preference has
+   * to be read and applied by hand, the way captions-panel and animated-artwork
+   * already do.
+   *
+   * Opacity is deliberately left alone. Motion's own reduced-motion behaviour
+   * keeps fades, and the value readout is information rather than decoration —
+   * hiding it would remove feedback, not motion.
+   */
+  const reduceMotion = useReducedMotion() ?? false;
+
   const sliderRef = useRef<HTMLDivElement>(null);
   const clientX = useMotionValue(0);
   const overflow = useMotionValue(0);
@@ -161,7 +175,9 @@ export function ElasticSlider({
       overflowDirection.set(0);
       past = 0;
     }
-    overflow.jump(decay(past, MAX_OVERFLOW));
+    // The rubber-band stretch is pure decoration — it says nothing the value
+    // does not already say — so it is the first thing to go.
+    overflow.jump(reduceMotion ? 0 : decay(past, MAX_OVERFLOW));
   });
 
   const commit = (next: number) => {
@@ -197,7 +213,19 @@ export function ElasticSlider({
   const handlePointerUp = () => {
     draggingRef.current = false;
     animate(readout, 0, TWEEN.normal);
-    animate(overflow, 0, { type: "spring", bounce: 0.5, duration: 0.6 }).then(() => {
+
+    // Nothing stretched, so there is nothing to spring back from.
+    if (reduceMotion) {
+      overflowDirection.set(0);
+      return;
+    }
+
+    // `SPRING.pop` rather than the reference's inline `{ bounce: 0.5,
+    // duration: 0.6 }`: 600ms is slower than every token the app defines, and a
+    // visible bounce is what config.ts's spring notes call the line between
+    // "alive" and "toy-like". This is also the spring the volume popover itself
+    // opens on, so the control and its container settle as one material.
+    animate(overflow, 0, SPRING.pop).then(() => {
       overflowDirection.set(0);
     });
   };
@@ -311,8 +339,12 @@ export function ElasticSlider({
   );
   const valueText = useTransform(progress, (p) => Math.round(p).toString());
 
-  const grow = () => animate(scale, HOVER_SCALE, SPRING.snappy);
-  const shrink = () => animate(scale, 1, SPRING.snappy);
+  // The track still thickens on hover under reduced motion; it just arrives
+  // instead of travelling. The thickening is the affordance — losing it would
+  // cost the control its hover state, not just its animation.
+  const grow = () =>
+    reduceMotion ? scale.set(HOVER_SCALE) : animate(scale, HOVER_SCALE, SPRING.snappy);
+  const shrink = () => (reduceMotion ? scale.set(1) : animate(scale, 1, SPRING.snappy));
 
   return (
     <div className={cn("relative flex w-full flex-col items-stretch", className)}>
