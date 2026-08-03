@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { getUser } from "@/lib/supabase/server";
 import { db } from "@/lib/db/client";
 import { aiJobs, episodes, summaries, transcripts } from "@/lib/db/schema";
-import { recordUsage, resolveTier } from "@/lib/ai/quota";
+import { recordUsage, resolveTier, withProviderHint } from "@/lib/ai/quota";
 import { colabSttConfig } from "@/lib/ai/config";
 import { servedLocally, transcribeWithFallback } from "@/lib/ai/transcribe";
 import { generateChapters, generateShowNotes } from "@/lib/ai/llm";
@@ -158,13 +158,29 @@ export async function POST(request: NextRequest) {
         text: result.text,
         segments: result.segments,
         source: result.model,
+        // What these timings were measured against, so the player can tell
+        // later whether the file being streamed is still that file. See the
+        // column comment in schema.ts.
+        audioDurationSeconds: result.audioSeconds,
+        audioBytes: result.audioBytes ?? null,
+        audioEtag: result.audioEtag ?? null,
         generatedByUserId: user.id,
       })
       .onConflictDoUpdate({
         // Two people can request the same episode at once; last write wins and
         // both get a usable transcript.
         target: transcripts.episodeId,
-        set: { text: result.text, segments: result.segments, source: result.model },
+        set: {
+          text: result.text,
+          segments: result.segments,
+          source: result.model,
+          // Written together with the segments, always. Leaving a stale
+          // duration beside fresh timings would be worse than having none: the
+          // comparison it feeds would be against the wrong file.
+          audioDurationSeconds: result.audioSeconds,
+          audioBytes: result.audioBytes ?? null,
+          audioEtag: result.audioEtag ?? null,
+        },
       })
       .returning();
     transcript = row;
@@ -206,7 +222,7 @@ export async function POST(request: NextRequest) {
 
   if (kind === "chapters") {
     const result = await generateChapters(funded.llm, episode.title, segments);
-    if (!result.ok) return fail(result.error);
+    if (!result.ok) return fail(withProviderHint(result.error, funded.tier));
 
     await db
       .update(episodes)
@@ -214,7 +230,9 @@ export async function POST(request: NextRequest) {
       .where(eq(episodes.id, episodeId));
 
     await finish(job.id);
-    if (funded.tier === "default") await recordUsage(user.id, "jobs");
+    // Charged on which key answered — a user's own provider can fail over onto
+    // the operator's chain, and that call is theirs to account for.
+    if (result.metered) await recordUsage(user.id, "jobs");
 
     return NextResponse.json({ chapters: result.chapters, source: "ai_generated" });
   }
@@ -225,7 +243,7 @@ export async function POST(request: NextRequest) {
     episode.podcast.title,
     transcript.text,
   );
-  if (!result.ok) return fail(result.error);
+  if (!result.ok) return fail(withProviderHint(result.error, funded.tier));
 
   // The model that answered, not the one at the head of the chain — with
   // failover across providers those are routinely different, and the stored
@@ -246,7 +264,8 @@ export async function POST(request: NextRequest) {
     });
 
   await finish(job.id);
-  if (funded.tier === "default") await recordUsage(user.id, "jobs");
+  // Charged on which key answered — see the chapters branch above.
+  if (result.metered) await recordUsage(user.id, "jobs");
 
   return NextResponse.json({
     text: result.text,

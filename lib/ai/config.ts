@@ -35,6 +35,15 @@ export type LlmConfig = {
    */
   models: string[];
   apiKey: string;
+  /**
+   * True when this config spends the operator's key rather than the user's, and
+   * therefore has to be counted against their daily allowance if it answers.
+   *
+   * A chain can now contain both — a user's own key first, the operator's free
+   * tier behind it — so "who pays" is a property of the config that answered,
+   * not of the request.
+   */
+  metered: boolean;
 };
 
 export type SttConfig = {
@@ -153,19 +162,30 @@ function geminiModelChain(): string[] {
  *
  * Ids come from GET https://integrate.api.nvidia.com/v1/models, which needs no
  * key — so unlike the other two catalogues here, this list could be checked
- * before a key existed. What could not be checked is how these models behave
- * on a real transcript; if one turns out to reason its way past the token
- * budget the way the OpenRouter free models did, the chain simply moves on.
+ * before a key existed. What that check could not tell us is whether a listed
+ * model actually answers, and two of these do not:
  *
- * Instruct models first, largest first, for the same reason as everywhere else
- * in this file: a model that answers directly beats one that thinks first when
- * the reply has to be JSON.
+ *   nvidia/llama-3.3-nemotron-super-49b-v1.5   first token in 1.5s
+ *   meta/llama-3.1-70b-instruct                first token in 1.7s
+ *   meta/llama-3.3-70b-instruct                no response headers in 10 min
+ *   mistralai/mistral-medium-3.5-128b          no response headers in 10 min
+ *
+ * Measured against a real key on a real transcript. The two that hang do not
+ * fail — no status, no error body, nothing to fall through on — they simply
+ * never reply, and llama-3.3-70b sitting at the head of this list is the whole
+ * reason adding a working NVIDIA key made the AI stop working: every request
+ * opened on a model that would never answer.
+ *
+ * So the order here is measured rather than reasoned. The two that answer come
+ * first; the two that hang stay at the back, where reaching them costs one
+ * first-token timeout instead of the entire request, in case their silence is
+ * particular to this account rather than to the models.
  */
 const DEFAULT_NVIDIA_MODELS = [
-  "meta/llama-3.3-70b-instruct",
   "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-  "mistralai/mistral-medium-3.5-128b",
   "meta/llama-3.1-70b-instruct",
+  "meta/llama-3.3-70b-instruct",
+  "mistralai/mistral-medium-3.5-128b",
 ];
 
 function nvidiaModelChain(): string[] {
@@ -299,6 +319,7 @@ function configFor(provider: LlmProvider, apiKey: string): LlmConfig {
     model: models[0],
     models,
     apiKey,
+    metered: true,
   };
 }
 
@@ -382,17 +403,45 @@ export function colabSttConfig(): SttConfig | null {
   };
 }
 
-/** Builds an LLM config from a user's own key. */
+/**
+ * Providers where a personal key buys a free developer tier rather than a bill.
+ *
+ * The distinction matters because it decides whether trying a second model is
+ * generous or expensive.
+ */
+const FREE_TIER_PROVIDERS: LlmProvider[] = ["gemini", "nvidia", "openrouter"];
+
+/**
+ * Builds an LLM config from a user's own key.
+ *
+ * A user's key is used *instead of* the operator's chain, never alongside it —
+ * falling through to an operator-funded provider would bill the wrong person.
+ * That makes this chain the only one the request has, and it used to be a
+ * single model.
+ *
+ * Which is how adding a working NVIDIA key made the AI stop working. Before the
+ * key there were nine candidates across two providers; after it there was one,
+ * `meta/llama-3.3-70b-instruct`, with nothing behind it — so the first time that
+ * one model was slow, the request had no second option and died on the timeout.
+ *
+ * So a free-tier key now gets the same chain the operator tier would use for it:
+ * those catalogues are lists of separately-limited free models, and refusing to
+ * try the second one buys nothing. Paid providers keep exactly the model the
+ * user chose, because there the extra attempt is a charge they didn't ask for.
+ */
 export function byokLlmConfig(provider: LlmProvider, apiKey: string): LlmConfig {
   const endpoint = LLM_ENDPOINTS[provider];
-  // A user's own key is billed to them, so there's no reason to hop between
-  // free-tier models — always their provider's normal default.
+  const models = FREE_TIER_PROVIDERS.includes(provider)
+    ? modelChainFor(provider)
+    : [endpoint.defaultModel];
+
   return {
     provider,
     baseUrl: endpoint.baseUrl,
-    model: endpoint.defaultModel,
-    models: [endpoint.defaultModel],
+    model: models[0],
+    models,
     apiKey,
+    metered: false,
   };
 }
 

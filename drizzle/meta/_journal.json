@@ -8,6 +8,13 @@
       "when": 1785342633738,
       "tag": "0000_secret_betty_brant",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785755333249,
+      "tag": "0001_fluffy_sandman",
+      "breakpoints": true
     }
   ]
 }

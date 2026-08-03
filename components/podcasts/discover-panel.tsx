@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { SectionLabel } from "@/components/ui/page";
 import { liftCard, pressSubtle } from "@/lib/motion/gestures";
 import { listContainer, listItem } from "@/lib/motion/variants";
+import { assertSafeFeedUrl, UnsafeUrlError } from "@/lib/rss/url-guard";
 import { cn, stripHtml } from "@/lib/utils";
 
 /**
@@ -133,13 +134,25 @@ const CATEGORIES = [
 
 function CategoryChips({ onPick }: { onPick: (term: string) => void }) {
   return (
-    <div className="mt-4 flex flex-wrap gap-2">
+    /*
+     * One scrolling line on a phone, wrapped from `sm`.
+     *
+     * Seven chips wrap to three rows at 402px, which puts about 130px of
+     * starting points between the search field and the results — on the screen
+     * where the results are the point. Sideways they cost one 38px line, and
+     * the row is cut off at the edge, which says there are more of them better
+     * than a third row of them does.
+     *
+     * `flex-nowrap` is a utility so it beats `.card-scroller`'s own display in
+     * the components layer; `sm:flex-wrap` hands it back along with the bleed.
+     */
+    <div className="card-scroller -mx-5 mt-4 flex-nowrap gap-2 scroll-pl-5 px-5 py-0.5 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:scroll-pl-0">
       {CATEGORIES.map((category) => (
         <motion.button
           {...pressSubtle}
           key={category}
           onClick={() => onPick(category)}
-          className="rounded-full bg-surface-raised px-3.5 py-2 text-[12.5px] font-medium text-ink-4 transition-colors hover:bg-surface-strong hover:text-foreground"
+          className="shrink-0 rounded-full bg-surface-raised px-3.5 py-2 text-[12.5px] font-medium text-ink-4 transition-colors hover:bg-surface-strong hover:text-foreground"
         >
           {category}
         </motion.button>
@@ -268,13 +281,32 @@ function AddByRss() {
     e.preventDefault();
     setError(null);
     setSuccess(null);
+
+    /*
+     * Checked here as well as on the server, and not for security — the server
+     * never trusts this — but for the message. The same function runs on both
+     * sides, so an address that is genuinely unusable is named as such
+     * ("must start with http:// or https://", "that address isn't reachable")
+     * without a round trip, and one that is merely missing its scheme is
+     * completed rather than refused.
+     */
+    let feedUrl: string;
+    try {
+      feedUrl = assertSafeFeedUrl(url).toString();
+    } catch (err) {
+      setError(
+        err instanceof UnsafeUrlError ? err.message : "That doesn't look like a valid URL.",
+      );
+      return;
+    }
+
     setBusy(true);
 
     try {
       const res = await fetch("/api/subscriptions", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ feedUrl: url.trim() }),
+        body: JSON.stringify({ feedUrl }),
       });
       const body = await res.json();
       if (!res.ok) {
@@ -308,12 +340,32 @@ function AddByRss() {
       </div>
 
       <form onSubmit={submit} className="mt-4 flex flex-col gap-2 sm:flex-row">
+        {/*
+          Deliberately not `type="url"`. That hands validation to the browser,
+          which refuses anything without a scheme and says so in a bubble we
+          cannot word — "Please enter a URL" for `blog.example.org/feed`, which
+          is both wrong and unactionable. As a plain text field the value
+          reaches `submit`, where a missing scheme is filled in and only a
+          genuinely bad address produces an error, in our own words.
+
+          `inputMode` and `autoComplete` are what `type="url"` was really
+          earning: a keyboard with a slash on it, and the browser's own list of
+          addresses.
+        */}
         <Input
-          type="url"
+          type="text"
+          inputMode="url"
+          autoComplete="url"
+          spellCheck={false}
           value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://example.com/feed.xml"
+          onChange={(e) => {
+            setUrl(e.target.value);
+            // Clear a stale complaint as soon as they start fixing it.
+            if (error) setError(null);
+          }}
+          placeholder="example.com/feed.xml"
           aria-label="RSS feed URL"
+          aria-invalid={error ? true : undefined}
           required
           className={cn("flex-1", error && "border-danger")}
         />

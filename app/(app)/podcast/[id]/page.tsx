@@ -6,10 +6,11 @@ import { Rss } from "lucide-react";
 import { getUser } from "@/lib/supabase/server";
 import { db } from "@/lib/db/client";
 import { playbackState, podcasts } from "@/lib/db/schema";
-import { listEpisodes } from "@/lib/podcasts/ingest";
+import { countEpisodes, ingestFeed, listEpisodes } from "@/lib/podcasts/ingest";
 import { PageShell } from "@/components/ui/page";
-import { EpisodeList } from "@/components/episodes/episode-list";
+import { EpisodeList, PAGE_SIZE } from "@/components/episodes/episode-list";
 import { SubscribeButton } from "@/components/podcasts/subscribe-button";
+import { PlayLatestButton } from "@/components/podcasts/play-latest-button";
 import { stripHtml } from "@/lib/utils";
 
 /* Locale pinned, as everywhere else that formats a date — see lib/utils.ts. */
@@ -34,13 +35,32 @@ export default async function PodcastPage({
   if (!user) redirect("/login");
 
   const { id } = await params;
-  const podcast = await db.query.podcasts.findFirst({ where: eq(podcasts.id, id) });
-  if (!podcast) notFound();
+  const stored = await db.query.podcasts.findFirst({ where: eq(podcasts.id, id) });
+  if (!stored) notFound();
+
+  /*
+   * Bring the show up to date before rendering it.
+   *
+   * This was missing, and it was the reason shows appeared with no episodes at
+   * all. A podcast can enter the catalogue as a stub — `ensureCatalogPodcast`
+   * writes what a search result gave us without fetching the feed, on the
+   * reasoning that the first real visit would ingest it properly. Nothing ever
+   * did. Opening such a show ran one query against an empty `episodes` table
+   * and rendered "0 shown", permanently, for feeds with hundreds of episodes.
+   *
+   * `ingestFeed` is safe to call on every visit: it returns the cached row
+   * without touching the network while the last fetch is under an hour old, so
+   * the common case is two cheap queries and the stale case is the refresh this
+   * page should always have been doing.
+   */
+  const ingested = await ingestFeed(stored.feedUrl);
+  const podcast = ingested.status === "ok" ? ingested.podcast : stored;
 
   // Independent of each other, so they go out together rather than paying three
   // round-trips to Supabase in series.
-  const [episodes, subscription] = await Promise.all([
-    listEpisodes(podcast.id, 50),
+  const [episodes, episodeTotal, subscription] = await Promise.all([
+    listEpisodes(podcast.id, PAGE_SIZE),
+    countEpisodes(podcast.id),
     db.query.subscriptions.findFirst({
       where: (s, { and }) => and(eq(s.userId, user.id), eq(s.podcastId, podcast.id)),
     }),
@@ -84,6 +104,9 @@ export default async function PodcastPage({
 
   const credits = [podcast.author, following].filter(Boolean).join(" · ");
 
+  // `listEpisodes` returns newest first, so this is what "Play latest" plays.
+  const latest = episodes[0];
+
   return (
     <>
       {/*
@@ -99,7 +122,22 @@ export default async function PodcastPage({
       <div
         className={[
           "relative bg-[radial-gradient(90%_140%_at_8%_0%,#3c5445_0%,#33463a_48%,var(--background)_100%)]",
-          "px-5 pb-8 pt-9 sm:px-10 sm:pt-11",
+          "px-5 pb-8 sm:px-10",
+          /*
+           * On a phone the band runs to the very top of the screen: it pulls
+           * back the shell's whole top padding and re-spends it as its own,
+           * so the content still starts exactly where every other page's does
+           * while the colour reaches up behind the floating tab bar.
+           *
+           * That is the reason to bother. The bar is glass, and glass with
+           * nothing behind it is just a tinted strip — this is the one screen
+           * in the app with a saturated field for it to pick up, and stopping
+           * the band below the bar would leave it sitting on flat background
+           * with a hard colour edge starting an inch underneath.
+           */
+          "-mt-[calc(env(safe-area-inset-top)+5.625rem)]",
+          "pt-[calc(env(safe-area-inset-top)+5.625rem)]",
+          "lg:mt-0 lg:pt-11",
           /*
            * The radial alone still meets the page in a straight line along the
            * bottom, because at that distance from its origin it has not run out
@@ -111,39 +149,51 @@ export default async function PodcastPage({
           "after:bg-[linear-gradient(to_bottom,transparent,var(--background))]",
         ].join(" ")}
       >
-        <div className="mx-auto flex max-w-[1000px] flex-col gap-5 sm:flex-row sm:items-end sm:gap-6">
+        {/*
+          Cover beside the title at every width now, rather than stacked below
+          `sm`. A 128px square on its own line was spending a quarter of a phone
+          viewport to say what a 112px one beside the title says just as well —
+          and stacking put the follow button three blocks down from the top of
+          the screen, which is where the fold is.
+        */}
+        <div className="mx-auto flex max-w-[1000px] items-end gap-4 sm:gap-6">
           {podcast.artworkUrl ? (
             <Image
               src={podcast.artworkUrl}
               alt=""
               width={360}
               height={360}
-              sizes="(max-width: 640px) 128px, 180px"
+              sizes="(max-width: 640px) 112px, 180px"
               priority
-              className="size-32 shrink-0 rounded-[18px] object-cover shadow-[0_20px_48px_rgb(20_24_20_/_0.4)] sm:size-45"
+              className="size-28 shrink-0 rounded-[16px] object-cover shadow-[0_16px_36px_rgb(20_24_20_/_0.45)] sm:size-45 sm:rounded-[18px]"
             />
           ) : (
-            <span className="grid size-32 shrink-0 place-items-center rounded-[18px] bg-white/10 text-white/70 sm:size-45">
+            <span className="grid size-28 shrink-0 place-items-center rounded-[16px] bg-white/10 text-white/70 sm:size-45 sm:rounded-[18px]">
               <Rss className="size-10" />
             </span>
           )}
 
-          <div className="min-w-0 flex-1 pb-1.5">
+          <div className="min-w-0 flex-1 pb-1">
             {podcast.categories.length > 0 && (
-              <p className="truncate text-[11.5px] font-semibold uppercase tracking-[0.12em] text-white/60">
+              <p className="truncate text-[10.5px] font-semibold uppercase tracking-[0.12em] text-white/60 sm:text-[11.5px]">
                 {podcast.categories.slice(0, 2).join(" · ")}
               </p>
             )}
 
-            <h1 className="mt-2.5 text-pretty text-[28px] font-semibold -tracking-[0.03em] text-[#f7f5f0] sm:text-[36px]">
+            <h1 className="mt-1.5 text-pretty text-[24px] font-semibold leading-[1.15] -tracking-[0.03em] text-[#f7f5f0] sm:mt-2.5 sm:text-[36px]">
               {podcast.title}
             </h1>
 
             {credits && (
-              <p className="mt-2 text-[14.5px] text-white/70">{credits}</p>
+              <p className="mt-1.5 truncate text-[12.5px] text-white/70 sm:mt-2 sm:whitespace-normal sm:text-[14.5px]">
+                {credits}
+              </p>
             )}
 
-            <div className="mt-4.5">
+            {/* Below `sm` the actions move out of this column and onto their own
+                full-width row — see below. There is not room beside a 112px
+                cover for a filled button and an outlined one. */}
+            <div className="mt-4.5 hidden sm:block">
               <SubscribeButton
                 podcastId={podcast.id}
                 feedUrl={podcast.feedUrl}
@@ -152,6 +202,32 @@ export default async function PodcastPage({
               />
             </div>
           </div>
+        </div>
+
+        <div className="mx-auto mt-4 flex max-w-[1000px] items-center gap-2.5 sm:hidden">
+          {latest && (
+            <PlayLatestButton
+              episode={{
+                id: latest.id,
+                title: latest.title,
+                enclosureUrl: latest.enclosureUrl,
+                durationSeconds: latest.durationSeconds,
+                artworkUrl: latest.imageUrl ?? podcast.artworkUrl,
+                podcastId: podcast.id,
+                podcastTitle: podcast.title,
+                categories: podcast.categories,
+              }}
+            />
+          )}
+          {/* Matched to `PlayLatestButton`'s 44px beside it — the shared
+              `Button` is 40px, which reads as a misprint next to it. */}
+          <SubscribeButton
+            podcastId={podcast.id}
+            feedUrl={podcast.feedUrl}
+            initiallySubscribed={Boolean(subscription)}
+            onDark
+            className="h-11 shrink-0 px-4.5 text-[14px]"
+          />
         </div>
       </div>
 
@@ -165,12 +241,24 @@ export default async function PodcastPage({
         <section className="mt-7">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3.5">
             <h2 className="text-[17px] font-semibold -tracking-[0.02em]">Episodes</h2>
-            <span className="text-xs text-subtle-2">{episodes.length} shown</span>
+            {/* The show's real total, not the size of the first page. "50
+                shown" on a 535-episode show read as the show only having 50. */}
+            <span className="text-xs text-subtle-2 tabular-nums">
+              {episodeTotal === 1 ? "1 episode" : `${episodeTotal} episodes`}
+            </span>
           </div>
 
-          {episodes.length === 0 ? (
+          {episodeTotal === 0 ? (
+            /*
+              Named rather than left as "no episodes found", because the two
+              ways to get here need different things from the reader. A feed
+              with items but no audio is a blog's feed pasted in place of a
+              podcast's, and no amount of waiting will fix it.
+            */
             <p className="py-10 text-center text-sm text-muted">
-              No episodes found in this feed yet.
+              {ingested.status === "ok" && (ingested.feed?.totalItems ?? 0) > 0
+                ? "This feed has articles rather than audio, so there's nothing to play. It's most likely the site's blog feed rather than its podcast feed."
+                : "No episodes found in this feed yet."}
             </p>
           ) : (
             <EpisodeList
@@ -187,6 +275,7 @@ export default async function PodcastPage({
                 artworkUrl: podcast.artworkUrl,
                 categories: podcast.categories,
               }}
+              total={episodeTotal}
             />
           )}
         </section>

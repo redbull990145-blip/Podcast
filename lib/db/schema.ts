@@ -307,6 +307,28 @@ export const transcripts = pgTable("transcripts", {
   segments: jsonb("segments"),
   /** e.g. 'groq/whisper-large-v3' | 'openai/whisper-1' */
   source: text("source").notNull(),
+  /**
+   * Length of the audio these timings were measured against, in seconds.
+   *
+   * The file a listener streams is not necessarily the file this was made from.
+   * Hosts that stitch advertising in serve a different cut per request — a
+   * different number of ad pods, of different lengths — so a transcript that was
+   * correct when it was generated can be wrong for the next person to play the
+   * episode, by however much advertising moved.
+   *
+   * Recording what was measured is what makes that detectable. Without it the
+   * player has one duration (the file in front of it) and nothing to compare it
+   * to, so a re-cut episode is indistinguishable from a correct one and the
+   * captions simply drift with no explanation. See `captionOffsetFor`.
+   *
+   * Null when the container could not be measured — a format we cannot parse
+   * frames from, or a provider that reported no duration.
+   */
+  audioDurationSeconds: doublePrecision("audio_duration_seconds"),
+  /** Bytes of that same served copy, for the same comparison at coarser grain. */
+  audioBytes: bigint("audio_bytes", { mode: "number" }),
+  /** Its `ETag`, when the host offered one. Diagnostic; never load-bearing. */
+  audioEtag: text("audio_etag"),
   /** Attribution and abuse-limiting only. */
   generatedByUserId: uuid("generated_by_user_id").references(() => users.id, {
     onDelete: "set null",

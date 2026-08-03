@@ -163,7 +163,14 @@ export function QueueList({ userId }: { userId: string }) {
                       <GripVertical className="size-4" />
                     </span>
 
-                    <span className="w-3.5 shrink-0 text-center text-[12.5px] tabular-nums text-faint">
+                    {/*
+                      The ordinal is desktop-only. Between the handle, the
+                      cover and the remove button a phone row has about 160px
+                      left for an episode title, and the position is the one
+                      thing in the row the list itself already states by being
+                      a list.
+                    */}
+                    <span className="hidden w-3.5 shrink-0 text-center text-[12.5px] tabular-nums text-faint sm:block">
                       {index + 1}
                     </span>
 

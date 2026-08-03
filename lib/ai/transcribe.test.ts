@@ -6,9 +6,84 @@ import {
   mergeSegments,
   planChunks,
   rateLimitMessage,
+  renditionMismatch,
   timelineCoversAudio,
 } from "./transcribe";
 import { frameSeconds, prepareChunk } from "./mp3";
+
+/** Minimal stand-in for a `Headers` object. */
+function headers(values: Record<string, string>) {
+  return {
+    get: (name: string) => values[name.toLowerCase()] ?? null,
+  };
+}
+
+/**
+ * Detecting that a host swapped the file out underneath a chunked job.
+ *
+ * Every range request in a job has to read the same cut of the episode. When a
+ * host re-stitches its advertising between two of them, the chunks describe
+ * different audio and `mergeSegments` builds the timeline out of durations that
+ * belong to different files.
+ */
+describe("renditionMismatch", () => {
+  const pinned = { total: 50_000_000, etag: '"abc"', lastModified: "Mon, 01 Jan 2024 00:00:00 GMT" };
+
+  it("passes a range from the same file", () => {
+    const result = renditionMismatch(
+      pinned,
+      headers({
+        "content-range": "bytes 0-999/50000000",
+        etag: '"abc"',
+        "last-modified": "Mon, 01 Jan 2024 00:00:00 GMT",
+      }),
+    );
+    expect(result).toBeNull();
+  });
+
+  it("fails fatally when the file's length changed", () => {
+    // A different set of ads is a different number of bytes, so every offset
+    // planned against the old length now points somewhere else.
+    const result = renditionMismatch(
+      pinned,
+      headers({ "content-range": "bytes 0-999/50120000" }),
+    );
+    expect(result?.fatal).toBe(true);
+    expect(result?.detail).toContain("50120000");
+  });
+
+  it("treats a moved validator with an unchanged length as non-fatal", () => {
+    // CDNs vary these per edge for byte-identical content. Refusing here would
+    // break transcription on shows that are working correctly.
+    const result = renditionMismatch(
+      pinned,
+      headers({ "content-range": "bytes 0-999/50000000", etag: '"def"' }),
+    );
+    expect(result?.fatal).toBe(false);
+  });
+
+  it("does not mind a weak validator matching a strong one", () => {
+    expect(
+      renditionMismatch(
+        pinned,
+        headers({ "content-range": "bytes 0-999/50000000", etag: 'W/"abc"' }),
+      ),
+    ).toBeNull();
+  });
+
+  it("says nothing when the host offers nothing to compare", () => {
+    expect(renditionMismatch(pinned, headers({}))).toBeNull();
+    expect(
+      renditionMismatch({ total: 0, etag: null, lastModified: null }, headers({})),
+    ).toBeNull();
+  });
+
+  it("ignores a length it could not parse out of the header", () => {
+    expect(
+      renditionMismatch(pinned, headers({ "content-range": "bytes 0-999/*" })),
+    ).toBeNull();
+  });
+});
 
 describe("planChunks", () => {
   it("returns a single range when the file fits in one chunk", () => {
@@ -505,5 +580,67 @@ describe("chunked timeline arithmetic", () => {
     expect(lastDrifting).toBeLessThan(lastFixed - 2 * (ranges.length - 2));
     // The new one lands exactly where the audio says it should.
     expect(lastFixed).toBeCloseTo(seconds - chunks[chunks.length - 1].seconds!, 9);
+  });
+
+  /** An ID3v2 tag, of the kind an ad stitcher writes at a splice point. */
+  function id3Tag(payloadSize: number): Uint8Array {
+    const bytes = new Uint8Array(10 + payloadSize);
+    bytes[0] = 0x49;
+    bytes[1] = 0x44;
+    bytes[2] = 0x33;
+    bytes[3] = 0x03;
+    bytes[6] = (payloadSize >> 21) & 0x7f;
+    bytes[7] = (payloadSize >> 14) & 0x7f;
+    bytes[8] = (payloadSize >> 7) & 0x7f;
+    bytes[9] = payloadSize & 0x7f;
+    return bytes;
+  }
+
+  it("reconstructs the length of an episode with adverts stitched into it", () => {
+    /*
+     * The shape of a dynamically-stitched file: content, a splice marker, an ad
+     * pod, another marker, more content. The markers are ID3 tags large enough
+     * to carry artwork, which is what used to make `frameSeconds` give up and
+     * report the chunk containing one as far shorter than it is — pulling every
+     * later caption earlier by the difference.
+     */
+    const before = episode(3000);
+    const advert = episode(1500);
+    const after = episode(4500);
+    const marker = id3Tag(100 * 1024);
+
+    const parts = [before.bytes, marker, advert.bytes, marker, after.bytes];
+    const total = parts.reduce((n, p) => n + p.length, 0);
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const part of parts) {
+      bytes.set(part, offset);
+      offset += part.length;
+    }
+
+    const seconds = before.seconds + advert.seconds + after.seconds;
+
+    /*
+     * Chunks much larger than a marker, which is the arrangement that actually
+     * breaks. `prepareChunk` trims a chunk to its first parseable frame, so a
+     * marker straddling a boundary is skipped for free and proves nothing — the
+     * damage needs a marker sitting wholly inside one chunk with audio on both
+     * sides of it, which at the real 20MB chunk size is every marker there is.
+     *
+     * Measured against the previous implementation on this exact fixture: 226.64s
+     * for 235.10s of audio, short by 8.46s from a single marker.
+     */
+    const ranges = planChunks(bytes.length, 1_000_000);
+    expect(ranges.length).toBeGreaterThan(4);
+
+    const measured = ranges.map(({ start, end }, i) =>
+      frameSeconds(prepareChunk(bytes.subarray(start, end), i === 0)),
+    );
+
+    const sum = measured.reduce((n: number, s) => n + (s ?? 0), 0);
+
+    // Still exact. The markers contribute no time and cost no frames, and the
+    // audio on both sides of each one is counted exactly once.
+    expect(sum).toBeCloseTo(seconds, 9);
   });
 });

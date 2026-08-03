@@ -10,13 +10,25 @@ export function PageHeader({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-6">
+    /*
+     * The rule under the title is desktop-only.
+     *
+     * It is doing a real job there: a 1000px measure puts a lot of empty space
+     * to the right of a two-word heading, and the line is what stops the title
+     * floating free of the content it introduces. On a 402px screen there is no
+     * empty space to close — the description already runs the full width — so
+     * the same line only adds a horizontal band to a screen whose whole layout
+     * is edge-to-edge stacked blocks.
+     */
+    <div className="flex flex-wrap items-start justify-between gap-4 lg:border-b lg:border-border lg:pb-6">
       <div className="min-w-0">
-        <h1 className="text-[26px] font-semibold -tracking-[0.03em] sm:text-[30px]">
+        <h1 className="text-[28px] font-semibold -tracking-[0.03em] lg:text-[30px]">
           {title}
         </h1>
         {description && (
-          <p className="mt-2 text-sm text-muted sm:text-[14px]">{description}</p>
+          <p className="mt-[7px] text-[13.5px] text-muted lg:mt-2 lg:text-[14px]">
+            {description}
+          </p>
         )}
       </div>
       {action}
@@ -41,7 +53,26 @@ export function PageShell({
   className?: string;
 }) {
   return (
-    <div className={cn("mx-auto max-w-[1000px] px-5 py-8 sm:px-10 sm:py-11", className)}>
+    /*
+     * No top padding below `lg`, and that is not an oversight.
+     *
+     * The phone's shell already spends 90px clearing the floating tab bar —
+     * the bar's own inset, its height, and the air under it — and every one of
+     * those pixels is above the first line of the page. Adding this element's
+     * own 32px on top put the greeting 122px down a 812px screen, which is a
+     * seventh of the viewport gone before anything is said. Desktop keeps it:
+     * there the bar is 76px away and the padding is what separates the page
+     * from the window edge rather than from a bar.
+     *
+     * Every caller sits inside the authenticated shell, so there is no route
+     * where zeroing this leaves content against the top of the viewport.
+     */
+    <div
+      className={cn(
+        "mx-auto max-w-[1000px] px-5 pb-8 sm:px-10 sm:pb-11 lg:pt-11",
+        className,
+      )}
+    >
       {children}
     </div>
   );

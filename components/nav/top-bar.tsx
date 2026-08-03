@@ -2,18 +2,15 @@
 
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect } from "react";
 import {
   motion,
   useMotionTemplate,
   useMotionValue,
   useReducedMotion,
-  useScroll,
   useSpring,
-  useTransform,
 } from "motion/react";
 import type { MotionStyle } from "motion/react";
-import { useQueryClient } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { MotionLink } from "@/components/ui/motion-link";
@@ -22,10 +19,18 @@ import { SPRING } from "@/lib/motion/config";
 import { pressSubtle } from "@/lib/motion/gestures";
 import { usePrefs } from "@/lib/prefs/store";
 import { NAV_ITEMS } from "./nav-items";
+import { QueueBadge } from "./queue-badge";
+import { useBarLift } from "./use-bar-lift";
 import { cn } from "@/lib/utils";
 
 /**
- * Floating glass bar, the app's only chrome on desktop.
+ * Floating glass bar, the app's only chrome on desktop — and only on desktop.
+ *
+ * Below `lg` the phone's own chrome takes over entirely: `MobileTabBar` is the
+ * same material carrying the sections, and Settings, search and the theme
+ * control are reached from inside the app rather than from a strip that would
+ * have room for one of the three. Hidden rather than adapted, because there is
+ * nothing in here a 402px-wide bar can keep.
  *
  * It replaced a fixed sidebar, which is worth explaining because it costs a
  * persistent column of navigation. Almost every screen here is a grid of square
@@ -85,7 +90,7 @@ export function TopBar({
   const sheen = useGlassSheen();
 
   return (
-    <header className="pointer-events-none fixed inset-x-3 top-3 z-40 lg:inset-x-7 lg:top-[18px]">
+    <header className="pointer-events-none fixed inset-x-7 top-[18px] z-40 hidden lg:block">
       <motion.div
         /* Motion writes custom properties fine; `MotionStyle` just has no index
            signature for them, so the key has to be asserted in. */
@@ -149,25 +154,6 @@ export function TopBar({
       </motion.div>
     </header>
   );
-}
-
-/**
- * 0 while the page is at rest, 1 once content has travelled under the bar.
- *
- * Returns a motion value rather than React state, which is the entire point of
- * doing it this way. Scroll fires far more often than a frame, and putting the
- * offset in state would re-render the header — its five nav pills, the queue
- * badge's external-store subscription, the search field and the profile button
- * — on every one of those events, for a shadow. The motion value writes the
- * opacity straight to the node and React never hears about the scroll at all.
- *
- * 24px is roughly one line of body text: far enough that something has
- * demonstrably moved, close enough that the lift has already happened by the
- * time anyone looks up from the first scroll gesture.
- */
-function useBarLift() {
-  const { scrollY } = useScroll();
-  return useTransform(scrollY, [0, 24], [0, 1]);
 }
 
 /**
@@ -267,40 +253,6 @@ function NavPill({
       {label}
       {badge != null && badge > 0 && <QueueBadge fallback={badge} />}
     </Link>
-  );
-}
-
-/**
- * Count of episodes waiting in Up Next.
- *
- * The number arrives server-rendered so the badge is correct on first paint,
- * and this subscribes to the shared queue cache for anything newer — so it
- * never issues a request of its own, it just re-renders when the queue page or
- * a queue mutation writes to that key. Polling from the top bar would put a
- * request on every page load in the app for a two-digit number.
- *
- * Reading the cache directly rather than through `useQuery({ enabled: false })`:
- * that form still *registers* a query, and registering one with no `queryFn`
- * makes React Query log an error on every mount. There is no query here to
- * register — only a cache to watch.
- */
-function QueueBadge({ fallback }: { fallback: number }) {
-  const client = useQueryClient();
-
-  const data = useSyncExternalStore(
-    (onChange) => client.getQueryCache().subscribe(onChange),
-    () => client.getQueryData<{ queue: unknown[] }>(["queue"]),
-    // Nothing is cached during SSR, so the server always renders `fallback`.
-    () => undefined,
-  );
-
-  const count = data?.queue.length ?? fallback;
-  if (count === 0) return null;
-
-  return (
-    <span className="grid h-[18px] min-w-[18px] place-items-center rounded-full bg-accent-subtle px-[5px] text-[10.5px] font-semibold tabular-nums text-accent">
-      {count}
-    </span>
   );
 }
 

@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { motion } from "motion/react";
-import { ArrowUp, Loader2 } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { ArrowDown, ArrowUp, Loader2 } from "lucide-react";
 import { CitationText } from "@/components/ai/citation-text";
+import { askEpisode } from "@/lib/ai/ask-client";
 import { press, pressSubtle } from "@/lib/motion/gestures";
 import { cn } from "@/lib/utils";
 
@@ -41,13 +42,65 @@ export function AskPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
+  const fieldRef = useRef<HTMLTextAreaElement>(null);
+  const [pinned, setPinned] = useState(true);
 
-  // Answers arrive at the bottom; without this the newest one lands below the
-  // fold of a panel the reader is already looking at.
+  /**
+   * Grow the field with the question, up to about five lines, then let it
+   * scroll. Height has to be reset before it is measured, or `scrollHeight`
+   * reports the box it already has rather than the text it now holds, and the
+   * field only ever gets taller.
+   */
+  useEffect(() => {
+    const field = fieldRef.current;
+    if (!field) return;
+    field.style.height = "auto";
+    field.style.height = `${Math.min(field.scrollHeight, 120)}px`;
+  }, [question]);
+
+  /**
+   * Follow the answer down, but only while the reader is already at the bottom.
+   *
+   * Unconditional scrolling was fine when answers arrived whole. Now they arrive
+   * a word at a time, and this effect runs on every one of them — so scrolling
+   * up to re-read the start of a long answer meant being yanked back down a few
+   * times a second until it finished. Whether to follow is the reader's, and
+   * they say it by where they have scrolled to.
+   */
   useEffect(() => {
     const thread = threadRef.current;
-    if (thread) thread.scrollTop = thread.scrollHeight;
-  }, [turns, busy]);
+    if (thread && pinned) thread.scrollTop = thread.scrollHeight;
+  }, [turns, busy, pinned]);
+
+  /** Within a line or so of the end counts as the end. */
+  function onThreadScroll() {
+    const thread = threadRef.current;
+    if (!thread) return;
+    const distance = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+    setPinned(distance < 24);
+  }
+
+  function scrollToLatest() {
+    const thread = threadRef.current;
+    if (!thread) return;
+    thread.scrollTo({ top: thread.scrollHeight, behavior: "smooth" });
+    setPinned(true);
+  }
+
+  /**
+   * Enter sends, shift-Enter breaks the line — the convention everywhere else a
+   * message gets typed, and the reason this is a textarea rather than an input.
+   *
+   * IME composition is checked because in a language composed through a
+   * candidate window, Enter is how you accept the candidate. Sending on that
+   * keystroke would post a half-typed word and there would be no way to type a
+   * whole one.
+   */
+  function onFieldKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    void send(question);
+  }
 
   async function send(text: string) {
     const q = text.trim();
@@ -57,28 +110,29 @@ export function AskPanel({
     setError(null);
     setBusy(true);
     const history = turns;
-    setTurns([...history, { role: "user", content: q }]);
 
-    try {
-      const res = await fetch("/api/ai/ask", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ episodeId, question: q, history }),
-      });
-      const body = await res.json();
+    // The empty assistant turn is the bubble the answer will be written into.
+    setTurns([...history, { role: "user", content: q }, { role: "assistant", content: "" }]);
 
-      if (!res.ok) {
-        setError(body.error ?? "Couldn't answer that.");
-        return;
-      }
+    const result = await askEpisode({ episodeId, question: q, history }, (delta) =>
+      setTurns((prev) => {
+        const next = [...prev];
+        const tail = next[next.length - 1];
+        next[next.length - 1] = { ...tail, content: tail.content + delta };
+        return next;
+      }),
+    );
 
-      setTurns((prev) => [...prev, { role: "assistant", content: body.answer }]);
-      void queryClient.invalidateQueries({ queryKey: ["ai-usage"] });
-    } catch {
-      setError("Couldn't reach the server.");
-    } finally {
-      setBusy(false);
+    setBusy(false);
+
+    if (!result.ok) {
+      setError(result.error);
+      // Nothing was ever written into it, so the placeholder goes too.
+      setTurns((prev) => prev.slice(0, -1));
+      return;
     }
+
+    void queryClient.invalidateQueries({ queryKey: ["ai-usage"] });
   }
 
   return (
@@ -87,9 +141,11 @@ export function AskPanel({
         Ask this episode
       </p>
 
+      <div className="relative mt-4 flex min-h-0 flex-1 flex-col">
       <div
         ref={threadRef}
-        className="mt-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto"
+        onScroll={onThreadScroll}
+        className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto"
       >
         {turns.length === 0 && !busy && (
           <p className="text-[13.5px] leading-relaxed text-white/45">
@@ -98,9 +154,12 @@ export function AskPanel({
           </p>
         )}
 
+        {/* The placeholder the answer streams into is empty for about a
+            second; the spinner below stands in for it until it has words. */}
         {turns.map((turn, index) => (
           <div
             key={index}
+            hidden={turn.role === "assistant" && turn.content === ""}
             className={cn(
               "text-[13.5px] leading-relaxed",
               turn.role === "user"
@@ -116,12 +175,31 @@ export function AskPanel({
           </div>
         ))}
 
-        {busy && (
+        {busy && turns[turns.length - 1]?.content === "" && (
           <p className="flex items-center gap-2 text-[13px] text-white/50">
             <Loader2 className="size-3.5 animate-spin" />
             Reading the transcript…
           </p>
         )}
+      </div>
+
+        {/* Only while there is something below the fold to go back to. */}
+        <AnimatePresence>
+          {!pinned && turns.length > 0 && (
+            <motion.button
+              type="button"
+              onClick={scrollToLatest}
+              aria-label="Scroll to the latest message"
+              initial={{ opacity: 0, y: 6, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 6, scale: 0.9 }}
+              transition={{ duration: 0.16 }}
+              className="absolute bottom-2 left-1/2 grid size-8 -translate-x-1/2 place-items-center rounded-full border border-white/20 bg-black/70 text-white/85 shadow-lg backdrop-blur transition-colors hover:border-white/40 hover:text-white"
+            >
+              <ArrowDown className="size-4" strokeWidth={2} />
+            </motion.button>
+          )}
+        </AnimatePresence>
       </div>
 
       {error && (
@@ -151,15 +229,18 @@ export function AskPanel({
           e.preventDefault();
           void send(question);
         }}
-        className="mt-3 flex h-11 items-center gap-2 rounded-[13px] border border-white/[0.18] bg-white/10 pl-4 pr-1.5"
+        className="mt-3 flex items-end gap-2 rounded-[13px] border border-white/[0.18] bg-white/10 py-1.5 pl-4 pr-1.5"
       >
-        <input
+        <textarea
+          ref={fieldRef}
+          rows={1}
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={onFieldKeyDown}
           placeholder="Ask anything — answers cite the tape"
           aria-label={`Ask a question about ${episodeTitle}`}
           maxLength={1000}
-          className="min-w-0 flex-1 bg-transparent text-[13.5px] text-white placeholder:text-white/45 focus:outline-none"
+          className="min-w-0 flex-1 resize-none self-center bg-transparent py-1.5 text-[13.5px] leading-[1.5] text-white placeholder:text-white/45 focus:outline-none"
         />
         <motion.button
           {...press}

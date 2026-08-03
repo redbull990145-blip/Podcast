@@ -3,7 +3,7 @@ import type { TranscriptSegment, TranscriptWord } from "@/lib/db/schema";
 import { collapseLoops } from "@/lib/transcript/repetition";
 import { repairTranscript } from "@/lib/player/transcript-integrity";
 import { publisherHeaders } from "@/lib/user-agent";
-import { frameSeconds, prepareChunk } from "./mp3";
+import { measureFrames, prepareChunk } from "./mp3";
 import {
   buildM4A,
   groupSeconds,
@@ -88,8 +88,135 @@ const MAX_MOOV_BYTES = 32 * 1024 * 1024;
 const COLAB_HEALTH_TIMEOUT_MS = 4_000;
 
 export type TranscriptionResult =
-  | { ok: true; text: string; segments: TranscriptSegment[]; model: string }
+  | {
+      ok: true;
+      text: string;
+      segments: TranscriptSegment[];
+      model: string;
+      /**
+       * Length of the audio these timings were measured against, in seconds.
+       *
+       * Stored with the transcript, and the whole reason it exists: hosts that
+       * stitch advertising in serve a different cut per request, so the file the
+       * listener streams is not the file this was timed against. Without a
+       * record of what *was* measured there is no way to tell a transcript that
+       * still matches from one that silently no longer does. Null when the
+       * container could not be measured.
+       */
+      audioSeconds: number | null;
+      /**
+       * Size and validator of the served copy these timings came from.
+       *
+       * Diagnostic only — nothing reads them to make a decision. They exist
+       * because a re-stitched episode is otherwise invisible after the fact:
+       * when someone reports captions drifting, one `HEAD` against the enclosure
+       * URL compared with these says immediately whether the host is serving a
+       * different file than the one we transcribed, which is the difference
+       * between a bug in this code and a bug in the premise.
+       *
+       * Null on the local-server path, which fetches the URL itself and never
+       * shows us the response.
+       */
+      audioBytes?: number | null;
+      audioEtag?: string | null;
+    }
   | { ok: false; error: string };
+
+/**
+ * One specific served copy of an episode's audio.
+ *
+ * Podcast enclosure URLs are not stable files on the hosts that matter here.
+ * Megaphone, Omny, Art19 and the Podtrac chains stitch advertising in at request
+ * time, so two `GET`s of the same URL return different bytes of different
+ * lengths — the content segments are identical, the ad pods are not.
+ *
+ * A chunked transcription reads the file in up to four concurrent byte ranges,
+ * and every one of them used to re-resolve the enclosure URL from scratch. Each
+ * could therefore land on a different stitch, which is not a subtle problem:
+ * `mergeSegments` places each chunk at the running sum of the measured durations
+ * before it, so one mismatched chunk shifts every caption after it.
+ *
+ * Pinning the post-redirect URL is what actually prevents it — the stitching
+ * happens while the redirect chain is resolved, and the CDN object it lands on
+ * is stable. The length and validators are carried alongside so a change can
+ * still be *detected* if one slips through.
+ *
+ * ## Is it safe to hold one of these for the length of a job?
+ *
+ * Yes, and it was worth checking, because the URL these hosts resolve to is
+ * signed per request rather than canonical. Megaphone's looks like
+ * `dcs-spotify.megaphone.fm/…?key=…&session_id=…&timetoken=<epoch>_<hmac>`, and
+ * a signature that expired mid-job would turn a caption bug into a 403.
+ *
+ * Measured against a live episode: the `timetoken` is stamped two hours ahead
+ * of the request, and ranged reads 60MB into the file kept returning 206 with
+ * an unchanged total four minutes later. Two hours against a 48-second job
+ * deadline is not a close call.
+ *
+ * It also cannot be single-use, on any host, for a reason that needs no
+ * measuring: a browser streams audio with repeated ranged requests against one
+ * resolved URL, so a URL that only worked once would not play.
+ */
+type Rendition = {
+  /** The URL after redirects. Every range request must use this, not the feed's. */
+  url: string;
+  total: number;
+  etag: string | null;
+  lastModified: string | null;
+};
+
+/**
+ * Whether a ranged response came from a different cut than the one we planned
+ * against.
+ *
+ * Only the total length is treated as proof, and that asymmetry is deliberate.
+ * A different set of ads is a different number of bytes, so the total is both
+ * the most reliable signal available and the one that actually matters: if it
+ * still agrees, every byte offset we planned still points at the same audio.
+ *
+ * `ETag` and `Last-Modified` are reported but not trusted to fail a job. CDNs in
+ * front of these hosts vary them per edge and per request even for identical
+ * content, so treating a mismatch as fatal would refuse to transcribe shows that
+ * work correctly today. A changed validator with an unchanged length is worth
+ * knowing about and is not evidence of anything on its own.
+ */
+export function renditionMismatch(
+  rendition: Pick<Rendition, "total" | "etag" | "lastModified">,
+  headers: { get(name: string): string | null },
+): { fatal: boolean; detail: string } | null {
+  const contentRange = headers.get("content-range") ?? "";
+  const match = /\/(\d+)\s*$/.exec(contentRange);
+  const total = match ? Number(match[1]) : null;
+
+  if (total !== null && rendition.total > 0 && total !== rendition.total) {
+    return {
+      fatal: true,
+      detail: `length changed from ${rendition.total} to ${total} bytes`,
+    };
+  }
+
+  const etag = normaliseEtag(headers.get("etag"));
+  const expected = normaliseEtag(rendition.etag);
+  if (etag && expected && etag !== expected) {
+    return { fatal: false, detail: `etag changed from ${expected} to ${etag}` };
+  }
+
+  const modified = headers.get("last-modified");
+  if (modified && rendition.lastModified && modified !== rendition.lastModified) {
+    return {
+      fatal: false,
+      detail: `last-modified changed from ${rendition.lastModified} to ${modified}`,
+    };
+  }
+
+  return null;
+}
+
+/** Strips the weak-validator prefix so `W/"x"` and `"x"` compare equal. */
+function normaliseEtag(value: string | null): string | null {
+  if (!value) return null;
+  return value.trim().replace(/^W\//, "");
+}
 
 type TranscribeOptions = {
   signal?: AbortSignal;
@@ -381,12 +508,21 @@ export function mergeSegments(chunks: ChunkResult[]): TranscriptSegment[] {
 // Network
 // ---------------------------------------------------------------------------
 
-/** Discovers the total size and whether the host honours range requests. */
+/**
+ * Discovers the total size, whether the host honours range requests, and which
+ * served copy we are looking at.
+ *
+ * `response.url` is the URL after redirects, and capturing it is the single most
+ * important thing this function does for a dynamically-stitched show: it is the
+ * CDN object the redirect chain resolved to, and reusing it for every subsequent
+ * range request is what keeps a job reading one consistent cut of the episode.
+ * See `Rendition`.
+ */
 async function probeAudio(
   url: string,
   signal?: AbortSignal,
 ): Promise<
-  | { ok: true; total: number; rangeSupported: boolean; kind: AudioKind }
+  | { ok: true; rendition: Rendition; rangeSupported: boolean; kind: AudioKind }
   | { ok: false; error: string }
 > {
   const controller = new AbortController();
@@ -404,20 +540,32 @@ async function probeAudio(
 
     const contentType = response.headers.get("content-type");
 
+    // The URL after redirects, plus whatever validators the host offered. Every
+    // range request from here on uses these rather than the feed's URL.
+    const resolved = {
+      url: response.url || url,
+      etag: response.headers.get("etag"),
+      lastModified: response.headers.get("last-modified"),
+    };
+
     if (response.status === 206) {
       const match = /\/(\d+)\s*$/.exec(response.headers.get("content-range") ?? "");
       const head = new Uint8Array(await response.arrayBuffer().catch(() => new ArrayBuffer(0)));
       const kind = detectAudioKind(head, contentType);
       const total = match ? Number(match[1]) : 0;
-      if (total > 0) return { ok: true, total, rangeSupported: true, kind };
-      return { ok: true, total: 0, rangeSupported: false, kind };
+      return {
+        ok: true,
+        rendition: { ...resolved, total },
+        rangeSupported: total > 0,
+        kind,
+      };
     }
 
     if (response.ok) {
       const total = Number(response.headers.get("content-length") ?? 0);
       const head = new Uint8Array(await response.arrayBuffer().catch(() => new ArrayBuffer(0)));
       const kind = detectAudioKind(head, contentType);
-      return { ok: true, total, rangeSupported: false, kind };
+      return { ok: true, rendition: { ...resolved, total }, rangeSupported: false, kind };
     }
 
     return { ok: false, error: "Couldn't download the episode audio." };
@@ -432,29 +580,57 @@ async function probeAudio(
 }
 
 /**
+ * How much of a chunk may be unreadable before its measured duration is thrown
+ * away rather than trusted.
+ *
+ * `measureFrames` reports the bytes it could account for as neither audio nor a
+ * declared tag. A little of that is normal around a splice; a lot means the
+ * duration it returned is short by an unknown amount, and a duration that is
+ * short by an unknown amount is the worst possible input to `mergeSegments` —
+ * it pushes every later chunk early and looks like a real measurement while
+ * doing it. Past this, `chunkDuration`'s honest lower bound is the better bet.
+ *
+ * 2% of a 20MB chunk is roughly 25 seconds of audio at 128kbps, which is well
+ * beyond anything a legitimate splice point accounts for.
+ */
+const MAX_UNREADABLE_RATIO = 0.02;
+
+/**
  * Fetches one byte range and trims it to a clean frame boundary.
  *
  * See lib/ai/mp3.ts for why the first chunk in particular must not keep the
  * file's original header.
  */
 async function fetchChunk(
-  url: string,
+  rendition: Rendition,
   start: number,
   end: number,
   isFirst: boolean,
   signal?: AbortSignal,
 ): Promise<PreparedChunk> {
-  const bytes = await fetchRange(url, start, end, CHUNK_FETCH_TIMEOUT_MS, signal);
+  const bytes = await fetchRange(rendition, start, end, CHUNK_FETCH_TIMEOUT_MS, signal);
   const prepared = prepareChunk(bytes, isFirst);
+
+  // Measured on the prepared bytes rather than the raw range, so it is the
+  // duration of exactly the audio the provider is about to hear — the leading
+  // partial frame, and the first chunk's ID3 tag and Xing header, are already
+  // gone and must not be counted.
+  const measured = measureFrames(prepared);
+  const unreadable = prepared.length > 0 ? measured.skippedBytes / prepared.length : 1;
+  const trustworthy = measured.framesCounted > 0 && unreadable <= MAX_UNREADABLE_RATIO;
+
+  if (!trustworthy && measured.framesCounted > 0) {
+    console.warn(
+      `Chunk at ${start} had ${(unreadable * 100).toFixed(1)}% unreadable bytes; ` +
+        "falling back to the transcript's own duration to place it.",
+    );
+  }
+
   return {
     // Re-wrap the view's bytes: a subarray shares its parent's buffer, and the
     // Blob constructor's type only accepts a plain ArrayBuffer view.
     blob: new Blob([prepared.slice().buffer], { type: "audio/mpeg" }),
-    // Measured on the prepared bytes rather than the raw range, so it is the
-    // duration of exactly the audio the provider is about to hear — the leading
-    // partial frame, and the first chunk's ID3 tag and Xing header, are already
-    // gone and must not be counted.
-    seconds: frameSeconds(prepared),
+    seconds: trustworthy ? measured.seconds : null,
   };
 }
 
@@ -551,24 +727,35 @@ export async function transcribeAudio(
   const probe = await probeAudio(audioUrl, signal);
   if (!probe.ok) return probe;
 
-  if (probe.total > MAX_TOTAL_BYTES) {
+  const { rendition } = probe;
+
+  if (rendition.total > MAX_TOTAL_BYTES) {
     return { ok: false, error: TOO_LONG_ERROR };
   }
 
-  // Small enough to send in one request — always the simplest thing that works.
-  if (probe.total > 0 && probe.total <= maxUploadBytes) {
-    return transcribeWhole(audioUrl, config, signal);
+  /** Stamps a successful result with which served copy it came from. */
+  const from = (result: Promise<TranscriptionResult>) =>
+    result.then((r) =>
+      r.ok
+        ? { ...r, audioBytes: rendition.total || null, audioEtag: rendition.etag }
+        : r,
+    );
+
+  // Small enough to send in one request — always the simplest thing that works,
+  // and immune to the re-stitching problem by construction: one request, one cut.
+  if (rendition.total > 0 && rendition.total <= maxUploadBytes) {
+    return from(transcribeWhole(rendition.url, config, signal));
   }
 
   // Splitting needs both a known size and a host that honours byte ranges.
-  const canChunk = probe.rangeSupported && probe.total > 0;
+  const canChunk = probe.rangeSupported && rendition.total > 0;
   if (!canChunk) {
-    if (probe.total > maxUploadBytes) {
+    if (rendition.total > maxUploadBytes) {
       return { ok: false, error: UNSPLITTABLE_ERROR };
     }
     // Unknown size and no range support: attempt it whole and let the size
     // guard inside catch anything over the cap.
-    return transcribeWhole(audioUrl, config, signal);
+    return from(transcribeWhole(rendition.url, config, signal));
   }
 
   // How a file is split depends entirely on its container. MP3 frames are
@@ -576,15 +763,15 @@ export async function transcribeAudio(
   // in an opaque blob described by a separate index, so each piece has to be
   // repackaged into a real file. See lib/ai/mp4.ts.
   if (probe.kind === "mp4") {
-    return transcribeMp4Chunked(audioUrl, config, probe.total, signal);
+    return from(transcribeMp4Chunked(rendition, config, signal));
   }
   if (probe.kind !== "mp3") {
     // Something we can't identify. A byte split would probably produce
     // undecodable pieces, so try it whole and let the size guard answer.
-    return transcribeWhole(audioUrl, config, signal);
+    return from(transcribeWhole(rendition.url, config, signal));
   }
 
-  return transcribeMp3Chunked(audioUrl, config, probe.total, signal);
+  return from(transcribeMp3Chunked(rendition, config, signal));
 }
 
 /**
@@ -790,6 +977,11 @@ async function transcribeViaLocalServer(
       text,
       segments: mergeSegments([{ segments, words }]),
       model: `${config.provider}/${config.model}`,
+      // The server decoded the whole file, so this is the real thing rather
+      // than a sum of measurements — and it is already checked for sanity by
+      // `timelineCoversAudio` above.
+      audioSeconds:
+        typeof job.duration === "number" && job.duration > 0 ? job.duration : null,
     };
   }
 }
@@ -904,9 +1096,21 @@ async function transcribeWhole(
   if (!result.ok) return result;
   if (!result.text) return { ok: false, error: "The transcription came back empty." };
 
+  /*
+   * Measured off the bytes we just sent, which is the same thing the chunked
+   * paths record. Null for anything that isn't MP3 — `measureFrames` finds no
+   * frames and says so — which is the correct answer rather than a guess.
+   *
+   * Worth the read even though this path never had a re-stitching problem: the
+   * value is what lets the player notice later that the served file has moved
+   * on, and short episodes are no more immune to that than long ones.
+   */
+  const measured = measureFrames(new Uint8Array(await audio.arrayBuffer()));
+
   return {
     ok: true,
     text: result.text,
+    audioSeconds: measured.framesCounted > 0 ? measured.seconds : null,
     // Through `mergeSegments` as a single chunk, the same as the local path.
     // It was returning the provider's segments raw, which meant an episode
     // small enough to send in one request — the simplest case there is — was
@@ -964,7 +1168,17 @@ async function transcribeChunks(
           seconds: chunk.seconds,
         };
       } catch (err) {
-        if (err instanceof Error && err.name === "AbortError") {
+        if (err instanceof RenditionChangedError) {
+          /*
+           * Not retried here. By the time this surfaces most of the 48s budget
+           * is spent, and a restart would re-download everything only to race
+           * the same stitcher again. Failing with an error that says what
+           * happened lets the listener retry against a settled CDN copy, which
+           * is the thing that actually works.
+           */
+          console.error(`Audio re-stitched mid-job: ${err.message}`);
+          failure ??= RESTITCHED_ERROR;
+        } else if (err instanceof Error && err.name === "AbortError") {
           failure ??= "Transcription timed out.";
         } else {
           failure ??= "Couldn't download part of the episode audio.";
@@ -988,23 +1202,49 @@ async function transcribeChunks(
   const text = segments.map((s) => s.text).join(" ").trim();
   if (!text) return { ok: false, error: "The transcription came back empty." };
 
-  return { ok: true, text, segments, model: `${config.provider}/${config.model}` };
+  return {
+    ok: true,
+    text,
+    segments,
+    model: `${config.provider}/${config.model}`,
+    audioSeconds: measuredSeconds(chunks),
+  };
+}
+
+/**
+ * Total length of the audio these chunks were measured from.
+ *
+ * Null unless *every* chunk was measured off its container. A partial sum would
+ * be a smaller number than the real duration while looking like a real one, and
+ * this is stored to answer "is the file the listener is streaming still the file
+ * this was timed against?" — a question a silently short answer gets wrong in
+ * the direction that matters.
+ */
+function measuredSeconds(chunks: ChunkResult[]): number | null {
+  let total = 0;
+  for (const chunk of chunks) {
+    if (typeof chunk.seconds !== "number" || chunk.seconds <= 0) return null;
+    total += chunk.seconds;
+  }
+  return total > 0 ? total : null;
 }
 
 /** MP3: every byte range is already playable once trimmed to a frame boundary. */
 async function transcribeMp3Chunked(
-  audioUrl: string,
+  rendition: Rendition,
   config: SttConfig,
-  total: number,
   signal?: AbortSignal,
 ): Promise<TranscriptionResult> {
-  const ranges = planChunks(total, config.chunkTargetBytes ?? CHUNK_TARGET_BYTES);
+  const ranges = planChunks(
+    rendition.total,
+    config.chunkTargetBytes ?? CHUNK_TARGET_BYTES,
+  );
 
   return transcribeChunks(
     ranges.length,
     (index, sig) => {
       const { start, end } = ranges[index];
-      return fetchChunk(audioUrl, start, end, index === 0, sig);
+      return fetchChunk(rendition, start, end, index === 0, sig);
     },
     config,
     signal,
@@ -1020,12 +1260,11 @@ async function transcribeMp3Chunked(
  * each chunk costs exactly one ranged fetch, the same as the MP3 path.
  */
 async function transcribeMp4Chunked(
-  audioUrl: string,
+  rendition: Rendition,
   config: SttConfig,
-  total: number,
   signal?: AbortSignal,
 ): Promise<TranscriptionResult> {
-  const moov = await locateMoov(audioUrl, total, signal);
+  const moov = await locateMoov(rendition, signal);
   if (!moov) return { ok: false, error: MP4_UNREADABLE_ERROR };
 
   const track = parseAudioTrack(moov);
@@ -1039,7 +1278,7 @@ async function transcribeMp4Chunked(
 
   return transcribeChunks(
     groups.length,
-    (index, sig) => buildMp4Chunk(audioUrl, track, groups[index], sig),
+    (index, sig) => buildMp4Chunk(rendition, track, groups[index], sig),
     config,
     signal,
   );
@@ -1047,13 +1286,13 @@ async function transcribeMp4Chunked(
 
 /** Fetches one group's audio frames and wraps them in a playable M4A. */
 async function buildMp4Chunk(
-  audioUrl: string,
+  rendition: Rendition,
   track: Mp4AudioTrack,
   group: { start: number; end: number },
   signal?: AbortSignal,
 ): Promise<PreparedChunk> {
   const range = sampleRange(track.samples, group.start, group.end);
-  const data = await fetchRange(audioUrl, range.start, range.end, CHUNK_FETCH_TIMEOUT_MS, signal);
+  const data = await fetchRange(rendition, range.start, range.end, CHUNK_FETCH_TIMEOUT_MS, signal);
 
   const samples = track.samples.slice(group.start, group.end);
   const file = buildM4A(track, samples, data, range.start);
@@ -1075,17 +1314,17 @@ async function buildMp4Chunk(
  * a small read at the right place is enough to hop to the next.
  */
 async function locateMoov(
-  url: string,
-  total: number,
+  rendition: Rendition,
   signal?: AbortSignal,
 ): Promise<Uint8Array | null> {
+  const { total } = rendition;
   let cursor = 0;
 
   for (let hop = 0; hop < MOOV_SCAN_HOPS && cursor < total; hop += 1) {
     let window: Uint8Array;
     try {
       window = await fetchRange(
-        url,
+        rendition,
         cursor,
         Math.min(cursor + MOOV_SCAN_BYTES, total),
         PROBE_TIMEOUT_MS,
@@ -1108,7 +1347,7 @@ async function locateMoov(
       // Otherwise fetch exactly the index, now that its length is known.
       try {
         const full = await fetchRange(
-          url,
+          rendition,
           cursor + moov.start,
           Math.min(cursor + moov.end, total),
           CHUNK_FETCH_TIMEOUT_MS,
@@ -1132,9 +1371,22 @@ async function locateMoov(
   return null;
 }
 
-/** Fetches a byte range as raw bytes. Throws on transport or status failure. */
+/**
+ * Thrown when a range came back from a different cut of the episode than the one
+ * the job was planned against. Distinct from a transport failure because it is
+ * not retryable within this job — see `RESTITCHED_ERROR`.
+ */
+class RenditionChangedError extends Error {}
+
+const RESTITCHED_ERROR =
+  "This episode's host re-cut the file with different adverts while it was being transcribed, so the captions would not have lined up. Try again — it usually settles on one version.";
+
+/**
+ * Fetches a byte range of a pinned rendition. Throws on transport or status
+ * failure, or if the host served a different cut than the one planned against.
+ */
 async function fetchRange(
-  url: string,
+  rendition: Rendition,
   start: number,
   end: number,
   timeoutMs: number,
@@ -1145,12 +1397,28 @@ async function fetchRange(
   const combined = mergeSignals(signal, controller.signal);
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch(rendition.url, {
       // `end` is exclusive here but inclusive in an HTTP range header.
       headers: publisherHeaders({ range: `bytes=${start}-${end - 1}` }),
       signal: combined,
     });
     if (!response.ok) throw new Error(`range fetch failed: ${response.status}`);
+
+    /*
+     * Checked on the response we already have rather than asked for up front
+     * with `If-Range`. That header looks like the right tool and is a trap here:
+     * when the validator no longer matches, the server answers 200 with the
+     * *entire* file — which on a 200MB episode, inside a 60s function, is a far
+     * worse outcome than the mismatch it was meant to catch.
+     */
+    const mismatch = renditionMismatch(rendition, response.headers);
+    if (mismatch?.fatal) {
+      throw new RenditionChangedError(mismatch.detail);
+    }
+    if (mismatch) {
+      console.warn(`Rendition validator moved but length held: ${mismatch.detail}`);
+    }
+
     return new Uint8Array(await response.arrayBuffer());
   } finally {
     clearTimeout(timeout);

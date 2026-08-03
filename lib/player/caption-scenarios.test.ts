@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { activeSegmentIndex, captionLines } from "./captions";
 import { fillFraction } from "./caption-motion";
 import { repairTranscript } from "./transcript-integrity";
-import { toTranscriptTime } from "./caption-sync";
+import { toTranscriptTime, transcriptTimeAt } from "./caption-sync";
 import type { TranscriptSegment } from "@/lib/db/schema";
 
 /**
@@ -278,5 +278,46 @@ describe("the whole pipeline, end to end", () => {
     const offset = 30;
     const samples = playback(0, 90).map((t) => toTranscriptTime(t, offset));
     replay(LINES, samples);
+  });
+
+  /**
+   * A mid-roll break, which is the case one offset cannot express.
+   *
+   * The shift steps up when the listener crosses the correction, so the
+   * transcript clock jumps backwards at that instant — sixty seconds of it were
+   * already shown, early, while the advertising played. Every consumer
+   * downstream has to survive that, and it is the same jump a seek produces, so
+   * the same invariants apply.
+   */
+  it("survives the clock jumping back at a mid-roll correction", () => {
+    const anchors = [
+      { at: 0, offset: 30 },
+      { at: 600, offset: 90 },
+    ];
+
+    // Starting twenty seconds after the shift's own size, so the jump back
+    // lands strictly behind the first line seen rather than exactly on it.
+    const samples = playback(560, 120).map((t) => transcriptTimeAt(anchors, t));
+    const seen = replay(LINES, samples);
+
+    // The correction is crossed, so the transcript really does go back.
+    expect(Math.min(...seen)).toBeLessThan(seen[0]);
+    // And recovers: by the end it is ahead of where it started.
+    expect(seen[seen.length - 1]).toBeGreaterThan(seen[0]);
+  });
+
+  it("holds a steady line rate either side of the correction", () => {
+    // The step is a discontinuity in the *clock*, not in the reading pace. A
+    // listener sees the same lines-per-minute before and after it.
+    const anchors = [
+      { at: 0, offset: 30 },
+      { at: 600, offset: 90 },
+    ];
+
+    const before = replay(LINES, playback(400, 60).map((t) => transcriptTimeAt(anchors, t)));
+    const after = replay(LINES, playback(700, 60).map((t) => transcriptTimeAt(anchors, t)));
+
+    const advanced = (seen: number[]) => seen[seen.length - 1] - seen[0];
+    expect(advanced(after)).toBe(advanced(before));
   });
 });

@@ -300,7 +300,7 @@ describe("transcribeWithFallback", () => {
 
   describe("servedLocally", () => {
     it("distinguishes a locally-produced transcript from a paid one", () => {
-      const base = { ok: true as const, text: "x", segments: [] };
+      const base = { ok: true as const, text: "x", segments: [], audioSeconds: null };
       expect(servedLocally({ ...base, model: "colab/whisper" })).toBe(true);
       expect(servedLocally({ ...base, model: "groq/whisper-large-v3-turbo" })).toBe(false);
       expect(servedLocally({ ok: false, error: "nope" })).toBe(false);

@@ -701,6 +701,98 @@
   }
 
   /*
+   * Hands the whole material back at `lg`.
+   *
+   * The mini player is the tab bar's slab on a phone — floated in from three
+   * edges, above the home indicator — and a full-width dock along the bottom on
+   * desktop. Those are one element rather than a phone copy and a desktop copy,
+   * for the reason set out on Now Playing's panel: `display: none` hides
+   * without unmounting, so a second copy would keep a second <Image>, a second
+   * speed popover and a second volume slider live for the entire session.
+   *
+   * `.fluid-glass` is a component class, so no `lg:` variant can reach it. This
+   * unsets every property it declares at that width and stops there — the
+   * `lg:` utilities on the element then paint the dock, and utilities outrank
+   * the components layer, so nothing here has to know what they are. It has to
+   * sit after `.fluid-glass` and after the squircle block above, since all
+   * three are the same specificity in the same layer.
+   */
+  @media (width >= 64rem) {
+    .glass-to-lg {
+      border-radius: 0;
+      corner-shape: normal;
+      background: none;
+      border: 0;
+      box-shadow: none;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+
+  /*
+   * The player's popovers: speed, sleep timer.
+   *
+   * These open over Now Playing, which is a photographic backdrop that is dark
+   * but not *reliably* dark — a bright cover pushes real colour into the top of
+   * the screen. A flat panel at 95% opacity, which is what these used to be,
+   * reads as a grey rectangle pasted over the artwork: opaque enough to kill
+   * the backdrop, plain enough to look like a different application.
+   *
+   * So it is glass, of the same family as the bars — a dark slab that lets a
+   * little of the colour behind it through and picks up its saturation. The
+   * fill is layered under a faint top-lit gradient rather than being one value,
+   * because a flat translucent black over a gradient backdrop shows the seam
+   * where the panel begins.
+   *
+   * The `--fg-*` tokens are deliberately not reused. Those describe a slab
+   * viewed against the page in whichever theme is active; this one is always on
+   * the near-black of Now Playing regardless of theme, so it has its own
+   * values and does not move when the theme does.
+   */
+  .popover-glass {
+    /*
+     * Owned here rather than by a `rounded-*` at the call site, and that is
+     * load-bearing: the squircle below needs a *larger* radius to carry the
+     * same corner weight, and a utility would sit in a later layer and win —
+     * silently pinning the superellipse to the circular value and making it
+     * look pinched. Same arrangement, for the same reason, as `.fluid-glass`.
+     */
+    border-radius: 1rem;
+
+    background:
+      linear-gradient(
+        180deg,
+        rgb(255 255 255 / 0.07) 0%,
+        rgb(255 255 255 / 0.02) 55%,
+        rgb(255 255 255 / 0.04) 100%
+      ),
+      rgb(14 14 17 / 0.84);
+    border: 1px solid rgb(255 255 255 / 0.1);
+    box-shadow:
+      /* The polished top edge, as on `.fluid-glass`. */
+      inset 0 1px 0 rgb(255 255 255 / 0.13),
+      inset 0 -1px 0 rgb(0 0 0 / 0.3),
+      0 1px 2px rgb(0 0 0 / 0.45),
+      0 20px 50px rgb(0 0 0 / 0.55);
+  }
+
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .popover-glass {
+      -webkit-backdrop-filter: blur(26px) saturate(165%);
+      backdrop-filter: blur(26px) saturate(165%);
+    }
+  }
+
+  /* Same reasoning as on the bars: a squircle needs a larger radius to carry
+     the same corner weight, so the two values change together. */
+  @supports (corner-shape: squircle) {
+    .popover-glass {
+      border-radius: 1.125rem;
+      corner-shape: squircle;
+    }
+  }
+
+  /*
    * A horizontally scrolling row of cards.
    *
    * The scrollbar is hidden rather than styled. Normally that is a bad trade —

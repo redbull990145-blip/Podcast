@@ -9,12 +9,49 @@ import type { Recommendation } from "@/lib/recommender/score-candidates";
 import { Skeleton } from "@/components/ui/page";
 import { liftCard } from "@/lib/motion/gestures";
 import { listContainer, listItem } from "@/lib/motion/variants";
+import { cn } from "@/lib/utils";
 
 type Response = {
   recommendations: Recommendation[];
   categories: string[];
   coldStart: boolean;
 };
+
+/**
+ * A scrolling row on a phone, a grid from `sm`.
+ *
+ * Five covers two-across is two and a half rows of scroll for a section that is
+ * explicitly a glance on the way somewhere else — it takes more vertical space
+ * than the unfinished episodes above it, which are the things someone actually
+ * came back for. Sideways it is one 132px band, the last cover is cut off at
+ * the edge to say there is more, and the section costs what it is worth.
+ *
+ * Shared with the loading state below so the placeholders occupy the same
+ * boxes the covers will. A skeleton that reflows into a different shape is
+ * worse than no skeleton.
+ */
+const LAYOUT = [
+  "card-scroller -mx-5 gap-3 px-5 pb-1",
+  /*
+   * `scroll-pl-5` matches the padding, and without it the padding does not
+   * survive the first paint. `.card-scroller` snaps on `x`, its children align
+   * `start`, and with the default `scroll-padding: auto` the snapport begins at
+   * the *padding box* — so the browser snaps the first cover's left edge to
+   * there and lands on `scrollLeft: 20`, scrolling the 20px straight back off.
+   * The row opens with its first cover flush against the edge of the screen and
+   * no gesture has happened. Setting the scroll padding moves the snapport in
+   * to where the content actually starts.
+   */
+  "scroll-pl-5",
+  // `overflow-visible` because `.card-scroller`'s `overflow-x: auto` makes the
+  // block a scroll container on both axes, which clips `liftCard`'s hover
+  // translate against the top edge once this is a grid.
+  "sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-4 sm:overflow-visible sm:px-0 sm:scroll-pl-0",
+  "lg:grid-cols-5",
+].join(" ");
+
+/** Fixed width in the row; the grid track's width from `sm`. */
+const CARD = "w-[132px] shrink-0 sm:w-auto sm:shrink";
 
 /**
  * A row of suggested shows, artwork first.
@@ -40,9 +77,9 @@ export function RecommendedRow() {
 
   if (isPending) {
     return (
-      <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+      <div className={cn(LAYOUT, "mt-4")}>
         {Array.from({ length: 5 }, (_, i) => (
-          <div key={i} className="space-y-2.5">
+          <div key={i} className={cn(CARD, "space-y-2.5")}>
             <Skeleton className="aspect-square w-full rounded-app-lg" />
             <Skeleton className="h-3.5 w-3/4" />
             <Skeleton className="h-3 w-1/2" />
@@ -60,10 +97,10 @@ export function RecommendedRow() {
       variants={listContainer}
       initial="hidden"
       animate="visible"
-      className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5"
+      className={cn(LAYOUT, "mt-4")}
     >
       {shows.map((show) => (
-        <motion.li key={show.feedUrl} variants={listItem} {...liftCard}>
+        <motion.li key={show.feedUrl} variants={listItem} {...liftCard} className={CARD}>
           <Link
             href="/discover"
             className="flex flex-col gap-2.5"
@@ -75,7 +112,7 @@ export function RecommendedRow() {
                 alt=""
                 width={400}
                 height={400}
-                sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 180px"
+                sizes="(max-width: 640px) 132px, (max-width: 1024px) 33vw, 180px"
                 className="aspect-square w-full rounded-[14px] object-cover shadow-[var(--shadow-art)]"
               />
             ) : (

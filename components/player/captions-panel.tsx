@@ -35,8 +35,10 @@ import {
 } from "@/lib/player/caption-motion";
 import {
   captionOffsetFor,
-  toPlaybackTime,
-  toTranscriptTime,
+  playbackTimeFor,
+  resolveAnchors,
+  transcriptTimeAt,
+  type CaptionAnchor,
   transcriptEndSeconds,
 } from "@/lib/player/caption-sync";
 import { CaptionSyncControl, useCaptionOffset } from "./caption-sync-control";
@@ -64,6 +66,16 @@ type TranscriptResponse = {
    * server knows it; see captionOffsetFor for what it's for.
    */
   publishedDuration?: number | null;
+  /**
+   * The length of the audio an AI transcript was actually measured from.
+   *
+   * The counterpart to the above for transcripts we generated: the same host
+   * can serve a differently-stitched file to the transcriber and to the
+   * listener, and this is the only record of which one the timings belong to.
+   * Null for publisher transcripts and for anything generated before it was
+   * recorded.
+   */
+  transcribedDuration?: number | null;
 };
 
 /** Momentum for a wheel or trackpad flick — stiffer and more damped than the follow spring. */
@@ -201,6 +213,7 @@ export function CaptionsPanel({ episodeId }: { episodeId: string }) {
         onSeek={seek}
         source={data?.source ?? null}
         publishedDuration={data?.publishedDuration ?? null}
+        transcribedDuration={data?.transcribedDuration ?? null}
         onRegenerate={regenerate}
       />
     </div>
@@ -213,6 +226,7 @@ function VirtualTranscript({
   onSeek,
   source,
   publishedDuration,
+  transcribedDuration,
   onRegenerate,
 }: {
   episodeId: string;
@@ -220,6 +234,7 @@ function VirtualTranscript({
   onSeek: (seconds: number) => void;
   source: string | null;
   publishedDuration: number | null;
+  transcribedDuration: number | null;
   onRegenerate: () => void;
 }) {
   const reduceMotion = useReducedMotion() ?? false;
@@ -246,12 +261,14 @@ function VirtualTranscript({
    * How far the captions have to be shifted to match this download.
    *
    * `duration` is the decoded length of the file actually being played, which
-   * includes any advertising stitched in on the way; the transcript's own end
-   * is the length of the clean master. The difference is the shift, and the
+   * includes whatever advertising was stitched in on the way. What it gets
+   * compared against depends on where the transcript came from: the feed's
+   * declared length for a publisher's, and the length measured at transcription
+   * time for one of ours. Either way the difference is the shift, and the
    * listener can correct it (see caption-sync-control.tsx).
    *
-   * Which transcripts can need it, and why an AI one never does, is in
-   * captionOffsetFor.
+   * Both cases, and why an AI transcript is no longer assumed to be exempt, are
+   * in captionOffsetFor.
    */
   const duration = usePlayer((s) => s.duration);
   /*
@@ -262,15 +279,28 @@ function VirtualTranscript({
   const podcastId = usePlayer((s) =>
     s.episode?.id === episodeId ? s.episode.podcastId : null,
   );
-  const { nudge, adjust, reset } = useCaptionOffset(episodeId, podcastId);
+  const { anchors: corrections, adjust, reset } = useCaptionOffset(episodeId, podcastId);
   // Deliberately the settled duration, never the live one — see the hook.
   const autoOffset = captionOffsetFor(
     source,
     useSettledDuration(duration),
     transcriptEndSeconds(segments),
     publishedDuration,
+    transcribedDuration,
   );
-  const offset = autoOffset + nudge;
+
+  /*
+   * The guess and the listener's corrections as one stepped timeline.
+   *
+   * Memoised on identity, not for the arithmetic — which is a handful of
+   * additions — but because this array is a dependency of the two effects that
+   * subscribe to the playback clock. A fresh array every render would tear down
+   * and re-establish both subscriptions on every state change in this panel.
+   */
+  const anchors = useMemo(
+    () => resolveAnchors(autoOffset, corrections),
+    [autoOffset, corrections],
+  );
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLOListElement>(null);
@@ -284,7 +314,7 @@ function VirtualTranscript({
   const [following, setFollowing] = useState(true);
   const viewportHeight = viewport.height;
 
-  const activeIndex = useActiveSegment(segments, offset);
+  const activeIndex = useActiveSegment(segments, anchors);
 
   /**
    * Which transcript `metrics` describes. Comparing identity rather than
@@ -459,7 +489,7 @@ function VirtualTranscript({
   }, []);
 
   // --- karaoke fill --------------------------------------------------------
-  useKaraokeFill(segments, activeIndex, range.start, reduceMotion, offset);
+  useKaraokeFill(segments, activeIndex, range.start, reduceMotion, anchors);
 
   const positioned = measuring ? null : metrics;
   const rows = positioned ? segments.slice(range.start, range.end) : segments;
@@ -487,7 +517,7 @@ function VirtualTranscript({
 
         <CaptionSyncControl
           auto={autoOffset}
-          nudge={nudge}
+          corrections={corrections}
           onAdjust={adjust}
           onReset={reset}
         />
@@ -525,9 +555,11 @@ function VirtualTranscript({
           const target = (event.target as HTMLElement).closest("[data-start]");
           // Seek in playback time, which is transcript time plus whatever was
           // stitched in ahead of it — otherwise clicking a line lands early by
-          // exactly the amount the captions were out by.
+          // exactly the amount the captions were out by. How much that is
+          // depends on where in the episode the line falls, which is why this
+          // is a search rather than an addition; see `playbackTimeFor`.
           if (target) {
-            onSeek(toPlaybackTime(Number(target.getAttribute("data-start")), offset));
+            onSeek(playbackTimeFor(anchors, Number(target.getAttribute("data-start"))));
           }
         }}
       >
@@ -684,7 +716,7 @@ function useKaraokeFill(
   activeIndex: number,
   rangeStart: number,
   reduceMotion: boolean,
-  offset: number,
+  anchors: CaptionAnchor[],
 ) {
   useLayoutEffect(() => {
     const segment = segments[activeIndex];
@@ -714,7 +746,7 @@ function useKaraokeFill(
     };
 
     const paint = (playback: number) => {
-      const time = toTranscriptTime(playback, offset);
+      const time = transcriptTimeAt(anchors, playback);
       // A plain number, not a percentage: the word being swept turns it into
       // its own local fill in CSS, which divides by that word's own width.
       const progress = reduceMotion ? 1 : fillFraction(segment, time);
@@ -735,7 +767,7 @@ function useKaraokeFill(
     }
 
     return subscribeClock(paint);
-  }, [segments, activeIndex, rangeStart, reduceMotion, offset]);
+  }, [segments, activeIndex, rangeStart, reduceMotion, anchors]);
 }
 
 /**
@@ -804,7 +836,7 @@ function useSettledDuration(duration: number): number {
  */
 function useActiveSegment(
   segments: TranscriptSegment[] | null,
-  offset: number,
+  anchors: CaptionAnchor[],
 ): number {
   const [activeIndex, setActiveIndex] = useState(-1);
 
@@ -818,7 +850,11 @@ function useActiveSegment(
     return subscribeClock((playback) => {
       const next = activeSegmentIndex(
         segments,
-        toTranscriptTime(playback, offset),
+        // Evaluated per frame rather than lifted out, because the shift is a
+        // function of the position now — crossing a correction mid-episode has
+        // to move the highlight with it. It is a scan of a list with about as
+        // many entries as the show has ad breaks.
+        transcriptTimeAt(anchors, playback),
         previous,
       );
       if (next !== previous) {
@@ -826,7 +862,7 @@ function useActiveSegment(
         setActiveIndex(next);
       }
     });
-  }, [segments, offset]);
+  }, [segments, anchors]);
 
   return activeIndex;
 }

@@ -108,10 +108,34 @@ export async function resolveTier(
 
   if (userLlm.length > 0) {
     const userStt = await getUserKey(userId, ["groq", "openai"]);
+
+    /**
+     * The operator's chain sits *behind* the user's own keys rather than being
+     * replaced by them.
+     *
+     * It used to be replaced, on the reasoning that falling through to an
+     * operator-funded provider bills the wrong person. The reasoning was right
+     * and the conclusion was wrong: it meant one key could be the only thing
+     * standing between a user and a working feature, and when that provider was
+     * slow — NVIDIA's free tier on a three-hour transcript — nothing worked at
+     * all, with nine perfectly good candidates sitting unused behind it.
+     *
+     * Billing is settled by metering instead of by exclusion. The fallback is
+     * only offered while the user still has allowance left, and if it is what
+     * answers, it is charged exactly as it would be for someone with no key of
+     * their own. Their own key stays free and stays first.
+     */
+    const usage = await getUsage(userId);
+    const spent = kind === "jobs" ? usage.jobsUsed : usage.qaUsed;
+    const cap = kind === "jobs" ? usage.jobsLimit : usage.qaLimit;
+
     return {
       allowed: true,
       tier: "byok",
-      llm: userLlm.map((k) => byokLlmConfig(k.provider as LlmProvider, k.key)),
+      llm: [
+        ...userLlm.map((k) => byokLlmConfig(k.provider as LlmProvider, k.key)),
+        ...(spent < cap ? defaultLlmChain() : []),
+      ],
       stt: userStt
         ? byokSttConfig(userStt.provider as HostedSttProvider, userStt.key)
         : defaultSttConfig(),
@@ -146,6 +170,25 @@ export async function resolveTier(
   }
 
   return { allowed: true, tier: "default", llm, stt: defaultSttConfig() };
+}
+
+/**
+ * Names whose provider just failed, when that is the user's own.
+ *
+ * A key added in Settings replaces the operator's chain rather than extending
+ * it — otherwise the operator pays for calls that were meant to be billed to
+ * the user — so adding one key can leave a request with a single provider and
+ * no way around it when that provider is slow. That is exactly what happened
+ * here: an NVIDIA key turned a chain of nine candidates into one, and every
+ * failure after it read as though the app had broken.
+ *
+ * It hadn't, and the message should say so, because the fix is in Settings and
+ * nowhere else.
+ */
+export function withProviderHint(error: string, tier: AiTier): string {
+  return tier === "byok"
+    ? `${error} This used the API key you added in Settings — if it keeps happening, add a second provider there so requests have somewhere to fall back to.`
+    : error;
 }
 
 /**

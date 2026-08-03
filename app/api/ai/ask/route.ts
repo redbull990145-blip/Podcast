@@ -3,9 +3,12 @@ import { eq } from "drizzle-orm";
 import { getUser } from "@/lib/supabase/server";
 import { db } from "@/lib/db/client";
 import { episodes, transcripts } from "@/lib/db/schema";
-import { recordUsage, resolveTier } from "@/lib/ai/quota";
-import { answerQuestion } from "@/lib/ai/llm";
+import { recordUsage, resolveTier, withProviderHint } from "@/lib/ai/quota";
+import { answerQuestionStream } from "@/lib/ai/llm";
+import { episodePeople, peopleAskedAbout } from "@/lib/ai/people";
+import { referenceNotes } from "@/lib/ai/wikipedia";
 import { isUuid, sanitizeHistory } from "@/lib/api/validation";
+import { stripHtml } from "@/lib/utils";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -75,9 +78,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  /**
+   * The show's own metadata travels with the transcript, because a listener's
+   * questions don't stop at the tape: "who is being interviewed", "what else
+   * has this host done", "when did this come out". The feed answers some of
+   * those outright, and grounds the rest.
+   */
   const episode = await db.query.episodes.findFirst({
     where: eq(episodes.id, episodeId),
-    columns: { title: true },
+    columns: { title: true, description: true, publishedAt: true },
+    with: {
+      podcast: { columns: { title: true, author: true, description: true } },
+    },
   });
 
   const segments = (transcript.segments ?? []) as {
@@ -86,20 +98,69 @@ export async function POST(request: NextRequest) {
     text: string;
   }[];
 
-  const result = await answerQuestion(
+  /**
+   * Reference notes, but only for a question about someone this episode is
+   * actually about — see people.ts. Costs nothing on every other question, and
+   * a failed or slow lookup degrades to the answer we would have given anyway.
+   */
+  const notes = await referenceNotes(
+    peopleAskedAbout(
+      question,
+      episodePeople(episode?.podcast.author, episode?.title ?? ""),
+    ),
+  );
+
+  const result = await answerQuestionStream(
     decision.llm,
-    episode?.title ?? "this episode",
+    {
+      episodeTitle: episode?.title ?? "this episode",
+      podcastTitle: episode?.podcast.title ?? "this podcast",
+      author: episode?.podcast.author,
+      // Feed prose is HTML; markup in the prompt is noise the model has to
+      // read past.
+      showDescription: stripHtml(episode?.podcast.description),
+      episodeDescription: stripHtml(episode?.description),
+      publishedAt: episode?.publishedAt,
+      reference: notes,
+    },
     segments,
     transcript.text,
     question,
     history,
   );
 
+  /**
+   * Every failure lands here, before a single byte has been sent — the chain
+   * commits to a model only once that model's first word arrives. So an error
+   * is still an ordinary JSON response with a status the client can read,
+   * which is what keeps the quota and "needs a key" messages working.
+   */
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: 502 });
+    return NextResponse.json(
+      { error: withProviderHint(result.error, decision.tier) },
+      { status: 502 },
+    );
   }
 
-  if (decision.tier === "default") await recordUsage(user.id, "qa");
+  /**
+   * Charged on who actually answered, not on which tier the request started in.
+   * A user with their own key can still land on the operator's chain when their
+   * provider is failing, and that call is theirs to account for — while a call
+   * their own key served stays free however the request was resolved.
+   *
+   * Done here rather than at the end of a stream the reader may navigate away
+   * from: by this point the call has happened and the answer is being written.
+   */
+  if (result.metered) await recordUsage(user.id, "qa");
 
-  return NextResponse.json({ answer: result.text, tier: decision.tier });
+  return new Response(result.stream, {
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": "no-store",
+      // Answers stream as plain text, so anything the client needs to know
+      // about the call itself rides on the headers instead.
+      "x-ai-tier": decision.tier,
+      "x-ai-model": `${result.provider}/${result.model}`,
+    },
+  });
 }

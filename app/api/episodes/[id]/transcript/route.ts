@@ -78,6 +78,15 @@ export async function GET(
       source: cached.source,
       estimatedSeconds,
       publishedDuration,
+      /*
+       * How long the audio was when these timings were made.
+       *
+       * Only an AI transcript has one — a publisher's was timed against a
+       * master we never saw, which is what `publishedDuration` stands in for
+       * instead. Null on transcripts generated before this was recorded, which
+       * `captionOffsetFor` treats as "no evidence" rather than "no drift".
+       */
+      transcribedDuration: cached.audioDurationSeconds,
     });
   }
 

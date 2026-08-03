@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Check, Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 export function SubscribeButton({
   podcastId,
@@ -15,11 +16,14 @@ export function SubscribeButton({
    * else without becoming a dark button on a dark ground.
    */
   onDark = false,
+  className,
 }: {
   podcastId: string;
   feedUrl: string;
   initiallySubscribed: boolean;
   onDark?: boolean;
+  /** Sizing overrides. The phone's header row sets these to 44px. */
+  className?: string;
 }) {
   const router = useRouter();
   const [subscribed, setSubscribed] = useState(initiallySubscribed);
@@ -61,13 +65,13 @@ export function SubscribeButton({
       onClick={toggle}
       disabled={busy}
       variant={subscribed ? "secondary" : "primary"}
-      className={
-        onDark
-          ? subscribed
+      className={cn(
+        onDark &&
+          (subscribed
             ? "border-white/30 bg-transparent text-white hover:border-white/50 hover:bg-white/10"
-            : "bg-[#f8f6f1] text-[#1c1b17] hover:bg-white"
-          : undefined
-      }
+            : "bg-[#f8f6f1] text-[#1c1b17] hover:bg-white"),
+        className,
+      )}
       onPointerEnter={() => setHovering(true)}
       onPointerLeave={() => setHovering(false)}
       onFocus={() => setHovering(true)}

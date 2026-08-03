@@ -12,7 +12,7 @@ import { VolumeControl } from "./volume-control";
 import { Scrubber } from "./scrubber";
 import { SkipButton } from "./skip-button";
 import { TransportIcon } from "./transport-icon";
-import { cn, formatDuration } from "@/lib/utils";
+import { cn, formatDuration, formatDurationLong } from "@/lib/utils";
 
 /*
  * Position is read in these two leaves rather than in PlayerBar itself.
@@ -44,6 +44,54 @@ function BarTimings() {
       {formatDuration(currentTime)}
       <span className="mx-1 text-faint">/</span>
       {formatDuration(duration)}
+    </span>
+  );
+}
+
+/**
+ * "34 min left" — what the phone's mini player says under the title.
+ *
+ * The show's name is what the docked bar shows there, and it is the right
+ * choice on a bar wide enough to carry the episode title in full. In a 382px
+ * pill the title is truncated anyway, so a second truncated line naming the
+ * show adds nothing you could not already infer, where the time left is the one
+ * fact that changes and the only reason to glance at the player at all.
+ */
+function MiniRemaining() {
+  const currentTime = usePlayer((s) => s.currentTime);
+  const duration = usePlayer((s) => s.duration);
+  const remaining = duration > 0 ? duration - currentTime : 0;
+  return <>{remaining > 0 ? `${formatDurationLong(remaining)} left` : "Nearly done"}</>;
+}
+
+/**
+ * Hairline progress inside the mini player, read-only.
+ *
+ * The docked bar puts a full-width `Scrubber` flush along its top edge, which
+ * is a control — you can drag it. This is not one, and deliberately: it is
+ * 3px tall inside a floating pill whose whole surface is already a tap target
+ * that opens Now Playing, so a draggable region here would mean a third of the
+ * pill's height silently doing something other than what the rest of it does.
+ * Seeking on a phone happens on the sheet, where the bar is 6px with a knob.
+ */
+function MiniProgress() {
+  const currentTime = usePlayer((s) => s.currentTime);
+  const duration = usePlayer((s) => s.duration);
+  const fraction = duration > 0 ? Math.min(1, currentTime / duration) : 0;
+
+  return (
+    <span
+      aria-hidden
+      className="mt-1.5 block h-[3px] overflow-hidden rounded-full bg-track lg:hidden"
+    >
+      {/* Springs rather than steps: position republishes about four times a
+          second, and a fill that only moved when the number did would visibly
+          tick. See SPRING.progress. */}
+      <motion.span
+        animate={{ scaleX: fraction }}
+        transition={SPRING.progress}
+        className="block h-full origin-left rounded-full bg-accent"
+      />
     </span>
   );
 }
@@ -83,9 +131,19 @@ function PanelChip({
 }
 
 /**
- * Persistent player, docked above the mobile tab bar and along the bottom on
- * desktop. Hidden entirely until something is loaded so it never takes space
- * from an empty library.
+ * Persistent player: a floating glass pill on a phone, a docked bar on desktop.
+ * Hidden entirely until something is loaded so it never takes space from an
+ * empty library.
+ *
+ * On a phone it is the mate to `MobileTabBar` — the same material, the same
+ * 10px inset, at the other end of the screen — and it carries only what one
+ * hand needs mid-episode: what is playing, how much is left, and pause. Skip,
+ * speed, volume, sleep and the two panels all live one tap in, on the Now
+ * Playing sheet, where there is room to hit them.
+ *
+ * One element serves both, moved by `lg:` utilities and by `.glass-to-lg`
+ * unsetting the glass at that width. See the note on that class for why it is
+ * not two components.
  */
 export function PlayerBar() {
   const episode = usePlayer((s) => s.episode);
@@ -147,7 +205,17 @@ export function PlayerBar() {
           initial={{ y: "110%" }}
           animate={{ y: 0, transition: SPRING.sheet }}
           exit={{ y: "110%", transition: { duration: DURATION.normal, ease: [0.4, 0, 1, 1] } }}
-          className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-40 border-t border-border bg-[var(--bar-bg)] backdrop-blur-xl lg:bottom-0"
+          className={cn(
+            "fluid-glass glass-to-lg fixed z-40",
+            "inset-x-2.5 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)]",
+            /*
+              Clips the error banner to the pill's own corners. Released at lg,
+              where the speed and volume popovers open upward out of the bar and
+              a clip would cut them off at the top edge.
+            */
+            "overflow-hidden lg:overflow-visible",
+            "lg:inset-x-0 lg:bottom-0 lg:border-t lg:border-border lg:bg-[var(--bar-bg)] lg:backdrop-blur-xl",
+          )}
         >
           {/*
             Height is animated here, which the rest of the app avoids — but an
@@ -185,10 +253,16 @@ export function PlayerBar() {
             )}
           </AnimatePresence>
 
-          {/* Scrubber sits flush along the top edge, full width, easy to hit. */}
-          <BarScrubber />
+          {/*
+            Scrubber sits flush along the top edge, full width, easy to hit.
+            The phone gets `MiniProgress` inside the title block instead — see
+            the note there for why the pill has no draggable region.
+          */}
+          <span className="hidden lg:block">
+            <BarScrubber />
+          </span>
 
-          <div className="flex items-center gap-3 px-3 py-2.5 sm:gap-4.5 sm:px-7">
+          <div className="flex items-center gap-3 p-2.5 lg:gap-4.5 lg:px-7 lg:py-2.5">
             {/*
               Artwork and titles are one target that opens Now Playing, the way
               every native player behaves. Deep links to the episode and show
@@ -200,7 +274,7 @@ export function PlayerBar() {
               transition={SPRING.snappy}
               onClick={() => setExpanded(true)}
               aria-label={`Open Now Playing for ${episode.title}`}
-              className="group flex min-w-0 flex-1 items-center gap-3 rounded-app text-left sm:max-w-[340px] sm:gap-3.5"
+              className="group flex min-w-0 flex-1 items-center gap-3 rounded-app text-left lg:max-w-[340px] lg:gap-3.5"
             >
               <span className="relative shrink-0">
                 {episode.artworkUrl ? (
@@ -210,10 +284,10 @@ export function PlayerBar() {
                     width={96}
                     height={96}
                     sizes="48px"
-                    className="size-10 rounded-app object-cover shadow-[0_4px_12px_rgb(34_32_29_/_0.16)] sm:size-12"
+                    className="size-[46px] rounded-app object-cover shadow-[0_4px_12px_rgb(34_32_29_/_0.16)] lg:size-12"
                   />
                 ) : (
-                  <span className="block size-10 rounded-app bg-accent-subtle sm:size-12" />
+                  <span className="block size-[46px] rounded-app bg-accent-subtle lg:size-12" />
                 )}
                 <span className="absolute inset-0 grid place-items-center rounded-app bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
                   <ChevronUp className="size-5 text-white" />
@@ -221,17 +295,21 @@ export function PlayerBar() {
               </span>
 
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13.5px] font-semibold">
+                <span className="block truncate text-[13px] font-semibold lg:text-[13.5px]">
                   {episode.title}
                 </span>
-                <span className="mt-0.5 block truncate text-xs text-subtle-2">
-                  {episode.podcastTitle}
+                <span className="mt-0.5 block truncate text-[11.5px] text-muted lg:text-xs lg:text-subtle-2">
+                  <span className="lg:hidden">
+                    <MiniRemaining />
+                  </span>
+                  <span className="hidden lg:inline">{episode.podcastTitle}</span>
                 </span>
+                <MiniProgress />
               </span>
             </motion.button>
 
-            <div className="flex items-center gap-1 sm:gap-2.5">
-              <span className="hidden sm:block">
+            <div className="flex items-center gap-1 lg:gap-2.5">
+              <span className="hidden lg:block">
                 <SkipButton
                   direction="back"
                   seconds={skipBackSeconds}
@@ -243,7 +321,7 @@ export function PlayerBar() {
                 {...pressPrimary}
                 onClick={toggle}
                 aria-label={isPlaying ? "Pause" : "Play"}
-                className="grid size-10 place-items-center rounded-full bg-accent text-accent-foreground shadow-[var(--shadow-accent)] sm:size-[46px]"
+                className="grid size-[46px] shrink-0 place-items-center rounded-full bg-accent text-accent-foreground shadow-[var(--shadow-accent)]"
               >
                 <TransportIcon
                   isPlaying={isPlaying}
@@ -252,23 +330,31 @@ export function PlayerBar() {
                 />
               </motion.button>
 
-              <SkipButton
-                direction="forward"
-                seconds={skipForwardSeconds}
-                onClick={skipForward}
-              />
+              {/*
+                Skip forward is desktop-only now. On a phone the pill holds
+                artwork, two lines of text and pause at 44px each; a fourth
+                target would take the title down to about 120px, and skipping is
+                one tap away on the sheet where it is a 52px control.
+              */}
+              <span className="hidden lg:block">
+                <SkipButton
+                  direction="forward"
+                  seconds={skipForwardSeconds}
+                  onClick={skipForward}
+                />
+              </span>
             </div>
 
-            <span className="hidden sm:block">
+            <span className="hidden lg:block">
               <BarTimings />
             </span>
 
             {/* Pushes the secondary controls to the far edge, which is what
                 keeps the transport near the artwork it belongs to rather than
                 floating in the middle of a wide bar. */}
-            <div className="hidden flex-1 sm:block" />
+            <div className="hidden flex-1 lg:block" />
 
-            <div className="hidden items-center gap-2 sm:flex">
+            <div className="hidden items-center gap-2 lg:flex">
               <PanelChip
                 onClick={() => {
                   setExpanded(true);

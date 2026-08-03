@@ -6,7 +6,7 @@ import { queueItems } from "@/lib/db/schema";
 import { ThemeProvider } from "@/components/theme/theme-provider";
 import { QueryProvider } from "@/components/providers/query-provider";
 import { TopBar } from "@/components/nav/top-bar";
-import { MobileNav } from "@/components/nav/mobile-nav";
+import { MobileTabBar } from "@/components/nav/mobile-tab-bar";
 import { PlayerProvider } from "@/components/player/player-provider";
 import { PlayerBar } from "@/components/player/player-bar";
 import { NowPlayingHost } from "@/components/player/now-playing-host";
@@ -45,18 +45,32 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             initialQueueCount={queued?.value ?? 0}
           />
 
+          <MobileTabBar initialQueueCount={queued?.value ?? 0} />
+
           {/*
-            Top padding clears the floating bar, which overlays the page rather
-            than displacing it. Bottom padding clears the mobile tab bar and the
-            docked player.
+            Both bars overlay the page rather than displacing it, so the padding
+            here is what keeps content clear of them.
+
+            On a phone that is the tab bar at the top — 10px below the status
+            bar, 62px tall, plus 18px of air — and the floating mini player at
+            the bottom. The bottom figure is measured from the safe area rather
+            than from the viewport edge: the player is inset from the home
+            indicator, so anything that only cleared 120px of viewport would
+            still end up underneath it on a device that has one.
           */}
-          <main className="min-w-0 pb-40 pt-[68px] lg:pb-28 lg:pt-[76px]">
+          <main
+            className={[
+              "min-w-0",
+              "pt-[calc(env(safe-area-inset-top)+5.625rem)]",
+              "pb-[calc(env(safe-area-inset-bottom)+7.5rem)]",
+              "lg:pb-28 lg:pt-[76px]",
+            ].join(" ")}
+          >
             {children}
           </main>
 
           <PlayerBar />
           <NowPlayingHost />
-          <MobileNav />
           {/* Code-split: nothing of it is fetched until ⌘K is first pressed. */}
           <CommandPaletteHost />
           {/* Headless: owns the audio element, position sync and OS controls. */}

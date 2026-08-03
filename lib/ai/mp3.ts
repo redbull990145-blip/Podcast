@@ -82,22 +82,26 @@ export function parseFrameHeader(bytes: Uint8Array, offset: number): Mp3Frame | 
 }
 
 /**
- * Total size of a leading ID3v2 tag, or 0 when there isn't one.
+ * Total size of an ID3v2 tag at `at`, or 0 when there isn't one there.
  *
  * The size field is "syncsafe": seven bits per byte, so the tag length can
  * never contain a byte that looks like a frame sync.
+ *
+ * The offset exists because these are not only a file-level header. Ad
+ * stitchers write a tag at every splice point, so one turns up wherever a
+ * segment boundary falls — see `measureFrames`.
  */
-export function id3v2Length(bytes: Uint8Array): number {
-  if (bytes.length < 10) return 0;
+export function id3v2Length(bytes: Uint8Array, at = 0): number {
+  if (at < 0 || at + 10 > bytes.length) return 0;
   // "ID3"
-  if (bytes[0] !== 0x49 || bytes[1] !== 0x44 || bytes[2] !== 0x33) return 0;
+  if (bytes[at] !== 0x49 || bytes[at + 1] !== 0x44 || bytes[at + 2] !== 0x33) return 0;
 
-  const flags = bytes[5];
+  const flags = bytes[at + 5];
   const size =
-    ((bytes[6] & 0x7f) << 21) |
-    ((bytes[7] & 0x7f) << 14) |
-    ((bytes[8] & 0x7f) << 7) |
-    (bytes[9] & 0x7f);
+    ((bytes[at + 6] & 0x7f) << 21) |
+    ((bytes[at + 7] & 0x7f) << 14) |
+    ((bytes[at + 8] & 0x7f) << 7) |
+    (bytes[at + 9] & 0x7f);
 
   const footer = flags & 0x10 ? 10 : 0;
   return 10 + size + footer;
@@ -171,10 +175,99 @@ export function audioStartOffset(bytes: Uint8Array): number {
  *
  * Frames in a well-formed file are contiguous, so this only comes into play
  * around embedded junk — a stray tag, a splice point from the host's ad
- * stitcher. Bounded so a corrupt region degrades to "stop measuring here"
- * rather than scanning the rest of the chunk byte by byte.
+ * stitcher. Bounded so that a corrupt region is scanned in windows rather than
+ * making one unbounded pass over the rest of the chunk.
+ *
+ * It used to bound something else: a failed resync abandoned the remainder of
+ * the chunk outright. See `measureFrames` for why that was the wrong response
+ * and what it cost.
  */
 const RESYNC_LIMIT = 64 * 1024;
+
+/** What a run of bytes turned out to contain. */
+export type FrameMeasurement = {
+  /** Playback duration of every frame whose header was read, in seconds. */
+  seconds: number;
+  framesCounted: number;
+  /**
+   * Bytes accounted for as neither a frame nor a declared metadata tag.
+   *
+   * The honest measure of how much of this run was not understood — and so of
+   * how far the duration above might be short. A tag is *not* counted here:
+   * its length is declared, so skipping it is knowledge rather than a guess.
+   */
+  skippedBytes: number;
+};
+
+/**
+ * Walks a run of MPEG frames, reporting what it found and what it could not.
+ *
+ * The scan continues to the end of the buffer whatever it meets on the way.
+ * That is the fix for a real desynchronisation bug, and the reason is worth
+ * recording because the old behaviour looked reasonable.
+ *
+ * This loop used to `break` when a resync failed, returning the seconds counted
+ * so far. Since `mergeSegments` places each chunk at the running sum of the
+ * measured durations before it, a chunk that reported short pushed every later
+ * chunk earlier by the difference — permanently, and invisibly, because a
+ * plausible number came back rather than a failure.
+ *
+ * What triggers it is specific: hosts that stitch advertising into the file
+ * write an ID3v2 tag at each splice point, and a tag carrying album art is
+ * larger than the resync window. So the shows that break are exactly the ones
+ * with ads baked in, which is how this hid for so long. Tags are now read
+ * rather than resynced past, so the common case costs nothing and does not
+ * count against `skippedBytes` either.
+ */
+export function measureFrames(bytes: Uint8Array): FrameMeasurement {
+  let offset = 0;
+  let seconds = 0;
+  let framesCounted = 0;
+  let skippedBytes = 0;
+
+  while (offset + 4 <= bytes.length) {
+    // Metadata between stitched segments. Its length is declared, so this is a
+    // known quantity of non-audio rather than something we failed to read.
+    const tagLength = id3v2Length(bytes, offset);
+    if (tagLength > 0) {
+      offset += tagLength;
+      continue;
+    }
+
+    const frame = parseFrameHeader(bytes, offset);
+
+    if (!frame) {
+      const next = findFrame(bytes, offset + 1, RESYNC_LIMIT);
+      if (next) {
+        skippedBytes += next.offset - offset;
+        offset = next.offset;
+        continue;
+      }
+
+      /*
+       * Nothing within reach. Step past the window just searched and keep
+       * going: audio after a damaged region is still audio, and abandoning it
+       * is what made the measurement short. Bounded work either way — each
+       * window is searched once and never revisited.
+       */
+      const jump = Math.min(RESYNC_LIMIT + 1, bytes.length - offset);
+      skippedBytes += jump;
+      offset += jump;
+      continue;
+    }
+
+    seconds += frame.samples / frame.sampleRate;
+    framesCounted += 1;
+
+    // Cut mid-frame. Counted above, because the header is here and the next
+    // chunk cannot see the orphaned body — nothing else will count it.
+    if (frame.offset + frame.length > bytes.length) break;
+
+    offset += frame.length;
+  }
+
+  return { seconds, framesCounted, skippedBytes };
+}
 
 /**
  * Exact playback duration of a run of MP3 frames, in seconds.
@@ -201,36 +294,13 @@ const RESYNC_LIMIT = 64 * 1024;
  *
  * Returns null when there are no parseable frames at all, so the caller can
  * fall back rather than place a chunk at zero.
+ *
+ * Callers that need to know how much of the run was *not* understood — which is
+ * how far this number might be short — should use `measureFrames` directly.
  */
 export function frameSeconds(bytes: Uint8Array): number | null {
-  const first = parseFrameHeader(bytes, 0) ?? findFrame(bytes, 0);
-  if (!first) return null;
-
-  let offset = first.offset;
-  let seconds = 0;
-  let counted = 0;
-
-  while (offset + 4 <= bytes.length) {
-    const frame = parseFrameHeader(bytes, offset);
-
-    if (!frame) {
-      const next = findFrame(bytes, offset + 1, RESYNC_LIMIT);
-      if (!next) break;
-      offset = next.offset;
-      continue;
-    }
-
-    seconds += frame.samples / frame.sampleRate;
-    counted += 1;
-
-    // Cut mid-frame. Counted above, because the header is here and the next
-    // chunk cannot see the orphaned body — nothing else will count it.
-    if (frame.offset + frame.length > bytes.length) break;
-
-    offset += frame.length;
-  }
-
-  return counted > 0 ? seconds : null;
+  const measured = measureFrames(bytes);
+  return measured.framesCounted > 0 ? measured.seconds : null;
 }
 
 /**

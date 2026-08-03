@@ -32,8 +32,25 @@ const format = (rate: number) => `${Number(rate.toFixed(2))}×`;
 export function SpeedControl({
   /** "surface" matches the docked bar; "light" sits on the Now Playing backdrop. */
   tone = "surface",
+  /**
+   * How the trigger is drawn.
+   *
+   * "chip" is a bordered pill, which is right in a dense bar of other
+   * controls. "bare" is the word alone, for Now Playing's phone row where it
+   * sits beside three other bare words and anything drawn around it would be
+   * the only box on the screen apart from the play button.
+   *
+   * A variant rather than a `className` override because the active state —
+   * "this is not playing at 1×" — has to survive it, and a class list passed
+   * from outside can only flatten it.
+   */
+  variant = "chip",
+  /** Sizing only. The look belongs to `variant`. */
+  className,
 }: {
   tone?: "surface" | "light";
+  variant?: "chip" | "bare";
+  className?: string;
 } = {}) {
   const rate = usePlayer((s) => s.playbackRate);
   const setRate = usePlayer((s) => s.setRate);
@@ -66,8 +83,10 @@ export function SpeedControl({
   };
 
   const stepClass = cn(
-    "grid size-9 place-items-center rounded-lg transition-colors disabled:opacity-30",
-    light ? "bg-white/10 hover:bg-white/20" : "bg-surface-raised hover:bg-surface-hover",
+    "grid size-9 shrink-0 place-items-center rounded-full transition-colors disabled:opacity-30",
+    light
+      ? "text-white/60 hover:bg-white/12 hover:text-white"
+      : "text-muted-foreground hover:bg-surface-raised hover:text-foreground",
   );
 
   return (
@@ -84,12 +103,32 @@ export function SpeedControl({
           aria-haspopup="dialog"
           aria-label={`Playback speed, currently ${label}`}
           className={cn(
-            "h-8 min-w-12 rounded-full px-2.5 text-xs font-semibold tabular-nums transition-colors",
-            light
-              ? "bg-white/15 text-white hover:bg-white/25"
-              : "border border-border text-foreground hover:bg-surface-hover",
-            active &&
-              (light ? "bg-white/30 text-white" : "border-accent bg-accent-subtle text-accent"),
+            "tabular-nums transition-colors",
+            variant === "bare"
+              ? cn(
+                  "font-medium",
+                  // The rate itself is most of the signal — "1.5×" already says
+                  // it is not 1× — so the state is carried by weight of colour
+                  // alone, which is all this row uses anywhere.
+                  light
+                    ? active
+                      ? "text-white"
+                      : "text-white/45 hover:text-white/80"
+                    : active
+                      ? "text-accent"
+                      : "text-muted-foreground hover:text-foreground",
+                )
+              : cn(
+                  "h-8 min-w-12 rounded-full px-2.5 text-xs font-semibold",
+                  light
+                    ? "bg-white/15 text-white hover:bg-white/25"
+                    : "border border-border text-foreground hover:bg-surface-hover",
+                  active &&
+                    (light
+                      ? "bg-white/30 text-white"
+                      : "border-accent bg-accent-subtle text-accent"),
+                ),
+            className,
           )}
         >
           {label}
@@ -108,22 +147,27 @@ export function SpeedControl({
             className={cn(
               // Growing from the corner nearest the button reads as the control
               // unfolding rather than a panel appearing over it.
-              "absolute bottom-full z-50 mb-2 w-60 rounded-xl p-3 shadow-[var(--shadow-lifted)]",
+              "absolute bottom-full z-50 mb-2 w-60 p-3.5",
+              // Shared with the sleep timer, so the two controls sitting inches
+              // apart are visibly the same kind of object. `.popover-glass`
+              // carries its own radius — see the note there.
               light
-                ? "left-0 origin-bottom-left bg-neutral-900/95 text-white backdrop-blur-xl"
-                : "right-0 origin-bottom-right border border-border bg-surface",
+                ? "popover-glass left-0 origin-bottom-left text-white"
+                : "elev-overlay right-0 origin-bottom-right rounded-[1rem]",
             )}
           >
-            <div className="flex items-center justify-between">
+            <div className="flex items-baseline justify-between">
               <span
                 className={cn(
-                  "text-xs font-medium",
-                  light ? "text-white/60" : "text-muted-foreground",
+                  "text-[10.5px] font-semibold uppercase tracking-[0.12em]",
+                  light ? "text-white/45" : "text-subtle",
                 )}
               >
                 Speed
               </span>
-              <span className="text-sm font-semibold tabular-nums">{label}</span>
+              <span className="text-[15px] font-semibold tabular-nums -tracking-[0.01em]">
+                {label}
+              </span>
             </div>
 
             {/* Fine stepping, either side of the current value. */}
@@ -178,19 +222,29 @@ export function SpeedControl({
               <span>{MAX_RATE}×</span>
             </div>
 
-            <div className="mt-3 grid grid-cols-3 gap-1.5">
+            {/* Borderless until one is chosen or hovered — the numbers are the
+                content, and six filled blocks under a slider is more furniture
+                than a panel this size can carry. Matches the sleep timer. */}
+            <div
+              className={cn(
+                "mt-3 grid grid-cols-3 gap-1 border-t pt-2.5",
+                light ? "border-white/10" : "border-border-3",
+              )}
+            >
               {PRESETS.map((preset) => (
                 <motion.button
                   {...pressSubtle}
                   key={preset}
                   onClick={() => setRate(preset)}
                   className={cn(
-                    "rounded-lg px-2 py-1.5 text-xs font-medium tabular-nums transition-colors",
+                    "h-9 rounded-[10px] text-[13px] font-medium tabular-nums transition-colors",
                     Math.abs(rate - preset) < 0.001
-                      ? "bg-accent text-accent-foreground"
+                      ? light
+                        ? "bg-white/[0.18] text-white"
+                        : "bg-accent-subtle text-accent"
                       : light
-                        ? "bg-white/10 text-white/75 hover:bg-white/20 hover:text-white"
-                        : "bg-surface-raised text-muted-foreground hover:bg-surface-hover hover:text-foreground",
+                        ? "text-white/70 hover:bg-white/10 hover:text-white"
+                        : "text-ink-3 hover:bg-surface-raised hover:text-foreground",
                   )}
                 >
                   {preset}×
@@ -200,8 +254,8 @@ export function SpeedControl({
 
             <p
               className={cn(
-                "mt-3 text-[11px] leading-relaxed",
-                light ? "text-white/50" : "text-subtle-foreground",
+                "mt-2.5 text-[11px] leading-relaxed",
+                light ? "text-white/40" : "text-subtle-foreground",
               )}
             >
               Pitch stays natural at every speed.

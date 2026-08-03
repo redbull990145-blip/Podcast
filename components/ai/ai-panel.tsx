@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, Loader2, MessageCircleQuestion, Send, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { CitationText } from "./citation-text";
+import { askEpisode } from "@/lib/ai/ask-client";
 import { cn } from "@/lib/utils";
 
 type Usage = {
@@ -248,6 +249,22 @@ function AskPanel({
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fieldRef = useRef<HTMLTextAreaElement>(null);
+
+  // Grows with the question, then scrolls. See the note in the player's panel.
+  useEffect(() => {
+    const field = fieldRef.current;
+    if (!field) return;
+    field.style.height = "auto";
+    field.style.height = `${Math.min(field.scrollHeight, 120)}px`;
+  }, [question]);
+
+  /** Enter sends, shift-Enter breaks the line. See the player's panel. */
+  function onFieldKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    void ask(event);
+  }
 
   async function ask(e: React.FormEvent) {
     e.preventDefault();
@@ -258,28 +275,28 @@ function AskPanel({
     setError(null);
     setBusy(true);
     const history = turns;
-    setTurns([...history, { role: "user", content: q }]);
 
-    try {
-      const res = await fetch("/api/ai/ask", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ episodeId, question: q, history }),
-      });
-      const body = await res.json();
+    // The empty assistant turn is the bubble the answer will be written into.
+    setTurns([...history, { role: "user", content: q }, { role: "assistant", content: "" }]);
 
-      if (!res.ok) {
-        setError(body.error ?? "Couldn't answer that.");
-        return;
-      }
+    const result = await askEpisode({ episodeId, question: q, history }, (delta) =>
+      setTurns((prev) => {
+        const next = [...prev];
+        const tail = next[next.length - 1];
+        next[next.length - 1] = { ...tail, content: tail.content + delta };
+        return next;
+      }),
+    );
 
-      setTurns((prev) => [...prev, { role: "assistant", content: body.answer }]);
-      void queryClient.invalidateQueries({ queryKey: ["ai-usage"] });
-    } catch {
-      setError("Couldn't reach the server.");
-    } finally {
-      setBusy(false);
+    setBusy(false);
+
+    if (!result.ok) {
+      setError(result.error);
+      setTurns((prev) => prev.slice(0, -1));
+      return;
     }
+
+    void queryClient.invalidateQueries({ queryKey: ["ai-usage"] });
   }
 
   return (
@@ -294,6 +311,7 @@ function AskPanel({
           {turns.map((turn, index) => (
             <li
               key={index}
+              hidden={turn.role === "assistant" && turn.content === ""}
               className={cn(
                 "text-[13px] leading-relaxed",
                 turn.role === "user"
@@ -308,7 +326,7 @@ function AskPanel({
               )}
             </li>
           ))}
-          {busy && (
+          {busy && turns[turns.length - 1]?.content === "" && (
             <li className="flex items-center gap-2 text-[13px] text-muted">
               <Loader2 className="size-3.5 animate-spin" />
               Reading the transcript…
@@ -317,14 +335,17 @@ function AskPanel({
         </ul>
       )}
 
-      <form onSubmit={ask} className="mt-3.5 flex gap-2">
-        <input
+      <form onSubmit={ask} className="mt-3.5 flex items-end gap-2">
+        <textarea
+          ref={fieldRef}
+          rows={1}
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={onFieldKeyDown}
           placeholder="Ask anything — answers cite the tape"
           aria-label={`Ask a question about ${episodeTitle}`}
           maxLength={1000}
-          className="h-10 min-w-0 flex-1 rounded-app border border-border-input bg-surface px-3 text-[13px] placeholder:text-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
+          className="min-h-10 min-w-0 flex-1 resize-none rounded-app border border-border-input bg-surface px-3 py-2.5 text-[13px] leading-[1.5] placeholder:text-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25"
         />
         <button
           type="submit"

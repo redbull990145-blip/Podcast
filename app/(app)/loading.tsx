@@ -10,7 +10,8 @@ import { EpisodeListSkeleton, PageShell, Skeleton } from "@/components/ui/page";
 export default function Loading() {
   return (
     <PageShell>
-      <div className="border-b border-border pb-6">
+      {/* Matches `PageHeader`, whose rule is desktop-only. */}
+      <div className="lg:border-b lg:border-border lg:pb-6">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="mt-3 h-4 w-72" />
       </div>

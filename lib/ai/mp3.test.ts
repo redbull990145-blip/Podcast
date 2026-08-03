@@ -4,6 +4,7 @@ import {
   findFrame,
   frameSeconds,
   id3v2Length,
+  measureFrames,
   parseFrameHeader,
   prepareChunk,
 } from "./mp3";
@@ -256,5 +257,68 @@ describe("frameSeconds", () => {
     const speech = concat(...Array.from({ length: 40 }, () => frame()));
     const silence = concat(...Array.from({ length: 60 }, () => frame()));
     expect(frameSeconds(concat(speech, silence))).toBeCloseTo(FRAME_SECONDS * 100, 9);
+  });
+});
+
+/**
+ * What happens at an ad splice point.
+ *
+ * These are the regressions that made captions drift on exactly the shows whose
+ * hosts stitch advertising into the file, and only those. Both used to return a
+ * duration short by everything after the splice, which `mergeSegments` then
+ * spent placing every later chunk too early.
+ */
+describe("measureFrames at a stitch point", () => {
+  it("reads a mid-stream ID3 tag rather than resyncing past it", () => {
+    // The tag a stitcher writes between two segments, carrying album art.
+    const bytes = concat(frame(), frame(), id3Tag(300_000), frame(), frame());
+    const measured = measureFrames(bytes);
+
+    expect(measured.seconds).toBeCloseTo(FRAME_SECONDS * 4, 9);
+    expect(measured.framesCounted).toBe(4);
+    // A declared tag length is knowledge, not a gap — nothing was guessed at.
+    expect(measured.skippedBytes).toBe(0);
+  });
+
+  it("counts audio after a tag too large to resync past", () => {
+    // Larger than RESYNC_LIMIT, which is precisely the case that used to make
+    // the loop give up and abandon the rest of the chunk.
+    const bytes = concat(frame(), id3Tag(200 * 1024), frame(), frame());
+    expect(frameSeconds(bytes)).toBeCloseTo(FRAME_SECONDS * 3, 9);
+  });
+
+  it("keeps scanning past junk it cannot resync through", () => {
+    // 200KB of noise: three failed resync windows before real audio resumes.
+    const junk = new Uint8Array(200 * 1024).fill(0x42);
+    const bytes = concat(frame(), frame(), junk, frame(), frame(), frame());
+    const measured = measureFrames(bytes);
+
+    expect(measured.framesCounted).toBe(5);
+    expect(measured.seconds).toBeCloseTo(FRAME_SECONDS * 5, 9);
+    // Reported rather than swallowed, so the caller can distrust the number.
+    expect(measured.skippedBytes).toBeGreaterThanOrEqual(junk.length);
+  });
+
+  it("resyncs through junk smaller than one window without losing the tail", () => {
+    const junk = new Uint8Array(1024).fill(0x42);
+    const bytes = concat(frame(), junk, frame(), frame());
+    const measured = measureFrames(bytes);
+
+    expect(measured.seconds).toBeCloseTo(FRAME_SECONDS * 3, 9);
+    expect(measured.skippedBytes).toBe(junk.length);
+  });
+
+  it("reports nothing understood for a run with no frames at all", () => {
+    const measured = measureFrames(new Uint8Array(4096).fill(0x42));
+    expect(measured.framesCounted).toBe(0);
+    expect(measured.skippedBytes).toBeGreaterThan(0);
+    expect(frameSeconds(new Uint8Array(4096).fill(0x42))).toBeNull();
+  });
+
+  it("terminates on a tag whose declared length overruns the buffer", () => {
+    // A tag cut in half by the end of a byte range. The rest is in the next
+    // chunk; this one simply ends.
+    const bytes = concat(frame(), id3Tag(500_000).subarray(0, 2048));
+    expect(measureFrames(bytes).framesCounted).toBe(1);
   });
 });

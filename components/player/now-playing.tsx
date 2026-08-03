@@ -12,7 +12,7 @@ import {
   type ArtworkPalette,
 } from "@/lib/player/artwork-palette";
 import { SPRING, TWEEN } from "@/lib/motion/config";
-import { press, pressPrimary } from "@/lib/motion/gestures";
+import { press, pressPrimary, pressSubtle } from "@/lib/motion/gestures";
 import { sheet } from "@/lib/motion/variants";
 import { chapterTicks } from "@/lib/player/chapters";
 import { AnimatedArtwork } from "@/components/artwork/animated-artwork";
@@ -224,25 +224,46 @@ export function NowPlaying() {
       */}
       <div aria-hidden className="now-playing-grain pointer-events-none absolute inset-0 -z-10" />
 
-      <header className="flex items-center justify-between gap-3 px-4 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-7">
+      <header className="flex items-center justify-between gap-3 px-5 pt-[calc(1rem+env(safe-area-inset-top))] lg:px-7 lg:pt-[calc(0.75rem+env(safe-area-inset-top))]">
         <motion.button
           {...press}
           onClick={() => setExpanded(false)}
           aria-label="Close Now Playing"
-          className="grid size-10 shrink-0 place-items-center rounded-full bg-white/10 text-white/85 transition-colors hover:bg-white/20 hover:text-white"
+          className="grid size-11 shrink-0 place-items-center rounded-full bg-white/10 text-white/85 transition-colors hover:bg-white/20 hover:text-white lg:size-10"
         >
-          <ChevronDown className="size-5" />
+          <ChevronDown className="size-[22px] lg:size-5" />
         </motion.button>
 
         <Link
           href={`/podcast/${episode.podcastId}`}
           onClick={() => setExpanded(false)}
-          className="min-w-0 truncate text-[11.5px] font-semibold uppercase tracking-[0.14em] text-white/60 transition-colors hover:text-white"
+          className="min-w-0 truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-white/60 transition-colors hover:text-white lg:text-[11.5px]"
         >
           {episode.podcastTitle}
         </Link>
 
+        {/*
+          The header's third slot holds different things at the two sizes, and
+          that follows from where the panel choice went. On desktop it is the
+          `ViewSwitch`, sitting above the column the panel occupies. On a phone
+          the panel *is* the screen, so the choice moved down beside the
+          transport where the thumb already is — which frees this corner for the
+          sleep timer, the one control that is genuinely peripheral and the one
+          that had nowhere else to go once volume left the phone layout.
+        */}
+        <span className="shrink-0 lg:hidden">
+          {/* `min-w` rather than a fixed square: once a timer is running the
+              trigger carries the countdown beside the moon, and a 44px box
+              would clip it. */}
+          <SleepTimer
+            tone="light"
+            placement="bottom"
+            className="h-11 min-w-11 justify-center rounded-full px-2.5"
+          />
+        </span>
+
         <ViewSwitch
+          className="hidden lg:flex"
           view={captionsOpen ? "transcript" : askOpen ? "ask" : "artwork"}
           onChange={(next) => {
             setCaptionsOpen(next === "transcript");
@@ -311,10 +332,17 @@ export function NowPlaying() {
             <motion.div
               animate={{ scale: isPlaying ? 1 : 0.94 }}
               transition={SPRING.snappy}
+              /*
+                The phone cap is lower than the desktop one on the height axis
+                — 46vh against 52vh — because the panel chips added a 44px row
+                under the transport that was not there before. Without it a
+                short phone in landscape-ish aspect pushes the chips under the
+                home indicator, and the cover is the thing with slack.
+              */
               className={
                 panelOpen
                   ? "w-[min(30vw,min(38vh,360px))]"
-                  : "w-[min(78vw,min(52vh,460px))]"
+                  : "w-[min(78vw,min(46vh,300px))] lg:w-[min(78vw,min(52vh,460px))]"
               }
             >
               {/*
@@ -343,7 +371,14 @@ export function NowPlaying() {
             plays stops reading as a pair.
           */}
           <div className="mx-auto w-full max-w-[520px] shrink-0 pt-4 xl:max-w-[560px]">
-            <h1 className="text-balance text-center text-[19px] font-semibold leading-snug -tracking-[0.02em] sm:text-[23px]">
+            {/*
+              Left-aligned on a phone, centred from lg. Centring is right under
+              a cover that is itself centred in a column; run full-bleed across
+              a 402px screen, a two-line title centred against a left-aligned
+              chapter caption and a scrubber that starts at the margin reads as
+              a caption that has come loose from its own block.
+            */}
+            <h1 className="text-balance text-[19px] font-semibold leading-snug -tracking-[0.02em] lg:text-center lg:text-[23px]">
               <Link
                 href={`/episode/${episode.id}`}
                 onClick={() => setExpanded(false)}
@@ -380,7 +415,7 @@ export function NowPlaying() {
             <PositionBar episodeId={episode.id} />
 
             {/* --- transport --- */}
-            <div className="mt-6 flex items-center justify-center gap-7 sm:gap-8">
+            <div className="mt-4 flex items-center justify-center gap-[26px] lg:mt-6 lg:gap-8">
               <SkipButton
                 direction="back"
                 seconds={skipBackSeconds}
@@ -392,7 +427,7 @@ export function NowPlaying() {
                 {...pressPrimary}
                 onClick={toggle}
                 aria-label={isPlaying ? "Pause" : "Play"}
-                className="grid size-16 place-items-center rounded-full bg-[#f7f5f0] text-[#1a1c18] shadow-[0_10px_30px_rgba(0,0,0,0.35)] sm:size-[72px]"
+                className="grid size-[68px] place-items-center rounded-full bg-[#f7f5f0] text-[#1a1c18] shadow-[0_10px_30px_rgba(0,0,0,0.35)] lg:size-[72px]"
               >
                 <TransportIcon
                   isPlaying={isPlaying}
@@ -409,8 +444,42 @@ export function NowPlaying() {
               />
             </div>
 
-            {/* --- secondary controls --- */}
-            <div className="mt-5 flex items-center justify-between gap-4">
+            {/*
+              --- secondary controls, phone ---
+
+              Artwork / Transcript / Ask, plus the speed, as bare words on a
+              44px target apiece. See `ViewSwitch` for why nothing is drawn
+              around them.
+
+              A hairline separates the speed from the three, because it is a
+              different kind of control — those choose what fills the screen,
+              this one changes playback — and without it a fourth word in the
+              same row reads as a fourth panel.
+
+              Volume is absent on purpose and is not hidden desktop chrome — a
+              phone has hardware keys for it, and a software slider next to them
+              is a second answer to a question the device already answers.
+            */}
+            <div className="mt-4 flex items-center lg:hidden">
+              <ViewSwitch
+                variant="buttons"
+                className="flex flex-1 items-center"
+                view={captionsOpen ? "transcript" : askOpen ? "ask" : "artwork"}
+                onChange={(next) => {
+                  setCaptionsOpen(next === "transcript");
+                  setAskOpen(next === "ask");
+                }}
+              />
+              <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-white/15" />
+              <SpeedControl
+                tone="light"
+                variant="bare"
+                className="h-11 min-w-11 shrink-0 px-2 text-[13px]"
+              />
+            </div>
+
+            {/* --- secondary controls, desktop --- */}
+            <div className="mt-5 hidden items-center justify-between gap-4 lg:flex">
               <SpeedControl tone="light" />
               <VolumeControl layout="inline" className="max-w-56 flex-1 text-white" />
               <SleepTimer tone="light" />
@@ -465,57 +534,106 @@ const VIEWS: { value: View; label: string }[] = [
 /**
  * What the space beside the controls is showing.
  *
- * Set as plain words with a rule under the current one, rather than as filled
- * chips. Three bordered pills in the corner of a photographic backdrop read as
- * browser chrome pasted over the artwork — they are the highest-contrast shapes
- * on the screen and the eye goes to them before it goes to the cover. Type
- * alone carries the same three states: the active one is simply the one that is
- * fully lit, which is how the rest of this screen already distinguishes what
- * matters from what is available.
- *
  * Modelled as one exclusive choice rather than two independent toggles because
  * that is what it is — the panel has room for exactly one of them, and
  * "Artwork" is a state in the same set, not a close button.
+ *
+ * Two presentations of that one choice, because it sits in two very different
+ * places.
+ *
+ * `"underline"` is the desktop form: plain words in the header with a rule
+ * under the current one. Three bordered pills in the corner of a photographic
+ * backdrop read as browser chrome pasted over the artwork — they are the
+ * highest-contrast shapes on the screen and the eye goes to them before it goes
+ * to the cover. Type alone carries the same three states.
+ *
+ * `"buttons"` is the phone form, down beside the transport. It is the same
+ * idea at touch size: the words carry the state and nothing is drawn around
+ * them. Only the *target* grows — each is 44px tall and takes an equal share of
+ * the row, so the thing you can hit is large while the thing you can see is
+ * just the label and a rule under the current one.
+ *
+ * They were bordered chips first, and that was wrong for the reason the desktop
+ * form has always been right: four outlined boxes across the foot of a
+ * photographic backdrop are the highest-contrast shapes on the screen, and the
+ * eye lands on them before the artwork. Sitting directly under a 68px play
+ * button they also read as three more transport controls. Taking the boxes away
+ * leaves the play button as the only filled shape below the cover, which is
+ * what it should be.
+ *
+ * The `layoutId` is deliberately different between the two. One shared id
+ * across both would make Motion try to slide the desktop rule into the phone
+ * one's box on a resize across `lg`, which is a projection between two elements
+ * that are never on screen together.
  */
 function ViewSwitch({
   view,
   onChange,
+  variant = "underline",
+  className,
 }: {
   view: View;
   onChange: (view: View) => void;
+  variant?: "underline" | "buttons";
+  className?: string;
 }) {
+  const buttons = variant === "buttons";
+
   return (
     <div
       role="radiogroup"
       aria-label="Companion panel"
-      className="flex shrink-0 items-center gap-1 sm:gap-2"
+      className={cn(
+        buttons ? "flex items-center gap-2" : "flex shrink-0 items-center gap-1 sm:gap-2",
+        className,
+      )}
     >
       {VIEWS.map(({ value, label }) => {
         const active = view === value;
         return (
           <motion.button
             key={value}
-            {...press}
+            /* Wider than they are tall, so the gentler press — and a 6% hover
+               growth on an ancestor of a `layoutId` element visibly skews the
+               plate Motion is projecting into it. */
+            {...(buttons ? pressSubtle : press)}
             role="radio"
             aria-checked={active}
             onClick={() => onChange(value)}
             className={cn(
-              "relative px-1.5 py-2 text-[12.5px] font-medium tracking-[0.01em] transition-colors sm:px-2",
-              active ? "text-white" : "text-white/45 hover:text-white/80",
+              "relative font-medium transition-colors",
+              buttons
+                ? cn(
+                    "h-11 flex-1 text-[13px] tracking-[0.01em]",
+                    active ? "text-white" : "text-white/45",
+                  )
+                : cn(
+                    "px-1.5 py-2 text-[12.5px] tracking-[0.01em] sm:px-2",
+                    active ? "text-white" : "text-white/45 hover:text-white/80",
+                  ),
             )}
           >
             {label}
             {/*
-              One rule shared by all three via layoutId, so it slides between
-              them. Hairline and inset from the text rather than a full
-              underline — it should register as emphasis, not as a border.
+              One rule shared by all three via layoutId, so changing panel
+              slides it across instead of blinking out here and in again there.
+
+              Inset from the text rather than run full width, and a hairline
+              rather than a bar — it should register as emphasis, not as a
+              border. The phone one is a touch heavier and further from the
+              label only because it is being read at arm's length.
             */}
             {active && (
               <motion.span
-                layoutId="now-playing-view"
+                layoutId={buttons ? "now-playing-view-chip" : "now-playing-view"}
                 aria-hidden
                 transition={SPRING.pop}
-                className="absolute inset-x-1.5 bottom-0.5 h-px rounded-full bg-white/70 sm:inset-x-2"
+                className={cn(
+                  "absolute rounded-full bg-white/70",
+                  buttons
+                    ? "inset-x-[30%] bottom-1.5 h-0.5"
+                    : "inset-x-1.5 bottom-0.5 h-px sm:inset-x-2",
+                )}
               />
             )}
           </motion.button>

@@ -35,7 +35,10 @@ function SectionHeading({
 }) {
   return (
     <div
-      className={cn("mt-11 flex items-baseline justify-between gap-4", className)}
+      className={cn(
+        "mt-7 flex items-baseline justify-between gap-4 lg:mt-11",
+        className,
+      )}
     >
       <h2 className="text-heading font-semibold">{title}</h2>
       {href && action && (
@@ -125,7 +128,7 @@ export default async function HomePage() {
         >
           <div className="min-w-0">
             <Greeting />
-            <h1 className="mt-2.5 text-[30px] font-semibold leading-[1.1] -tracking-[0.03em] sm:text-[38px]">
+            <h1 className="mt-2 text-[28px] font-semibold leading-[1.14] -tracking-[0.03em] sm:mt-2.5 sm:text-[38px]">
               Welcome back, {firstName}
             </h1>
             {/*
@@ -145,13 +148,25 @@ export default async function HomePage() {
             The streak only appears once there is one. A "0-day streak" badge is a
             reprimand, and rendering it on an empty account is the app's first
             impression.
+
+            It used to be hidden outright below `sm`, on the reasoning that
+            "12-day streak" beside a wrapping headline had nowhere to go. The
+            fix was the wording rather than the element: the flame already says
+            what the number counts, so the phone gets the glyph and the figure
+            and the word "streak" is what gets dropped. Screen readers keep the
+            full phrase either way.
           */}
           {streakDays > 0 && (
-            <div className="hidden shrink-0 items-center gap-2 rounded-full bg-clay-subtle px-3.5 py-2 text-clay-ink sm:flex">
-              <Flame className="size-[15px]" strokeWidth={1.75} />
-              <span className="text-[13px] font-semibold tabular-nums">
-                {streakDays}-day streak
+            <div className="flex shrink-0 items-center gap-1.5 rounded-full bg-clay-subtle px-3 py-2 text-clay-ink sm:gap-2 sm:px-3.5">
+              <Flame className="size-[15px]" strokeWidth={1.75} aria-hidden />
+              <span
+                aria-hidden
+                className="text-[12.5px] font-semibold tabular-nums sm:text-[13px]"
+              >
+                {streakDays}
+                <span className="hidden sm:inline">-day streak</span>
               </span>
+              <span className="sr-only">{streakDays}-day listening streak</span>
             </div>
           )}
         </CascadeBlock>
