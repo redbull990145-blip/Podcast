@@ -4,7 +4,7 @@ import { getUser } from "@/lib/supabase/server";
 import { db } from "@/lib/db/client";
 import { subscriptions } from "@/lib/db/schema";
 import { ingestFeed } from "@/lib/podcasts/ingest";
-import { isSafeFeedUrl } from "@/lib/rss/url-guard";
+import { isSafeFeedUrl, normaliseFeedUrl } from "@/lib/rss/url-guard";
 
 export const runtime = "nodejs";
 
@@ -45,7 +45,14 @@ export async function POST(request: NextRequest) {
     podcastindexId?: number | null;
   } | null;
 
-  const feedUrl = body?.feedUrl?.trim();
+  /*
+   * Normalised before anything else touches it, so the scheme this fills in is
+   * the one that gets fetched and the one that gets stored. Validating a
+   * completed URL and then ingesting the raw one would put a scheme-less
+   * address in the database, where every later fetch would have to repair it
+   * again — and the duplicate check would miss a show already followed.
+   */
+  const feedUrl = normaliseFeedUrl(body?.feedUrl ?? "");
   if (!feedUrl) {
     return NextResponse.json({ error: "A feed URL is required." }, { status: 400 });
   }
@@ -63,6 +70,35 @@ export async function POST(request: NextRequest) {
 
   if (ingested.status === "error") {
     return NextResponse.json({ error: ingested.message }, { status: 422 });
+  }
+
+  /*
+   * A feed with items but no audio is a blog's, not a podcast's.
+   *
+   * It parses perfectly — title, description, artwork, categories all present —
+   * so everything downstream treats it as a real show, and the only symptom is
+   * a subscription that is permanently empty. `blog.apaonline.org/feed` is
+   * exactly this: ten articles, zero enclosures, and a following you cannot
+   * explain. Refusing at the point of subscribing is the only moment the
+   * explanation is useful.
+   *
+   * Only ever refuses when a fetch actually happened and found items. A cache
+   * hit reports no `feed`, and a genuinely new show with nothing published yet
+   * has no items to judge — neither should be blocked.
+   */
+  if (
+    ingested.episodeCount === 0 &&
+    ingested.feed &&
+    ingested.feed.audioItems === 0 &&
+    ingested.feed.totalItems > 0
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "That feed has articles rather than audio, so there's nothing to play. It's most likely the site's blog feed — look for its podcast feed instead.",
+      },
+      { status: 422 },
+    );
   }
 
   await db

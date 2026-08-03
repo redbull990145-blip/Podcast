@@ -16,8 +16,20 @@ import { fetchFeed, type ParsedEpisode, type ParsedFeed } from "@/lib/rss/parse-
  * the function's time budget and bloat a 500MB free-tier database for episodes
  * nobody will open. The publisher orders newest-first, so this keeps the part
  * people actually listen to.
+ *
+ * Raised from 500, which was cutting real shows: a long-running weekly is past
+ * a thousand episodes and several in this library sit just over the old figure
+ * — BibleProject publishes 535 — so the cap was silently deciding that the
+ * back catalogue did not exist. At roughly 2KB a row this is about 2MB for the
+ * largest feed anyone is likely to add, which the free tier absorbs.
+ *
+ * It is still a cap rather than "all of them", because the failure mode at the
+ * far end is worse than a truncated list: a feed with ten thousand items would
+ * take the ingest past the function's time budget and leave the show
+ * half-written. `episodesAvailable` reports what the feed offered, so when this
+ * does bite the page can say so instead of quietly showing less.
  */
-const MAX_EPISODES_PER_FEED = 500;
+const MAX_EPISODES_PER_FEED = 2000;
 
 /** Postgres caps bound parameters per statement; chunking keeps us clear of it. */
 const INSERT_CHUNK_SIZE = 100;
@@ -26,7 +38,21 @@ const INSERT_CHUNK_SIZE = 100;
 const REFRESH_AFTER_MS = 60 * 60 * 1000;
 
 export type IngestResult =
-  | { status: "ok"; podcast: Podcast; episodeCount: number }
+  | {
+      status: "ok";
+      podcast: Podcast;
+      /** Episodes now stored for this show. */
+      episodeCount: number;
+      /**
+       * What the feed offered on this pass — items carrying audio, and items
+       * of any kind. Absent when nothing was fetched (a cache hit, or a 304).
+       *
+       * Both numbers are needed to tell the two silent failures apart. A blog
+       * feed has items and no audio; a dead feed has neither. They produce the
+       * same empty show and need completely different explanations.
+       */
+      feed?: { audioItems: number; totalItems: number };
+    }
   | { status: "error"; message: string };
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -172,11 +198,11 @@ export async function ingestFeed(
   if (!options.force && existing?.lastFetchedAt) {
     const age = Date.now() - existing.lastFetchedAt.getTime();
     if (age < REFRESH_AFTER_MS) {
-      const [{ count }] = await db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(episodes)
-        .where(eq(episodes.podcastId, existing.id));
-      return { status: "ok", podcast: existing, episodeCount: count };
+      return {
+        status: "ok",
+        podcast: existing,
+        episodeCount: await countEpisodes(existing.id),
+      };
     }
   }
 
@@ -193,22 +219,22 @@ export async function ingestFeed(
       .set({ lastFetchedAt: new Date() })
       .where(eq(podcasts.id, existing.id));
 
-    const [{ count }] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(episodes)
-      .where(eq(episodes.podcastId, existing.id));
-    return { status: "ok", podcast: existing, episodeCount: count };
+    return {
+      status: "ok",
+      podcast: existing,
+      episodeCount: await countEpisodes(existing.id),
+    };
   }
 
   if (result.status !== "ok") {
     // A refresh failure on a feed we already have should not break the page —
     // serve what is cached and try again next time.
     if (existing) {
-      const [{ count }] = await db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(episodes)
-        .where(eq(episodes.podcastId, existing.id));
-      return { status: "ok", podcast: existing, episodeCount: count };
+      return {
+        status: "ok",
+        podcast: existing,
+        episodeCount: await countEpisodes(existing.id),
+      };
     }
     return {
       status: "error",
@@ -223,9 +249,35 @@ export async function ingestFeed(
     { itunesId: options.itunesId, podcastindexId: options.podcastindexId },
   );
 
-  const episodeCount = await upsertEpisodes(podcast.id, result.feed.episodes);
+  await upsertEpisodes(podcast.id, result.feed.episodes);
 
-  return { status: "ok", podcast, episodeCount };
+  /*
+   * Counted from the table rather than taken from what this pass wrote.
+   * `upsertEpisodes` returns how many rows it touched, which is not the same as
+   * how many the show has: feeds routinely publish a rolling window of the most
+   * recent fifty, so a refresh writes fifty and the show still has six hundred.
+   * Reporting the write count made an established show look like it had shrunk.
+   */
+  const episodeCount = await countEpisodes(podcast.id);
+
+  return {
+    status: "ok",
+    podcast,
+    episodeCount,
+    feed: {
+      audioItems: result.feed.episodes.length,
+      totalItems: result.feed.itemCount,
+    },
+  };
+}
+
+/** How many episodes are stored for a show. */
+export async function countEpisodes(podcastId: string): Promise<number> {
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(episodes)
+    .where(eq(episodes.podcastId, podcastId));
+  return count;
 }
 
 /** Refreshes a show we already know about, by id. */

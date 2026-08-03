@@ -86,6 +86,36 @@ export class UnsafeUrlError extends Error {
 }
 
 /**
+ * Fills in what someone leaves off the front of a feed URL.
+ *
+ * Almost nobody types a scheme. Copying a feed address out of a show's website
+ * gives `blog.example.org/feed`, and that is a URL by every definition except
+ * `new URL()`'s — which threw, and produced "that doesn't look like a valid
+ * URL" for an address that was perfectly valid. Assuming `https` is what every
+ * browser address bar does with the same input.
+ *
+ * The test is `://` rather than a scheme-shaped prefix, and that matters:
+ * `example.com:8080/feed` starts with something that parses as a scheme, so a
+ * prefix test leaves it alone and `new URL` reads `example.com:` as the
+ * protocol and rejects it. Looking for the separator gets the port case right.
+ *
+ * Nothing here weakens the checks below. A scheme that is not http(s) is left
+ * exactly as it was so the protocol check can refuse it, and anything this does
+ * prepend still goes through every hostname and address test in full. The one
+ * scheme rewritten outright is `feed://`, which is a real convention on podcast
+ * pages and means https in practice.
+ */
+export function normaliseFeedUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return trimmed;
+
+  const feedScheme = /^feed:\/\//i;
+  if (feedScheme.test(trimmed)) return trimmed.replace(feedScheme, "https://");
+
+  return trimmed.includes("://") ? trimmed : `https://${trimmed}`;
+}
+
+/**
  * Returns a normalized URL, or throws UnsafeUrlError.
  *
  * Callers should surface the message to the user — it explains what was wrong
@@ -94,7 +124,7 @@ export class UnsafeUrlError extends Error {
 export function assertSafeFeedUrl(raw: string): URL {
   let url: URL;
   try {
-    url = new URL(raw.trim());
+    url = new URL(normaliseFeedUrl(raw));
   } catch {
     throw new UnsafeUrlError("That doesn't look like a valid URL.");
   }

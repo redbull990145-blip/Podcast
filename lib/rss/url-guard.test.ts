@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertSafeFeedUrl, isSafeFeedUrl } from "./url-guard";
+import { assertSafeFeedUrl, isSafeFeedUrl, normaliseFeedUrl } from "./url-guard";
 
 describe("assertSafeFeedUrl", () => {
   it("accepts ordinary public feed URLs", () => {
@@ -99,5 +99,84 @@ describe("assertSafeFeedUrl", () => {
     expect(() => assertSafeFeedUrl("ftp://example.com/x")).toThrowError(
       /http:\/\/ or https:\/\//,
     );
+  });
+});
+
+/**
+ * Filling in the scheme almost nobody types.
+ *
+ * `blog.apaonline.org/feed` is what you get copying a feed address off a show's
+ * website, and it used to be refused outright — by the browser first, with an
+ * unactionable "Please enter a URL", and by `new URL` behind it.
+ */
+describe("normaliseFeedUrl", () => {
+  it("assumes https when no scheme was given", () => {
+    expect(normaliseFeedUrl("blog.apaonline.org/feed")).toBe(
+      "https://blog.apaonline.org/feed",
+    );
+    expect(isSafeFeedUrl("blog.apaonline.org/feed")).toBe(true);
+    expect(assertSafeFeedUrl("feeds.example.com/show.xml").hostname).toBe(
+      "feeds.example.com",
+    );
+  });
+
+  it("leaves a scheme that is already there alone", () => {
+    for (const url of [
+      "https://feeds.example.com/show.xml",
+      "http://feeds.example.com/show.xml",
+      "HTTPS://Feeds.Example.com/show.xml",
+    ]) {
+      expect(normaliseFeedUrl(url)).toBe(url);
+    }
+  });
+
+  it("keeps a port from being mistaken for a scheme", () => {
+    // The reason the test is `://` rather than a scheme-shaped prefix: a prefix
+    // test leaves this alone, and `new URL` then reads `example.com:` as the
+    // protocol and rejects a perfectly good address.
+    expect(normaliseFeedUrl("example.com:8443/feed.xml")).toBe(
+      "https://example.com:8443/feed.xml",
+    );
+    expect(isSafeFeedUrl("example.com:8443/feed.xml")).toBe(true);
+  });
+
+  it("rewrites the feed:// convention podcast pages use", () => {
+    expect(normaliseFeedUrl("feed://example.com/rss")).toBe("https://example.com/rss");
+    expect(isSafeFeedUrl("feed://example.com/rss")).toBe(true);
+  });
+
+  it("trims, and leaves nothing as nothing", () => {
+    expect(normaliseFeedUrl("  example.com/feed  ")).toBe("https://example.com/feed");
+    expect(normaliseFeedUrl("   ")).toBe("");
+    expect(isSafeFeedUrl("   ")).toBe(false);
+  });
+
+  /**
+   * The part that matters: completing a URL must not complete a way past the
+   * guard. Every case below is something that could only get *worse* if the
+   * prepended scheme changed how it parsed.
+   */
+  it("does not let the assumed scheme smuggle anything through", () => {
+    // Other schemes keep theirs, so the protocol check still refuses them
+    // rather than them being rewritten into something fetchable.
+    expect(isSafeFeedUrl("file:///etc/passwd")).toBe(false);
+    expect(isSafeFeedUrl("data:text/xml,<rss/>")).toBe(false);
+    expect(isSafeFeedUrl("ftp://example.com/x")).toBe(false);
+
+    // No scheme, but still an address we refuse to fetch.
+    expect(isSafeFeedUrl("localhost/feed")).toBe(false);
+    expect(isSafeFeedUrl("127.0.0.1/feed")).toBe(false);
+    expect(isSafeFeedUrl("10.0.0.1/feed")).toBe(false);
+    expect(isSafeFeedUrl("169.254.169.254/latest/meta-data/")).toBe(false);
+    expect(isSafeFeedUrl("metadata.google.internal/computeMetadata")).toBe(false);
+    expect(isSafeFeedUrl("printer.local/feed")).toBe(false);
+    expect(isSafeFeedUrl("intranet/feed")).toBe(false);
+
+    // Credentials are still a smuggling vector with the scheme filled in.
+    expect(isSafeFeedUrl("real.com@evil.com/feed")).toBe(false);
+
+    // `javascript:` has no `://`, so it is completed — and the result is not a
+    // parseable URL, which is the right answer either way.
+    expect(isSafeFeedUrl("javascript:alert(1)")).toBe(false);
   });
 });

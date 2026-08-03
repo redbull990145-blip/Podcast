@@ -39,6 +39,20 @@ export type ParsedFeed = {
   link: string | null;
   lastBuildDate: Date | null;
   episodes: ParsedEpisode[];
+  /**
+   * How many `<item>`s the feed contained, audio or not.
+   *
+   * The difference between this and `episodes.length` is the whole diagnosis
+   * for the most confusing way an address can be wrong: a blog's RSS feed
+   * parses perfectly, has a title, a description and artwork, and yields no
+   * episodes — because its items link articles rather than audio. Subscribing
+   * to one produced a show that looked real and was permanently empty, with
+   * nothing anywhere saying why.
+   *
+   * `10 items, 0 of them audio` is enough to say so plainly. See the check in
+   * the subscriptions route.
+   */
+  itemCount: number;
 };
 
 export type FetchFeedResult =
@@ -307,6 +321,7 @@ export function normalizeFeed(
     link: raw.link?.trim() || null,
     lastBuildDate: parseDate(raw.lastBuildDate),
     episodes,
+    itemCount: (raw.items ?? []).length,
   };
 }
 
