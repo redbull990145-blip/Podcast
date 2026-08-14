@@ -1,4 +1,16 @@
 {
-  "extends": "@cue/config/tsconfig/node.json",
+  // A relative path rather than the package name `@cue/config/tsconfig/node.json`.
+  // That form resolves through node_modules, which works for every tool that
+  // fully replicates npm's resolution — but `@cue/config` is a devDependency,
+  // and Vercel's Node.js function builder traces and prunes the dependency
+  // tree for the deployed function separately from the project's own install,
+  // legitimately excluding devDependencies as build-time-only. When that pass
+  // couldn't resolve the extends target, it silently fell back to bare
+  // compiler defaults instead of failing loudly — which surfaced as an
+  // unrelated-looking type error deep in application code rather than a
+  // missing-config error. A relative path resolves by plain filesystem lookup
+  // and needs no package resolution at all, so it can't be affected by
+  // dependency pruning in any build environment.
+  "extends": "../../packages/config/tsconfig/node.json",
   "include": ["src/**/*.ts", "build.js"]
 }

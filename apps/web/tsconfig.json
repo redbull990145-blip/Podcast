@@ -1,5 +1,10 @@
 {
-  "extends": "@cue/config/tsconfig/next.json",
+  // Relative path, not the package name: this must resolve by plain
+  // filesystem lookup, not node_modules resolution, or a build tool that
+  // traces/prunes devDependencies (@cue/config is one) before its own
+  // type-check pass can silently fail to find it and fall back to bare
+  // defaults — see apps/api/tsconfig.json for the incident this fixed.
+  "extends": "../../packages/config/tsconfig/next.json",
   "compilerOptions": {
     "paths": { "@/*": ["./*"] }
   },
