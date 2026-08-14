@@ -1,0 +1,21 @@
+{
+  "extends": "@cue/config/tsconfig/react-native.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
+    "types": [
+      "react-native",
+      "expo"
+    ]
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

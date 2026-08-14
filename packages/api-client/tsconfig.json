@@ -1,0 +1,10 @@
+{
+  "extends": "@cue/config/tsconfig/library.json",
+  "compilerOptions": {
+    // This package targets any runtime with `fetch` — a browser, React
+    // Native's polyfill, or Node. The DOM lib is where those types live; it is
+    // not a claim that this code touches the document.
+    "lib": ["ES2023", "DOM"]
+  },
+  "include": ["src/**/*.ts"]
+}

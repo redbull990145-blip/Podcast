@@ -1,156 +1,173 @@
-# Cadence
+# Cue
 
-A podcast web app built around a list of complaints about the big ones: playback
-you can't control properly, sync that loses your place, opaque recommendations,
-and no way to take your subscriptions with you.
+A podcast platform for **web and Android**, built as a monorepo around one
+shared core.
 
-It's an **aggregator**, not a host — you subscribe to shows by RSS and audio
+It's an **aggregator**, not a host: you subscribe to shows by RSS and audio
 streams straight from each publisher. We never store or proxy audio, which is
-what keeps running costs at roughly zero.
+what keeps running costs at roughly zero and means the catalog is real from day
+one.
 
-## Status
+## Layout
 
-| Phase | Scope | State |
-| --- | --- | --- |
-| 0 | Scaffolding, schema, auth, app shell | ✅ Done |
-| 1 | Search, subscribe, browse, play, resume | ✅ Done |
-| 2 | Queue, cross-device sync, OPML, offline/PWA | ✅ Done |
-| 3 | AI transcripts, show notes, episode Q&A | ✅ Done |
-| 4 | Recommendations, power mode, audio enhancements, PWA | ✅ Done |
+```
+apps/
+  web        Next.js (App Router) · Tailwind · motion/react
+  mobile     Expo · Expo Router · Reanimated · expo-audio    (Android)
+  api        Fastify · Drizzle · Redis
+packages/
+  core       Domain logic — no platform imports. Player machine, queue, sync.
+  types      Shared domain + API contract types
+  validation Zod schemas, used by the API and both clients
+  api-client Typed client + TanStack Query keys
+  db         Drizzle schema and migrations
+  design     Design tokens → CSS variables (web) and a JS theme (native)
+  motion     Springs, easings, durations, gesture thresholds
+  config     Shared tsconfig / eslint / vitest
+```
 
-## Stack
+**There is no shared UI component package, on purpose.** Universal component
+libraries render mediocre web *and* mediocre native. What's shared is tokens,
+types, validation and logic; what isn't is components, so each platform can use
+its own idioms. The design system stays coherent because both sides read the
+same token file.
 
-- **Next.js** (App Router) on Vercel's free tier
-- **Supabase** — Postgres, auth, and Realtime for cross-device sync
-- **Drizzle ORM** with plain-SQL migrations
-- **Tailwind v4** with semantic design tokens, light and dark
-- **Zustand** for player state, **TanStack Query** for server state
+## Getting started
 
-## Setup
-
-### 1. Install
+No accounts, no Docker, no database to provision:
 
 ```bash
 npm install
 ```
 
-### 2. Create a Supabase project
-
-Free tier is fine. From **Project Settings → API** and **→ Database**, copy the
-values into `.env.local`:
-
 ```bash
-cp .env.example .env.local
+printf 'DATABASE_URL=pglite://.pglite-dev\nNEXT_PUBLIC_API_URL=http://localhost:8080\n' > .env
 ```
 
-You need `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
-`SUPABASE_SERVICE_ROLE_KEY` and `DATABASE_URL` to run Phase 0.
-
-### 3. Create the tables
+`pglite://` runs Postgres in-process against a local directory. It applies its
+own migrations on first boot, so there is nothing to set up. Fill it with real
+podcasts:
 
 ```bash
-npm run db:push
+npm run seed -w @cue/api
 ```
 
-Then open the Supabase SQL editor and run
-[`supabase/migrations/0001_auth_and_rls.sql`](supabase/migrations/0001_auth_and_rls.sql).
-This step is **not optional** — it adds the foreign key to `auth.users`, the
-trigger that creates a profile row on signup, and every row-level security
-policy. The anon key ships to every browser, so without RLS any user could read
-any other user's library.
-
-### 4. Run it
+That ingests five real feeds — about 5,000 episodes, including one show large
+enough to prove pagination. Then:
 
 ```bash
 npm run dev
 ```
 
-## Deploying
+Web is on `:3000`, the API on `:8080`.
 
-Import the repo on Vercel. Two things are not the defaults:
+> **Stop the API before seeding.** A PGlite data directory takes one writer.
+> While `npm run dev` holds `.pglite-dev`, another process writing to it does
+> not fail loudly — the API simply never sees the change, which looks exactly
+> like a broken query. Real Postgres has no such limit; this applies only to
+> the local dev database.
 
-- **Build command** must be `next build --webpack` (already the `build` script,
-  so leaving it on "npm run build" is correct — just don't let Vercel override
-  it with a bare `next build`).
-- **Environment variables** — everything in `.env.example` that isn't optional.
-  `API_KEY_ENCRYPTION_SECRET` must be the same value across deployments or
-  stored BYOK keys become undecryptable; generate it once with
-  `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
+### Running the Android app
 
-Then add two repository secrets on GitHub, `SUPABASE_URL` and
-`SUPABASE_ANON_KEY`, or the keepalive workflow silently skips and a free
-Supabase project will pause after seven idle days.
+`localhost` on a phone means the phone. Point the app at your machine's LAN
+address — the API already binds `0.0.0.0`, and prints its LAN URL on startup:
 
-### Free-tier ceilings worth knowing
+```bash
+echo "EXPO_PUBLIC_API_URL=http://192.168.1.10:8080" >> .env
+```
 
-| Limit | Value | What hits it first |
-| --- | --- | --- |
-| Groq audio-seconds/hour | 7,200 | One 75-minute episode is ~4,500 of them, shared across *all* users of the deployment |
-| Vercel function duration | 60s | Transcribing a very long episode; the job stops early with an explanation rather than a 502 |
-| Supabase idle pause | 7 days | Handled by the keepalive workflow |
+```bash
+npm run dev -w @cue/mobile
+```
 
-The audio-seconds ceiling is the real constraint on transcription, and it is
-per-organisation rather than per-user. Adding a personal Groq key in Settings
-bypasses it entirely, which is what the in-app rate-limit message suggests.
+Expo Router's `typedRoutes` is deliberately **off**. It types `Href` from a file
+it generates into `.expo/`, which is both gitignored and only written by a
+running dev server — so a clean checkout has no such file and every
+`router.push` fails to typecheck. That is precisely what CI is. It also
+mis-resolved in this monorepo, generating routes for `apps/web`'s pages
+alongside the Android app's own.
 
-## Design notes
+### Moving to a real database
 
-**Nothing is paywalled.** Power-user mode is a UI density toggle, not an upgrade
-prompt. OPML export sits in plain sight in Settings.
+Set `DATABASE_URL` to a Supabase connection string and apply the migrations.
+`pglite:` is rejected outright in production — it is a file on an ephemeral
+disk, so it would silently discard everything on the next deploy.
 
-**AI works without a key.** Summaries, chapters and episode Q&A run on the
-operator's own API keys with a modest daily per-user quota. Adding your own key
-in Settings removes the quota. Both tiers execute server-side in this app's own
-API routes — a user key is decrypted in memory for one call and never reaches
-the browser. Transcripts and summaries are cached _per episode_, so once anyone
-generates one, everyone else gets it free and it doesn't count against their
-quota.
+```bash
+npm run db:migrate -w @cue/db
+```
 
-**Long episodes are transcribed in pieces.** Whisper providers cap a single
-upload (Groq's free tier at 25MB), which an hour-long show already exceeds. The
-audio is range-fetched in ~20MB chunks and the per-chunk timings are stitched
-back onto one timeline. The first chunk has its ID3 tag and Xing header
-stripped first — a truncated file whose header still claims the full duration
-makes providers hang for two minutes and then fail, while billing the whole
-episode against the hourly allowance.
-
-**Enhanced audio degrades gracefully.** Skip-silence and volume boost route
-playback through the Web Audio API, which only yields samples when the host
-allows cross-origin reads — and many large hosts, Anchor/Spotify among them,
-send no CORS headers at all. Connecting an element to an AudioContext is also
-irreversible: feed it a non-CORS host afterwards and it outputs silence
-permanently. So each host's CORS behaviour is cached, the choice of audio
-element is made synchronously at play time, and an unknown host simply plays
-normally the first time. Plain playback and variable speed are never put at
-risk by an enhancement.
-
-**Recommendations explain themselves.** Ranking is cosine similarity over
-IDF-weighted category vectors built from your own listening history, computed
-in one request with no model involved. Every card shows the actual top
-contributors to its score, so the explanation is derived from the ranking
-rather than written to justify it. Popularity only ever breaks a tie.
+Search and trending additionally need `PODCASTINDEX_KEY` and
+`PODCASTINDEX_SECRET` (free). Without them every other feature still works;
+search returns a clear "not configured" error rather than failing obscurely.
+See `.env.example` for where each value comes from.
 
 ## Scripts
 
+Everything runs through Turborepo from the repo root.
+
 | Command | Does |
 | --- | --- |
-| `npm run dev` | Dev server |
-| `npm run build` | Production build |
-| `npm run typecheck` | `tsc --noEmit` |
-| `npm run db:generate` | Generate a migration from schema changes |
-| `npm run db:push` | Push the schema straight to the database |
-| `npm run db:studio` | Drizzle Studio |
-| `npm test` | Vitest |
+| `npm run dev` | All apps in watch mode |
+| `npm run build` | Production build of every app |
+| `npm run typecheck` | `tsc --noEmit` across the workspace |
+| `npm run lint` | ESLint across the workspace |
+| `npm test` | Vitest across the workspace |
+| `npm run check` | typecheck + lint + test — run before committing |
 
-**Production builds use webpack, not Turbopack.** Serwist (the service worker
-toolchain) is a webpack plugin, so `npm run build` passes `--webpack`. Dev still
-runs on Turbopack — the service worker is disabled there anyway, since one left
-running in development caches hard enough to make code changes look like they
-never applied.
+### Why `@cue/mobile` has no test suite
 
-## Known advisories
+Deliberate, not an omission. Everything in the Android app that *could* have a
+unit test has been moved out of it: the queue, resume rules and sleep timer live
+in `@cue/core`, and so does the trickiest part of the audio adapter — turning
+`expo-audio`'s status snapshots into engine events (`player/status.ts`). That
+edge detection is where the bugs with device-only symptoms live: a missed
+`ended` and the queue never advances; a stall reported per tick and a
+two-second buffer floods the UI. It is tested in core, off-device, in
+milliseconds.
 
-`npm audit` reports issues in `eslint-config-next`'s plugin tree and
-`drizzle-kit`'s bundled esbuild. Both are dev-only and neither reaches the
-production bundle; `npm audit fix --force` would downgrade them to years-old
-breaking versions, which is worse. Revisit when upstream updates.
+What is left in `apps/mobile` is screens and native bindings, which a test
+runner can only check by re-describing them. Adding `jest-expo` to assert that
+would cost a second test framework and buy nothing that `expo export` (which
+proves the whole app bundles) and a real device do not already cover.
+
+**Two things only a device can confirm**, and they are the two that matter most
+on Android — that audio survives the screen locking past the ~3 minute
+background cutoff, and that the notification controls work:
+
+```bash
+npx expo start --android
+```
+
+## Conventions
+
+- **React is pinned to one exact version workspace-wide**, via `overrides` in
+  the root `package.json`. Two copies of React in a React Native bundle is a
+  fatal and completely silent failure: Metro resolves `apps/mobile/node_modules`
+  first for the app's own files, but walks up to the hoisted root for anything
+  hoisted — `react-native` and `@tanstack/react-query` both live there. A
+  version skew therefore puts the query hooks on a different React than the
+  components calling them, and every hook throws.
+
+  `npx expo install --check` will report react as outdated. **That warning is
+  expected and is being ignored deliberately.** It compares against Expo's
+  pinned recommendation (19.2.3), not against a real constraint: React Native
+  0.86.2 declares `"react": "^19.2.3"`, which 19.2.8 satisfies, and Expo itself
+  declares `"react": "*"`. Taking Expo's pin would force a second copy, because
+  `better-auth` pulls React in as a peer of `@cue/api` and holds the root at
+  19.2.8 — trading a cosmetic warning for a broken app. Every *other* package
+  the check flags should still be fixed with `npx expo install --fix`.
+- **No `latest` in a dependency range.** An Expo app needs versions that match
+  its SDK; `latest` silently drifted `react-native-gesture-handler` a whole
+  major version ahead of what SDK 57 supports.
+- **Units live in identifiers.** `durationSec`, `startMs`. Audio code mixes
+  seconds and milliseconds constantly and the bugs are invisible until
+  something is 1000× off.
+- **Times crossing the wire are ISO strings**, not `Date`. JSON has no Date,
+  and a type claiming otherwise after `JSON.parse` is lying.
+- **No animation values in components.** Import from `@cue/motion`. Five spring
+  presets, four durations, four easings — that's the whole vocabulary.
+- **Opacity is tweened, never sprung.** Spring overshoot past 1 gets clamped
+  and reads as a flicker.
+- **No React state updates from rAF, scroll, or playback ticks.** Drive those
+  through a `MotionValue` (web) or `SharedValue` (native) instead.

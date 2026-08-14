@@ -1,0 +1,241 @@
+import type { Catalog } from './en.ts';
+
+/**
+ * Hindi.
+ *
+ * Everyday spoken Hindi rather than high Sanskritised register — the language
+ * people actually use about media, which means keeping the widely-understood
+ * borrowings (`पॉडकास्ट`, `ऐप`, `सर्वर`) instead of coining literal
+ * equivalents nobody says out loud.
+ *
+ * Hindi has two plural categories, `one` and `other`, so the shapes here match
+ * English's — but they are selected by `Intl.PluralRules`, not assumed.
+ */
+export const hi: Catalog = {
+  'nav.main': 'मुख्य',
+  'nav.listen': 'सुनें',
+  'nav.home': 'होम',
+  'nav.search': 'खोजें',
+  'nav.library': 'लाइब्रेरी',
+  'nav.queue': 'कतार',
+  'nav.settings': 'सेटिंग्ज़',
+  'nav.player': 'प्लेयर',
+
+  'common.loading': 'लोड हो रहा है…',
+  'common.retry': 'फिर कोशिश करें',
+  'common.signIn': 'साइन इन करें',
+  'common.signOut': 'साइन आउट करें',
+  'common.cancel': 'रद्द करें',
+  'common.remove': 'हटाएँ',
+  'common.save': 'सेव करें',
+  'common.offline': 'सर्वर ने जवाब नहीं दिया। शायद इसे बस एक पल चाहिए।',
+  'common.unreachable': 'सर्वर तक नहीं पहुँच सके',
+  'common.checkConnection': 'कनेक्शन जाँचें और फिर कोशिश करें।',
+
+  'home.title': 'सुनें',
+  'home.empty': 'यहाँ अभी कुछ नहीं है',
+  'home.emptyBody': 'लोकल डेटाबेस भरें: npm run seed -w @cue/api',
+  'home.continue': 'सुनना जारी रखें',
+  'home.latest': 'नए एपिसोड',
+
+  'library.title': 'लाइब्रेरी',
+  'library.signedOut': 'आपके शो यहाँ रहते हैं',
+  'library.signedOutBody':
+    'शो फ़ॉलो करने और किसी भी डिवाइस पर वहीं से सुनने के लिए साइन इन करें जहाँ छोड़ा था।',
+  'library.empty': 'अभी तक कुछ फ़ॉलो नहीं किया',
+  'library.emptyBody': 'खोज में कोई शो ढूँढकर फ़ॉलो करें — नए एपिसोड यहाँ जमा होते रहेंगे।',
+  'library.searchShows': 'शो खोजें',
+  'library.failed': 'आपकी लाइब्रेरी लोड नहीं हो सकी',
+  'library.newEpisodes': '{count, plural, one {# नया एपिसोड} other {# नए एपिसोड}}',
+  'library.groupUnplayed': 'आपके इंतज़ार में',
+  'library.groupActive': 'अब भी चल रहे',
+  'library.groupQuiet': 'शांत पड़े',
+
+  'search.title': 'खोजें',
+  'search.placeholder': 'शो, विषय, लोग',
+  'search.placeholderShort': 'पॉडकास्ट खोजें…',
+  'search.prompt': 'कोई शो ढूँढें',
+  'search.promptBody': 'नाम, विषय या बनाने वाले के नाम से डायरेक्टरी में खोजें।',
+  'search.searching': 'खोज रहे हैं…',
+  'search.noResults': 'कोई शो नहीं मिला',
+  'search.noResultsBody': 'दूसरी वर्तनी आज़माएँ, या होस्ट का नाम।',
+  'search.filterLanguage': 'भाषा से छाँटें',
+  'search.anyLanguage': 'कोई भी भाषा',
+  'search.trending': 'अभी चर्चा में',
+  'search.add': 'जोड़ें',
+  'search.adding': 'जोड़ा जा रहा है…',
+  'search.added': 'जुड़ गया',
+
+  'podcast.failed': 'यह शो लोड नहीं हो सका',
+  'podcast.failedBody': 'शायद इसे हटा दिया गया, या कनेक्शन टूट गया।',
+  'podcast.empty': 'अभी कोई एपिसोड नहीं',
+  'podcast.emptyBody': 'प्रकाशक ने इस फ़ीड में कुछ नहीं डाला है।',
+  'podcast.episodes': 'एपिसोड',
+  'podcast.loadingEpisodes': 'एपिसोड लोड हो रहे हैं…',
+  'podcast.follow': 'फ़ॉलो करें',
+  'podcast.following': 'फ़ॉलो कर रहे हैं',
+  'podcast.signInToFollow': 'फ़ॉलो करने के लिए साइन इन करें',
+  'podcast.episodeCount': '{count, plural, one {# एपिसोड} other {# एपिसोड}}',
+
+  'episode.failed': 'यह एपिसोड लोड नहीं हो सका',
+  'episode.failedBody': 'शायद प्रकाशक ने इसे हटा दिया, या कनेक्शन टूट गया।',
+  'episode.showNotes': 'एपिसोड नोट्स',
+  'episode.noNotes': 'प्रकाशक ने इस एपिसोड के लिए नोट्स नहीं दिए।',
+  'episode.play': 'चलाएँ',
+  'episode.pause': 'रोकें',
+  'episode.addToQueue': 'कतार में जोड़ें',
+  'episode.inQueue': 'कतार में है',
+  'episode.back': 'वापस',
+
+  'player.nothingPlaying': 'कुछ नहीं चल रहा',
+  'player.nothingPlayingBody': 'कोई एपिसोड चुनें, वह यहाँ दिखेगा।',
+  'player.open': 'प्लेयर खोलें',
+  'player.close': 'प्लेयर बंद करें',
+  'player.seek': 'आगे-पीछे करें',
+  'player.position': 'प्लेबैक की स्थिति',
+  'player.skipBack': '{seconds} सेकंड पीछे',
+  'player.skipForward': '{seconds} सेकंड आगे',
+  'player.speed': 'गति',
+  'player.sleepTimer': 'स्लीप टाइमर',
+  'player.sleepOff': 'बंद',
+  'player.sleepMinutes': '{count} मिनट',
+  'player.stoppingAt': '{time} पर रुकेगा',
+  'player.nowPlaying': 'चल रहा है: {title}. प्लेयर खोलें।',
+  'player.loading': 'लोड हो रहा है…',
+
+  'queue.title': 'कतार',
+  'queue.empty': 'कतार में कुछ नहीं',
+  'queue.emptyBody': 'कोई एपिसोड जोड़ें, वह इसके बाद चलेगा।',
+  'queue.waiting':
+    '{count, plural, =0 {कतार खाली है} one {कतार, # इंतज़ार में} other {कतार, # इंतज़ार में}}',
+  'queue.remove': 'कतार से हटाएँ',
+  'queue.clear': 'कतार खाली करें',
+
+  'transcript.title': 'ट्रांसक्रिप्ट',
+  'transcript.read': 'ट्रांसक्रिप्ट पढ़ें',
+  'transcript.available': 'इस एपिसोड के साथ प्रकाशक का ट्रांसक्रिप्ट आता है।',
+  'transcript.loading': 'ट्रांसक्रिप्ट लोड हो रहा है…',
+  'transcript.failed': 'ट्रांसक्रिप्ट लोड नहीं हो सका',
+  'transcript.none': 'कोई ट्रांसक्रिप्ट नहीं',
+  'transcript.noneBody': 'यह प्रकाशक इस एपिसोड के लिए ट्रांसक्रिप्ट नहीं देता।',
+  'transcript.unreadable': 'प्रकाशक से कुछ भी पढ़ने लायक नहीं आया।',
+  'transcript.search': 'इस ट्रांसक्रिप्ट में खोजें…',
+  'transcript.searchLabel': 'इस ट्रांसक्रिप्ट में खोजें',
+  'transcript.noMatches': 'कुछ नहीं मिला',
+  'transcript.matchCount': '{count, plural, one {# पंक्ति} other {# पंक्तियाँ}}',
+  'transcript.follow': 'साथ चलें',
+  'transcript.followLabel': 'ऑडियो के साथ चलें',
+  'transcript.playFrom': '{time} से चलाएँ',
+  'transcript.translated': '{language} में अनुवादित',
+  'transcript.translate': 'इस ट्रांसक्रिप्ट का अनुवाद करें',
+  'transcript.translating': 'अनुवाद हो रहा है…',
+  'transcript.showOriginal': 'मूल दिखाएँ',
+
+  'ai.title': 'इस एपिसोड के बारे में',
+  'ai.open': 'सारांश, अध्याय और सवाल',
+  'ai.signedOut': 'इसे इस्तेमाल करने के लिए साइन इन करें',
+  'ai.signedOutBody':
+    'सारांश, अध्याय और सवाल आपके खाते की रोज़ाना सीमा से जुड़े हैं।',
+  'ai.signedOutWeb':
+    'इस एपिसोड का सारांश बनाने, अध्याय निकालने या सवाल पूछने के लिए साइन इन करें।',
+
+  'ai.noTranscript': 'अभी कोई ट्रांसक्रिप्ट नहीं',
+  'ai.noTranscriptBody':
+    'प्रकाशक ने कोई नहीं दिया। ट्रांसक्रिप्ट बनाने पर सारांश, अध्याय और सवाल खुल जाते हैं।',
+  'ai.transcribing':
+    'एपिसोड सुनकर लिखा जा रहा है। इसमें दो-तीन मिनट लगते हैं — आप यह स्क्रीन छोड़ सकते हैं।',
+  'ai.transcribingShort': 'लिखा जा रहा है…',
+  'ai.generateTranscript': 'ट्रांसक्रिप्ट बनाएँ',
+
+  'ai.summary': 'सारांश',
+  'ai.summaryBody':
+    'इस एपिसोड में असल में क्या हुआ, कुछ वाक्यों में — और याद रखने लायक बातें।',
+  'ai.summarise': 'इस एपिसोड का सारांश बनाएँ',
+
+  'ai.chapters': 'अध्याय',
+  'ai.chaptersBody': 'एपिसोड को हिस्सों में बाँटें ताकि आप बीच में कूद सकें।',
+  'ai.chaptersUntimed':
+    'अध्यायों के लिए समय-चिह्नों वाला ट्रांसक्रिप्ट चाहिए। यह प्रकाशक का सादा पाठ है, जिसमें वे नहीं हैं।',
+  'ai.findChapters': 'अध्याय ढूँढें',
+
+  'ai.ask': 'इस एपिसोड के बारे में पूछें',
+  'ai.askBody':
+    'जवाब सिर्फ़ ट्रांसक्रिप्ट से आता है, उन्हीं पंक्तियों के साथ जो इस्तेमाल हुईं। अगर एपिसोड में वह बात नहीं है, तो यह साफ़ कह देता है।',
+  'ai.askPlaceholder': 'उन्होंने किस बारे में कहा…?',
+  'ai.askAction': 'पूछें',
+  'ai.asking': 'पूछा जा रहा है…',
+  'ai.fromTranscript': 'ट्रांसक्रिप्ट से',
+  'ai.failed': 'यह काम नहीं आया',
+  'ai.answerStopped': 'जवाब अचानक रुक गया',
+
+  'ai.quotaByok': 'आपकी अपनी Groq कुंजी (…{hint}) चल रही है। हमारी ओर से कोई सीमा नहीं।',
+  'ai.quotaLeft':
+    '{count, plural, one {आज # AI अनुरोध बचा है} other {आज # AI अनुरोध बचे हैं}}',
+  'ai.quotaSpent':
+    'आज के AI अनुरोध ख़त्म हो गए। बिना सीमा इस्तेमाल के लिए सेटिंग्ज़ में अपनी Groq कुंजी जोड़ें।',
+  'ai.quotaNoOperator':
+    'इन्हें इस्तेमाल करने के लिए सेटिंग्ज़ में Groq API कुंजी जोड़ें — मुफ़्त प्लान काफ़ी है।',
+
+  'settings.title': 'सेटिंग्ज़',
+  'settings.playback': 'प्लेबैक',
+  'settings.playbackCaption':
+    'इसी डिवाइस पर सहेजा जाता है — ट्रेन में हेडफ़ोन और रसोई का स्पीकर एक ही गति नहीं माँगते।',
+  'settings.speed': 'गति',
+  'settings.speedHint': 'आप जो भी चलाएँ, उस सब पर लागू होती है।',
+  'settings.skipBack': 'पीछे जाएँ',
+  'settings.skipBackHint': 'आप कुछ ख़ास दोबारा सुनने के लिए पीछे जाते हैं।',
+  'settings.skipForward': 'आगे जाएँ',
+  'settings.skipForwardHint': 'और विज्ञापन से बचने के लिए आगे।',
+
+  'settings.language': 'भाषा',
+  'settings.languageCaption':
+    'ऐप के शब्द बदलता है। आपके शो उसी भाषा में रहते हैं जिसमें वे प्रकाशित हुए।',
+  'settings.languageHint':
+    'हर जगह लागू होती है — इस डिवाइस पर और किसी भी दूसरे पर जहाँ आप साइन इन करें।',
+
+  'settings.ai': 'AI',
+  'settings.aiCaption':
+    'सारांश, अध्याय और जवाब Groq से आते हैं। एक साझा रोज़ाना सीमा है; अपनी कुंजी उसे हटा देती है और ख़र्च आप पर आता है — सामान्य इस्तेमाल के लिए मुफ़्त प्लान काफ़ी है।',
+  'settings.apiKey': 'Groq API कुंजी',
+  'settings.saveKey': 'कुंजी सेव करें',
+  'settings.checkingKey': 'जाँच हो रही है…',
+  'settings.keySaved': 'आपकी कुंजी सेव है (…{hint})',
+  'settings.keySavedHint': 'AI बिना सीमा चलती है और आपके Groq खाते पर लगती है।',
+  'settings.keyFailed': 'वह कुंजी सेव नहीं हो सकी',
+  'settings.removingKey': 'हटाया जा रहा है…',
+  'settings.quotaWithout':
+    'इसके बिना आपको रोज़ {limit} AI अनुरोध मिलते हैं ({remaining} बचे)।',
+  'settings.noOperatorKey':
+    'इस सर्वर पर कोई साझा कुंजी नहीं है, इसलिए AI के लिए आपकी अपनी कुंजी चाहिए।',
+
+  'settings.account': 'खाता',
+  'settings.accountCaption':
+    'ब्राउज़ करना, खोजना और सुनना बिना खाते के भी चलता है। खाता वह है जो आपकी लाइब्रेरी और हर एपिसोड में आपकी जगह एक डिवाइस से दूसरे तक ले जाता है।',
+  'settings.signedIn': 'साइन इन हैं',
+  'settings.signingOut': 'साइन आउट हो रहा है…',
+
+  'auth.email': 'ईमेल',
+  'auth.password': 'पासवर्ड',
+  'auth.name': 'नाम',
+  'auth.signIn': 'साइन इन करें',
+  'auth.signUp': 'खाता बनाएँ',
+  'auth.signingIn': 'साइन इन हो रहा है…',
+  'auth.noAccount': 'खाता बनाएँ',
+  'auth.haveAccount': 'साइन इन करें',
+
+  'library.latest': 'नवीनतम {date}',
+  'search.resultCount': '{count, plural, one {# परिणाम} other {# परिणाम}}',
+  'queue.after': '{count, plural, one {इसके बाद # एपिसोड।} other {इसके बाद # एपिसोड।}}',
+  'queue.reorder': '{title} का क्रम बदलें',
+  'queue.removeTitle': '{title} को कतार से हटाएँ',
+  'home.timeLeft': '{duration} बाकी',
+  'home.resume': '{title} फिर से शुरू करें',
+
+  'settings.restartForDirection': 'लेआउट को नई भाषा के अनुसार बदलने के लिए ऐप फिर से खोलें।',
+
+  'format.today': 'आज',
+  'format.yesterday': 'कल',
+  'format.minutes': '{count} मिनट',
+  'format.hours': '{count} घंटे',
+  'format.hoursMinutes': '{hours} घं {minutes} मि',
+};

@@ -1,0 +1,48 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1786639446634,
+      "tag": "0000_hot_omega_flight",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786652014388,
+      "tag": "0001_small_tattoo",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786654387069,
+      "tag": "0002_fluffy_johnny_blaze",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786656864121,
+      "tag": "0003_gifted_toro",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786732137599,
+      "tag": "0004_high_spitfire",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786740048012,
+      "tag": "0005_skinny_umar",
+      "breakpoints": true
+    }
+  ]
+}

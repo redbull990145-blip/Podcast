@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Cue",
+    "slug": "cue",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "cue",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "platforms": [
+      "android"
+    ],
+    "android": {
+      "package": "app.cue.podcast",
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "POST_NOTIFICATIONS"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-audio",
+        {
+          "recordAudioAndroid": false,
+          "enableBackgroundRecording": false,
+          "enableBackgroundPlayback": true
+        }
+      ],
+      "expo-secure-store",
+      "expo-image"
+    ]
+  }
+}

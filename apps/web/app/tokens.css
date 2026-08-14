@@ -1,0 +1,157 @@
+/**
+ * Design and motion tokens as CSS custom properties.
+ *
+ * GENERATED from @cue/design and @cue/motion — do not edit by hand.
+ * Regenerate with: npm run tokens --workspace @cue/web
+ */
+
+:root {
+  --space-0: 0px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+  --elevation-none: none;
+  --elevation-sm: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --elevation-md: 0 4px 12px rgba(0, 0, 0, 0.28);
+  --elevation-lg: 0 12px 32px rgba(0, 0, 0, 0.36);
+  --elevation-xl: 0 24px 64px rgba(0, 0, 0, 0.44);
+  --measure-prose: 660px;
+  --measure-content: 1180px;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --text-display-size: 40px;
+  --text-display-line: 44px;
+  --text-display-tracking: -0.021em;
+  --text-display-weight: 400;
+  --text-title1-size: 27px;
+  --text-title1-line: 32px;
+  --text-title1-tracking: -0.018em;
+  --text-title1-weight: 600;
+  --text-title2-size: 21px;
+  --text-title2-line: 27px;
+  --text-title2-tracking: -0.014em;
+  --text-title2-weight: 600;
+  --text-title3-size: 17px;
+  --text-title3-line: 23px;
+  --text-title3-tracking: -0.009em;
+  --text-title3-weight: 600;
+  --text-body-strong-size: 15px;
+  --text-body-strong-line: 21px;
+  --text-body-strong-tracking: -0.005em;
+  --text-body-strong-weight: 500;
+  --text-body-size: 15px;
+  --text-body-line: 23px;
+  --text-body-tracking: -0.005em;
+  --text-body-weight: 400;
+  --text-callout-size: 13.5px;
+  --text-callout-line: 19px;
+  --text-callout-tracking: -0.002em;
+  --text-callout-weight: 400;
+  --text-caption-size: 12.5px;
+  --text-caption-line: 16px;
+  --text-caption-tracking: 0em;
+  --text-caption-weight: 500;
+  --text-overline-size: 11px;
+  --text-overline-line: 14px;
+  --text-overline-tracking: 0.055em;
+  --text-overline-weight: 600;
+
+  --color-bg: #08080A;
+  --color-surface: #0D0D10;
+  --color-surface-raised: #131317;
+  --color-surface-overlay: #191920;
+  --color-surface-hover: rgba(255, 255, 255, 0.04);
+  --color-surface-pressed: rgba(255, 255, 255, 0.08);
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-strong: rgba(255, 255, 255, 0.36);
+  --color-text-primary: #F5F5F8;
+  --color-text-secondary: #9E9EA9;
+  --color-text-tertiary: #8D8D98;
+  --color-text-on-accent: #08080A;
+  --color-accent: #DE9A3F;
+  --color-accent-text: #EBB161;
+  --color-accent-muted: rgba(222, 154, 63, 0.14);
+  --color-danger: #E85055;
+  --color-success: #4CB86A;
+  --color-warning: #E0913C;
+  --color-scrim: rgba(0, 0, 0, 0.6);
+  --color-skeleton: #191920;
+}
+
+[data-theme='light'] {
+  --color-bg: #FFFFFF;
+  --color-surface: #F5F5F8;
+  --color-surface-raised: #FFFFFF;
+  --color-surface-overlay: #FFFFFF;
+  --color-surface-hover: rgba(0, 0, 0, 0.04);
+  --color-surface-pressed: rgba(0, 0, 0, 0.07);
+  --color-border: rgba(0, 0, 0, 0.09);
+  --color-border-strong: rgba(0, 0, 0, 0.44);
+  --color-text-primary: #131317;
+  --color-text-secondary: #5C5C68;
+  --color-text-tertiary: #6B6B78;
+  --color-text-on-accent: #08080A;
+  --color-accent: #BE7C28;
+  --color-accent-text: #96601D;
+  --color-accent-muted: rgba(190, 124, 40, 0.12);
+  --color-danger: #C62A2F;
+  --color-success: #2C7A42;
+  --color-warning: #9A5F16;
+  --color-scrim: rgba(0, 0, 0, 0.35);
+  --color-skeleton: #E9E9EE;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --color-bg: #FFFFFF;
+    --color-surface: #F5F5F8;
+    --color-surface-raised: #FFFFFF;
+    --color-surface-overlay: #FFFFFF;
+    --color-surface-hover: rgba(0, 0, 0, 0.04);
+    --color-surface-pressed: rgba(0, 0, 0, 0.07);
+    --color-border: rgba(0, 0, 0, 0.09);
+    --color-border-strong: rgba(0, 0, 0, 0.44);
+    --color-text-primary: #131317;
+    --color-text-secondary: #5C5C68;
+    --color-text-tertiary: #6B6B78;
+    --color-text-on-accent: #08080A;
+    --color-accent: #BE7C28;
+    --color-accent-text: #96601D;
+    --color-accent-muted: rgba(190, 124, 40, 0.12);
+    --color-danger: #C62A2F;
+    --color-success: #2C7A42;
+    --color-warning: #9A5F16;
+    --color-scrim: rgba(0, 0, 0, 0.35);
+    --color-skeleton: #E9E9EE;
+  }
+}
+
+:root {
+  --duration-instant: 100ms;
+  --duration-fast: 160ms;
+  --duration-base: 220ms;
+  --duration-slow: 320ms;
+  --duration-reduced: 120ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ease-enter: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
+}

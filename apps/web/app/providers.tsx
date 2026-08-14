@@ -1,0 +1,90 @@
+'use client';
+
+import { ApiClientError } from '@cue/api-client';
+import type { SupportedLocale } from '@cue/i18n';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useState, type ReactNode } from 'react';
+import { LocaleProvider } from '@/components/i18n/locale-provider';
+
+/**
+ * Server state.
+ *
+ * The defaults here are most of what makes the app feel fast: cached data is
+ * shown immediately and revalidated behind the scenes, so navigating back to a
+ * screen you've already seen is instant rather than a spinner.
+ */
+function makeQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        // Per-query `staleTime` from @cue/api-client overrides this; the
+        // default is simply "don't refetch the instant a component remounts".
+        staleTime: 60_000,
+        gcTime: 30 * 60_000,
+
+        // The window regaining focus is not evidence that podcast metadata
+        // changed. Refetching on every tab switch is the most common way an
+        // app burns battery and bandwidth for nothing.
+        refetchOnWindowFocus: false,
+        // Reconnecting *is* worth a refetch — the data may be from before an
+        // outage.
+        refetchOnReconnect: true,
+
+        /**
+         * Never withhold a request because the browser claims to be offline.
+         *
+         * The default (`'online'`) pauses a query whose retry is pending until
+         * the online flag comes back — and `fetchStatus: 'paused'` still reads
+         * as `status: 'pending'`, so the UI shows a loading state, no error,
+         * and no way out. A query observed here sat paused indefinitely with
+         * `navigator.onLine === true`, and dispatching an `online` event did
+         * not release it.
+         *
+         * `navigator.onLine` was never a good proxy for "can reach our API"
+         * anyway — it reports true behind a captive portal and lies in several
+         * embedded browsers. Attempting the request and failing fast produces
+         * an error a person can act on; pausing produces a spinner that never
+         * resolves.
+         */
+        networkMode: 'always',
+
+        retry: (failureCount, error) => {
+          // Retrying a 404 or a validation failure is pure added latency.
+          if (error instanceof ApiClientError) {
+            return error.retryable && failureCount < 2;
+          }
+          return failureCount < 2;
+        },
+        retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
+      },
+    },
+  });
+}
+
+let browserQueryClient: QueryClient | undefined;
+
+function getQueryClient(): QueryClient {
+  // On the server every request needs its own client, or one user's data
+  // leaks into another's cache. In the browser it must be a singleton, or a
+  // re-render throws away everything already fetched.
+  if (typeof window === 'undefined') return makeQueryClient();
+  browserQueryClient ??= makeQueryClient();
+  return browserQueryClient;
+}
+
+export function Providers({
+  children,
+  locale,
+}: {
+  children: ReactNode;
+  /** Resolved on the server, so client and server render the same words. */
+  locale: SupportedLocale;
+}) {
+  const [queryClient] = useState(getQueryClient);
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <LocaleProvider locale={locale}>{children}</LocaleProvider>
+    </QueryClientProvider>
+  );
+}

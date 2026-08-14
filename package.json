@@ -1,55 +1,39 @@
 {
-  "name": "podcast-app",
+  "name": "cue",
   "version": "0.1.0",
   "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build --webpack",
-    "start": "next start",
-    "lint": "eslint",
-    "typecheck": "tsc --noEmit",
-    "db:generate": "drizzle-kit generate",
-    "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio",
-    "test": "vitest run",
-    "test:watch": "vitest"
-  },
-  "dependencies": {
-    "@hello-pangea/dnd": "^18.0.1",
-    "@supabase/ssr": "^0.12.4",
-    "@supabase/supabase-js": "^2.111.0",
-    "@tanstack/react-query": "^5.101.4",
-    "clsx": "^2.1.1",
-    "cmdk": "^1.1.1",
-    "dexie": "^4.4.4",
-    "drizzle-orm": "^0.45.2",
-    "lucide-react": "^1.27.0",
-    "motion": "^12.43.0",
-    "next": "^16.2.12",
-    "postgres": "^3.4.9",
-    "radix-ui": "^1.6.7",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "rss-parser": "^3.13.0",
-    "tailwind-merge": "^3.6.0",
-    "zustand": "^5.0.14"
-  },
-  "devDependencies": {
-    "@serwist/next": "^9.5.12",
-    "@tailwindcss/postcss": "^4.3.3",
-    "@types/node": "^26.1.2",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "dotenv": "^17.4.2",
-    "drizzle-kit": "^0.31.10",
-    "eslint": "^10.8.0",
-    "eslint-config-next": "^16.2.12",
-    "serwist": "^9.5.12",
-    "tailwindcss": "^4.3.3",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.10"
+  "type": "module",
+  "description": "A podcast platform for web and Android",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "packageManager": "npm@11.16.0",
+  "engines": {
+    "node": ">=20.11"
   },
   "overrides": {
-    "sharp": "^0.35.3"
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "check": "turbo run typecheck lint test",
+    "clean": "turbo run clean"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.2.0",
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
+    "prettier": "^3.9.6",
+    "turbo": "^2.10.9",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4.1.10"
   }
 }

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "moduleDetection": "force",
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+
+    /* Imports carry explicit `.ts` extensions. Every consumer here resolves
+       bundler-style (Turbopack, Metro, tsx), all of which take the literal
+       path, and being explicit means an import never silently resolves to a
+       different file than the one intended. Requires noEmit, which every
+       config below sets. */
+    "allowImportingTsExtensions": true,
+
+    /* Strictness. `noUncheckedIndexedAccess` is on deliberately: this codebase
+       indexes into transcript segments, queue items and chapter arrays
+       constantly, and that is exactly where off-by-one bugs hide.
+       `exactOptionalPropertyTypes` is left off — it fights React prop spreading
+       hard enough to cost more than it catches. */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "incremental": true,
+    "resolveJsonModule": true
+  },
+  "exclude": ["node_modules", "dist", ".next", ".expo", "build"]
+}

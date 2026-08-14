@@ -1,0 +1,16 @@
+{
+  "name": "@cue/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./tsconfig/base.json": "./tsconfig/base.json",
+    "./tsconfig/library.json": "./tsconfig/library.json",
+    "./tsconfig/node.json": "./tsconfig/node.json",
+    "./tsconfig/next.json": "./tsconfig/next.json",
+    "./tsconfig/react-native.json": "./tsconfig/react-native.json",
+    "./eslint/base": "./eslint/base.js",
+    "./eslint/react": "./eslint/react.js",
+    "./vitest/base": "./vitest/base.js"
+  }
+}

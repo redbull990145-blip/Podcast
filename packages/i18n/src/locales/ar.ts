@@ -1,0 +1,243 @@
+import type { Catalog } from './en.ts';
+
+/**
+ * Arabic — Modern Standard, and the reason the plural machinery is not a
+ * shortcut.
+ *
+ * Arabic has **six** plural categories where English has two: `zero`, `one`,
+ * `two`, `few` (3–10), `many` (11–99) and `other`. "3 حلقات" and "11 حلقة" take
+ * different forms of the same noun, and no amount of appending a suffix gets
+ * there. `Intl.PluralRules` picks the category; the six bodies below are the
+ * only part that has to be written by hand.
+ *
+ * This is also the locale that proves the layout: `directionOf('ar')` is `rtl`,
+ * which flips the whole interface and is what catches every hardcoded
+ * `margin-left` in the codebase.
+ */
+export const ar: Catalog = {
+  'nav.main': 'الرئيسية',
+  'nav.listen': 'استمع',
+  'nav.home': 'الرئيسية',
+  'nav.search': 'بحث',
+  'nav.library': 'المكتبة',
+  'nav.queue': 'قائمة التشغيل',
+  'nav.settings': 'الإعدادات',
+  'nav.player': 'المشغّل',
+
+  'common.loading': 'جارٍ التحميل…',
+  'common.retry': 'أعد المحاولة',
+  'common.signIn': 'تسجيل الدخول',
+  'common.signOut': 'تسجيل الخروج',
+  'common.cancel': 'إلغاء',
+  'common.remove': 'إزالة',
+  'common.save': 'حفظ',
+  'common.offline': 'لم يستجب الخادم. ربما يحتاج إلى لحظة فقط.',
+  'common.unreachable': 'تعذّر الوصول إلى الخادم',
+  'common.checkConnection': 'تحقّق من الاتصال ثم أعد المحاولة.',
+
+  'home.title': 'استمع',
+  'home.empty': 'لا شيء هنا بعد',
+  'home.emptyBody': 'املأ قاعدة البيانات المحلية بالأمر: npm run seed -w @cue/api',
+  'home.continue': 'تابع الاستماع',
+  'home.latest': 'أحدث الحلقات',
+
+  'library.title': 'المكتبة',
+  'library.signedOut': 'برامجك تعيش هنا',
+  'library.signedOutBody':
+    'سجّل الدخول لمتابعة البرامج ولتكمل من حيث توقّفت على أي جهاز.',
+  'library.empty': 'لم تتابع شيئًا بعد',
+  'library.emptyBody': 'ابحث عن برنامج وتابعه — ستتجمّع الحلقات الجديدة هنا.',
+  'library.searchShows': 'ابحث عن برامج',
+  'library.failed': 'تعذّر تحميل مكتبتك',
+  'library.newEpisodes':
+    '{count, plural, zero {لا حلقات جديدة} one {حلقة جديدة واحدة} two {حلقتان جديدتان} few {# حلقات جديدة} many {# حلقة جديدة} other {# حلقة جديدة}}',
+  'library.groupUnplayed': 'في انتظارك',
+  'library.groupActive': 'ما زالت مستمرة',
+  'library.groupQuiet': 'توقّفت عن النشر',
+
+  'search.title': 'بحث',
+  'search.placeholder': 'برامج، مواضيع، أشخاص',
+  'search.placeholderShort': 'ابحث في البودكاست…',
+  'search.prompt': 'ابحث عن برنامج',
+  'search.promptBody': 'ابحث في الدليل بالاسم أو الموضوع أو اسم من يقدّمه.',
+  'search.searching': 'جارٍ البحث…',
+  'search.noResults': 'لا يوجد برنامج مطابق',
+  'search.noResultsBody': 'جرّب كتابة مختلفة، أو اسم المقدّم.',
+  'search.filterLanguage': 'تصفية حسب اللغة',
+  'search.anyLanguage': 'أي لغة',
+  'search.trending': 'الأكثر رواجًا',
+  'search.add': 'إضافة',
+  'search.adding': 'جارٍ الإضافة…',
+  'search.added': 'تمت الإضافة',
+
+  'podcast.failed': 'تعذّر تحميل هذا البرنامج',
+  'podcast.failedBody': 'ربما حُذف، أو انقطع الاتصال.',
+  'podcast.empty': 'لا حلقات بعد',
+  'podcast.emptyBody': 'لم ينشر صاحب البرنامج شيئًا في هذه التغذية.',
+  'podcast.episodes': 'الحلقات',
+  'podcast.loadingEpisodes': 'جارٍ تحميل الحلقات…',
+  'podcast.follow': 'متابعة',
+  'podcast.following': 'تتابعه',
+  'podcast.signInToFollow': 'سجّل الدخول للمتابعة',
+  'podcast.episodeCount':
+    '{count, plural, zero {لا حلقات} one {حلقة واحدة} two {حلقتان} few {# حلقات} many {# حلقة} other {# حلقة}}',
+
+  'episode.failed': 'تعذّر تحميل هذه الحلقة',
+  'episode.failedBody': 'ربما حذفها الناشر، أو انقطع الاتصال.',
+  'episode.showNotes': 'ملاحظات الحلقة',
+  'episode.noNotes': 'لم يضف الناشر ملاحظات لهذه الحلقة.',
+  'episode.play': 'تشغيل',
+  'episode.pause': 'إيقاف مؤقت',
+  'episode.addToQueue': 'أضف إلى قائمة التشغيل',
+  'episode.inQueue': 'في قائمة التشغيل',
+  'episode.back': 'رجوع',
+
+  'player.nothingPlaying': 'لا شيء قيد التشغيل',
+  'player.nothingPlayingBody': 'اختر حلقة وستظهر هنا.',
+  'player.open': 'افتح المشغّل',
+  'player.close': 'أغلق المشغّل',
+  'player.seek': 'تغيير الموضع',
+  'player.position': 'موضع التشغيل',
+  'player.skipBack': 'رجوع {seconds} ثانية',
+  'player.skipForward': 'تقدّم {seconds} ثانية',
+  'player.speed': 'السرعة',
+  'player.sleepTimer': 'مؤقّت النوم',
+  'player.sleepOff': 'معطّل',
+  'player.sleepMinutes': '{count} دقيقة',
+  'player.stoppingAt': 'سيتوقّف عند {time}',
+  'player.nowPlaying': 'قيد التشغيل: {title}. افتح المشغّل.',
+  'player.loading': 'جارٍ التحميل…',
+
+  'queue.title': 'قائمة التشغيل',
+  'queue.empty': 'القائمة فارغة',
+  'queue.emptyBody': 'أضف حلقة وستُشغَّل بعد هذه.',
+  'queue.waiting':
+    '{count, plural, =0 {القائمة فارغة} one {القائمة، حلقة واحدة في الانتظار} two {القائمة، حلقتان في الانتظار} few {القائمة، # حلقات في الانتظار} many {القائمة، # حلقة في الانتظار} other {القائمة، # حلقة في الانتظار}}',
+  'queue.remove': 'أزل من القائمة',
+  'queue.clear': 'أفرغ القائمة',
+
+  'transcript.title': 'النص',
+  'transcript.read': 'اقرأ النص',
+  'transcript.available': 'تأتي هذه الحلقة مع نص من الناشر.',
+  'transcript.loading': 'جارٍ تحميل النص…',
+  'transcript.failed': 'تعذّر تحميل النص',
+  'transcript.none': 'لا يوجد نص',
+  'transcript.noneBody': 'هذا الناشر لا يوفّر نصًا لهذه الحلقة.',
+  'transcript.unreadable': 'لم يصل شيء قابل للقراءة من الناشر.',
+  'transcript.search': 'ابحث في هذا النص…',
+  'transcript.searchLabel': 'ابحث في هذا النص',
+  'transcript.noMatches': 'لا نتائج',
+  'transcript.matchCount':
+    '{count, plural, zero {لا أسطر} one {سطر واحد} two {سطران} few {# أسطر} many {# سطرًا} other {# سطر}}',
+  'transcript.follow': 'تابِع',
+  'transcript.followLabel': 'تابِع الصوت',
+  'transcript.playFrom': 'شغّل من {time}',
+  'transcript.translated': 'مترجم إلى {language}',
+  'transcript.translate': 'ترجم هذا النص',
+  'transcript.translating': 'جارٍ الترجمة…',
+  'transcript.showOriginal': 'اعرض الأصل',
+
+  'ai.title': 'عن هذه الحلقة',
+  'ai.open': 'ملخّص وفصول وأسئلة',
+  'ai.signedOut': 'سجّل الدخول لاستخدام هذا',
+  'ai.signedOutBody': 'الملخّصات والفصول والأسئلة مرتبطة بحصّة حسابك اليومية.',
+  'ai.signedOutWeb':
+    'سجّل الدخول لتلخيص هذه الحلقة أو استخراج فصولها أو السؤال عنها.',
+
+  'ai.noTranscript': 'لا يوجد نص بعد',
+  'ai.noTranscriptBody':
+    'لم يوفّر الناشر نصًا. إنشاء نص يفتح الملخّص والفصول والأسئلة.',
+  'ai.transcribing':
+    'يجري الاستماع إلى الحلقة وتدوينها. يستغرق ذلك بضع دقائق — يمكنك مغادرة هذه الشاشة.',
+  'ai.transcribingShort': 'جارٍ التدوين…',
+  'ai.generateTranscript': 'أنشئ نصًا',
+
+  'ai.summary': 'الملخّص',
+  'ai.summaryBody': 'بضع جمل عمّا تناولته هذه الحلقة فعلًا، مع النقاط التي تستحقّ التذكّر.',
+  'ai.summarise': 'لخّص هذه الحلقة',
+
+  'ai.chapters': 'الفصول',
+  'ai.chaptersBody': 'قسّم الحلقة إلى أقسام يمكنك التنقّل بينها.',
+  'ai.chaptersUntimed':
+    'تحتاج الفصول إلى نص يحمل توقيتات. هذا نص الناشر النثري، ولا توقيتات فيه.',
+  'ai.findChapters': 'استخرج الفصول',
+
+  'ai.ask': 'اسأل عن هذه الحلقة',
+  'ai.askBody':
+    'تأتي الإجابة من النص وحده، مع الأسطر التي استند إليها. وإذا لم تتناول الحلقة الأمر، تقول ذلك صراحةً.',
+  'ai.askPlaceholder': 'ماذا قالوا عن…؟',
+  'ai.askAction': 'اسأل',
+  'ai.asking': 'جارٍ السؤال…',
+  'ai.fromTranscript': 'من النص',
+  'ai.failed': 'لم ينجح ذلك',
+  'ai.answerStopped': 'توقّفت الإجابة بشكل غير متوقّع',
+
+  'ai.quotaByok': 'تستخدم مفتاح Groq الخاص بك (…{hint}). لا حدّ من جانبنا.',
+  'ai.quotaLeft':
+    '{count, plural, zero {لم يبق طلب ذكاء اصطناعي اليوم} one {بقي طلب ذكاء اصطناعي واحد اليوم} two {بقي طلبان اليوم} few {بقيت # طلبات ذكاء اصطناعي اليوم} many {بقي # طلبًا اليوم} other {بقي # طلب اليوم}}',
+  'ai.quotaSpent':
+    'استهلكت طلبات الذكاء الاصطناعي لهذا اليوم. أضف مفتاح Groq الخاص بك في الإعدادات لاستخدام بلا حدود.',
+  'ai.quotaNoOperator':
+    'أضف مفتاح Groq في الإعدادات لاستخدام هذه الميزات — الخطة المجانية تكفي.',
+
+  'settings.title': 'الإعدادات',
+  'settings.playback': 'التشغيل',
+  'settings.playbackCaption':
+    'يُحفظ على هذا الجهاز — سمّاعات في القطار ومكبّر في المطبخ لا يطلبان السرعة نفسها.',
+  'settings.speed': 'السرعة',
+  'settings.speedHint': 'تنطبق على كل ما تشغّله.',
+  'settings.skipBack': 'رجوع',
+  'settings.skipBackHint': 'ترجع لتسمع شيئًا بعينه مرة أخرى.',
+  'settings.skipForward': 'تقدّم',
+  'settings.skipForwardHint': 'وتتقدّم لتتجاوز إعلانًا.',
+
+  'settings.language': 'اللغة',
+  'settings.languageCaption':
+    'تغيّر كلمات التطبيق. تبقى برامجك باللغة التي نُشرت بها.',
+  'settings.languageHint': 'تنطبق في كل مكان، على هذا الجهاز وأي جهاز آخر تسجّل الدخول منه.',
+
+  'settings.ai': 'الذكاء الاصطناعي',
+  'settings.aiCaption':
+    'الملخّصات والفصول والإجابات تأتي من Groq. هناك حصّة يومية مشتركة؛ ومفتاحك الخاص يلغيها ويحوّل التكلفة إليك — والخطة المجانية تكفي للاستخدام العادي.',
+  'settings.apiKey': 'مفتاح Groq',
+  'settings.saveKey': 'احفظ المفتاح',
+  'settings.checkingKey': 'جارٍ التحقّق…',
+  'settings.keySaved': 'مفتاحك محفوظ (…{hint})',
+  'settings.keySavedHint': 'ميزات الذكاء الاصطناعي بلا حدود وتُحتسب على حسابك في Groq.',
+  'settings.keyFailed': 'تعذّر حفظ هذا المفتاح',
+  'settings.removingKey': 'جارٍ الإزالة…',
+  'settings.quotaWithout': 'بدونه تحصل على {limit} طلبًا يوميًا (بقي {remaining}).',
+  'settings.noOperatorKey':
+    'لا يملك هذا الخادم مفتاحًا مشتركًا، لذا تحتاج ميزات الذكاء الاصطناعي إلى مفتاحك.',
+
+  'settings.account': 'الحساب',
+  'settings.accountCaption':
+    'التصفّح والبحث والتشغيل تعمل جميعها بدون حساب. الحساب هو ما ينقل مكتبتك وموضعك في كل حلقة بين أجهزتك.',
+  'settings.signedIn': 'مسجّل الدخول',
+  'settings.signingOut': 'جارٍ تسجيل الخروج…',
+
+  'auth.email': 'البريد الإلكتروني',
+  'auth.password': 'كلمة المرور',
+  'auth.name': 'الاسم',
+  'auth.signIn': 'تسجيل الدخول',
+  'auth.signUp': 'أنشئ حسابًا',
+  'auth.signingIn': 'جارٍ تسجيل الدخول…',
+  'auth.noAccount': 'أنشئ حسابًا',
+  'auth.haveAccount': 'سجّل الدخول',
+
+  'library.latest': 'الأحدث {date}',
+  'search.resultCount': '{count, plural, zero {لا نتائج} one {نتيجة واحدة} two {نتيجتان} few {# نتائج} many {# نتيجة} other {# نتيجة}}',
+  'queue.after': '{count, plural, zero {لا شيء بعد هذه.} one {حلقة واحدة بعد هذه.} two {حلقتان بعد هذه.} few {# حلقات بعد هذه.} many {# حلقة بعد هذه.} other {# حلقة بعد هذه.}}',
+  'queue.reorder': 'إعادة ترتيب {title}',
+  'queue.removeTitle': 'أزل {title} من القائمة',
+  'home.timeLeft': 'بقي {duration}',
+  'home.resume': 'استئناف {title}',
+
+  'settings.restartForDirection': 'أعد تشغيل التطبيق ليتبع التخطيط اللغة الجديدة.',
+
+  'format.today': 'اليوم',
+  'format.yesterday': 'أمس',
+  'format.minutes': '{count} دقيقة',
+  'format.hours': '{count} ساعة',
+  'format.hoursMinutes': '{hours} س {minutes} د',
+};

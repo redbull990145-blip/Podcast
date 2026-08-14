@@ -3,59 +3,55 @@ node_modules/
 .pnp
 .pnp.js
 
-# next.js
+# builds
+dist/
+build/
 .next/
 out/
-build/
-next-env.d.ts
+*.tsbuildinfo
 
-# production
-dist/
+# turbo
+.turbo/
 
-# misc
-.DS_Store
-*.pem
-Thumbs.db
+# expo
+.expo/
+android/
+ios/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+expo-env.d.ts
 
-# debug
+# env
+#
+# Ignore every .env* by default and re-admit only the template. The previous
+# list named three exact spellings, and real secrets arrived in files called
+# `.env.env` and `.env (2)` — the shapes an editor's "Save As" and a browser's
+# duplicate-download actually produce. A deny-list of filenames is the wrong
+# side of the default for anything holding a credential.
+.env*
+!.env.example
+
+# test + coverage
+coverage/
+.vitest/
+
+# logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.pnpm-debug.log*
 
-# env files — never commit secrets
-.env
-.env*.local
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-
-# generated service worker (built by Serwist during next build)
-public/sw.js
-public/sw.js.map
-public/swe-worker-*.js
-
-# testing
-coverage/
-
-# drizzle meta is committed; local journal noise is not
-drizzle/.snapshot-tmp/
-
-# editor
-.idea/
+# editors + os
 .vscode/*
 !.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
 
-# local agent/tooling state
-.claude/
-.zcode/
-
-# cloudflare worker (phase 3)
-.wrangler/
+# misc
+*.pem
+.vercel

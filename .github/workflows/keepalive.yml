@@ -1,33 +1,39 @@
-name: Supabase keepalive
+name: Keepalive
 
-# Free Supabase projects pause after 7 days without API traffic. A low-traffic
-# app can hit that during development and come back to a dead database, so touch
-# it twice a week.
-#
-# Requires repo secrets: SUPABASE_URL, SUPABASE_ANON_KEY.
-
+# Supabase pauses a free-tier project after 7 days with no activity, and
+# unpausing is a manual click in their dashboard. A read every few days costs
+# nothing and keeps the project awake.
 on:
   schedule:
-    - cron: "0 6 * * 1,4" # Mondays and Thursdays, 06:00 UTC
+    # 06:00 UTC, twice a week — comfortably inside the 7-day window even if a
+    # run is skipped, which GitHub does on repositories with no recent pushes.
+    - cron: '0 6 * * 1,4'
   workflow_dispatch:
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Touch the REST endpoint
+      - name: Touch the database
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          API_URL: ${{ secrets.API_URL }}
         run: |
-          if [ -z "$SUPABASE_URL" ]; then
-            echo "SUPABASE_URL secret not set — skipping."
+          if [ -z "$API_URL" ]; then
+            echo "API_URL secret is not set — skipping."
+            echo "Without it, a free Supabase project will pause after 7 idle days."
             exit 0
           fi
-          # RLS denies the read, but the request still counts as activity.
-          code=$(curl -s -o /dev/null -w "%{http_code}" \
-            "$SUPABASE_URL/rest/v1/podcasts?select=id&limit=1" \
-            -H "apikey: $SUPABASE_ANON_KEY")
-          echo "Supabase responded $code"
-          # Anything that reached the API keeps the project awake.
-          case "$code" in 2*|4*) exit 0 ;; *) exit 1 ;; esac
+
+          # /health/ready runs a real query, which is what counts as activity.
+          # /health would not touch Postgres at all.
+          status=$(curl --silent --show-error --max-time 30 \
+            --output /tmp/body --write-out '%{http_code}' \
+            "$API_URL/health/ready")
+
+          cat /tmp/body
+          echo
+
+          if [ "$status" != "200" ]; then
+            echo "Readiness check returned $status"
+            exit 1
+          fi

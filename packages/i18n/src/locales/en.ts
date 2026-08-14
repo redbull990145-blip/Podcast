@@ -1,0 +1,257 @@
+/**
+ * English — the source catalog.
+ *
+ * Every other locale is typed against this one, so adding a key here is a
+ * compile error in the three files that have not translated it yet. That is
+ * deliberate: a missing translation should be caught by `npm run typecheck`,
+ * not discovered by a reader in Cairo looking at an English button.
+ *
+ * Keys are flat and dotted. Nesting reads nicer in a file and worse everywhere
+ * else — a flat union of literal keys is what lets TypeScript reject `t('nav.hme')`.
+ */
+
+export const en = {
+  // ------------------------------------------------------------------ nav --
+  'nav.main': 'Main',
+  'nav.listen': 'Listen',
+  'nav.home': 'Home',
+  'nav.search': 'Search',
+  'nav.library': 'Library',
+  'nav.queue': 'Queue',
+  'nav.settings': 'Settings',
+  'nav.player': 'Player',
+
+  // --------------------------------------------------------------- common --
+  'common.loading': 'Loading…',
+  'common.retry': 'Try again',
+  'common.signIn': 'Sign in',
+  'common.signOut': 'Sign out',
+  'common.cancel': 'Cancel',
+  'common.remove': 'Remove',
+  'common.save': 'Save',
+  'common.offline': 'The server didn’t answer. It may just need a moment.',
+  'common.unreachable': 'Couldn’t reach the server',
+  'common.checkConnection': 'Check the connection and try again.',
+
+  // ----------------------------------------------------------------- home --
+  'home.title': 'Listen',
+  'home.empty': 'Nothing here yet',
+  'home.emptyBody': 'Seed the local database with: npm run seed -w @cue/api',
+  'home.continue': 'Continue listening',
+  'home.latest': 'Latest episodes',
+
+  // -------------------------------------------------------------- library --
+  'library.title': 'Library',
+  'library.signedOut': 'Your shows live here',
+  'library.signedOutBody':
+    'Sign in to follow shows and pick up where you left off on any device.',
+  'library.empty': 'Nothing followed yet',
+  'library.emptyBody':
+    'Find a show in Search and follow it — new episodes will collect here.',
+  'library.searchShows': 'Search shows',
+  'library.failed': 'Couldn’t load your library',
+  'library.newEpisodes': '{count, plural, one {# new episode} other {# new episodes}}',
+  'library.groupUnplayed': 'Waiting for you',
+  'library.groupActive': 'Still running',
+  'library.groupQuiet': 'Gone quiet',
+
+  // --------------------------------------------------------------- search --
+  'search.title': 'Search',
+  'search.placeholder': 'Shows, topics, people',
+  'search.placeholderShort': 'Search podcasts…',
+  'search.prompt': 'Find a show',
+  'search.promptBody': 'Search the directory by name, topic, or the person who makes it.',
+  'search.searching': 'Searching…',
+  'search.noResults': 'No shows matched',
+  'search.noResultsBody': 'Try a different spelling, or the host’s name.',
+  'search.filterLanguage': 'Filter by language',
+  'search.anyLanguage': 'Any language',
+  'search.trending': 'Trending now',
+  'search.add': 'Add',
+  'search.adding': 'Adding…',
+  'search.added': 'Added',
+
+  // -------------------------------------------------------------- podcast --
+  'podcast.failed': 'Couldn’t load this show',
+  'podcast.failedBody': 'It may have been removed, or the connection dropped.',
+  'podcast.empty': 'No episodes yet',
+  'podcast.emptyBody': 'The publisher hasn’t put anything in this feed.',
+  'podcast.episodes': 'Episodes',
+  'podcast.loadingEpisodes': 'Loading episodes…',
+  'podcast.follow': 'Follow',
+  'podcast.following': 'Following',
+  'podcast.signInToFollow': 'Sign in to follow',
+  'podcast.episodeCount': '{count, plural, one {# episode} other {# episodes}}',
+
+  // -------------------------------------------------------------- episode --
+  'episode.failed': 'Couldn’t load this episode',
+  'episode.failedBody': 'The publisher may have removed it, or the connection dropped.',
+  'episode.showNotes': 'Show notes',
+  'episode.noNotes': 'The publisher didn’t include notes for this episode.',
+  'episode.play': 'Play',
+  'episode.pause': 'Pause',
+  'episode.addToQueue': 'Add to queue',
+  'episode.inQueue': 'In queue',
+  'episode.back': 'Back',
+
+  // --------------------------------------------------------------- player --
+  'player.nothingPlaying': 'Nothing playing',
+  'player.nothingPlayingBody': 'Pick an episode and it will show up here.',
+  'player.open': 'Open player',
+  'player.close': 'Close player',
+  'player.seek': 'Seek',
+  'player.position': 'Playback position',
+  'player.skipBack': 'Skip back {seconds} seconds',
+  'player.skipForward': 'Skip forward {seconds} seconds',
+  'player.speed': 'Speed',
+  'player.sleepTimer': 'Sleep timer',
+  'player.sleepOff': 'Off',
+  'player.sleepMinutes': '{count} min',
+  'player.stoppingAt': 'Stopping at {time}',
+  'player.nowPlaying': 'Now playing: {title}. Open the player.',
+  'player.loading': 'Loading…',
+
+  // ---------------------------------------------------------------- queue --
+  'queue.title': 'Queue',
+  'queue.empty': 'Nothing queued',
+  'queue.emptyBody': 'Add an episode and it will play after this one.',
+  'queue.waiting': '{count, plural, =0 {Queue, empty} one {Queue, # waiting} other {Queue, # waiting}}',
+  'queue.remove': 'Remove from queue',
+  'queue.clear': 'Clear the queue',
+
+  // ----------------------------------------------------------- transcript --
+  'transcript.title': 'Transcript',
+  'transcript.read': 'Read the transcript',
+  'transcript.available': 'This episode ships with a transcript from the publisher.',
+  'transcript.loading': 'Loading the transcript…',
+  'transcript.failed': 'Couldn’t load the transcript',
+  'transcript.none': 'No transcript',
+  'transcript.noneBody': 'This publisher doesn’t offer one for this episode.',
+  'transcript.unreadable': 'Nothing readable came back from the publisher.',
+  'transcript.search': 'Search this transcript…',
+  'transcript.searchLabel': 'Search this transcript',
+  'transcript.noMatches': 'No matches',
+  'transcript.matchCount': '{count, plural, one {# line} other {# lines}}',
+  'transcript.follow': 'Follow',
+  'transcript.followLabel': 'Follow the audio',
+  'transcript.playFrom': 'Play from {time}',
+  'transcript.translated': 'Translated into {language}',
+  'transcript.translate': 'Translate this transcript',
+  'transcript.translating': 'Translating…',
+  'transcript.showOriginal': 'Show the original',
+
+  // ------------------------------------------------------------------- ai --
+  'ai.title': 'About this episode',
+  'ai.open': 'Summary, chapters & questions',
+  'ai.signedOut': 'Sign in to use this',
+  'ai.signedOutBody':
+    'Summaries, chapters and questions are tied to your account’s daily allowance.',
+  'ai.signedOutWeb':
+    'Sign in to summarise this episode, pull out chapters, or ask about it.',
+
+  'ai.noTranscript': 'No transcript yet',
+  'ai.noTranscriptBody':
+    'This publisher didn’t provide one. Generating a transcript unlocks the summary, chapters and questions.',
+  'ai.transcribing':
+    'Listening to the episode and writing it down. This takes a couple of minutes — you can leave this screen.',
+  'ai.transcribingShort': 'Transcribing…',
+  'ai.generateTranscript': 'Generate a transcript',
+
+  'ai.summary': 'Summary',
+  'ai.summaryBody':
+    'A few sentences on what this episode actually covered, plus the points worth remembering.',
+  'ai.summarise': 'Summarise this episode',
+
+  'ai.chapters': 'Chapters',
+  'ai.chaptersBody': 'Divide the episode into sections you can jump between.',
+  'ai.chaptersUntimed':
+    'Chapters need a transcript with timings. This one is the publisher’s prose, which has none.',
+  'ai.findChapters': 'Find the chapters',
+
+  'ai.ask': 'Ask about this episode',
+  'ai.askBody':
+    'Answered from the transcript only, with the lines it used. If the episode doesn’t cover it, it says so.',
+  'ai.askPlaceholder': 'What did they say about…?',
+  'ai.askAction': 'Ask',
+  'ai.asking': 'Asking…',
+  'ai.fromTranscript': 'FROM THE TRANSCRIPT',
+  'ai.failed': 'That didn’t work',
+  'ai.answerStopped': 'The answer stopped unexpectedly',
+
+  'ai.quotaByok': 'Using your own Groq key (…{hint}). No limit from us.',
+  'ai.quotaLeft':
+    '{count, plural, one {# AI request left today} other {# AI requests left today}}',
+  'ai.quotaSpent':
+    'You’ve used today’s AI requests. Add your own Groq key in Settings for unlimited use.',
+  'ai.quotaNoOperator': 'Add a Groq API key in Settings to use these — the free tier covers it.',
+
+  // ------------------------------------------------------------- settings --
+  'settings.title': 'Settings',
+  'settings.playback': 'Playback',
+  'settings.playbackCaption':
+    'Kept on this device — headphones on a train and a kitchen speaker are not the same speed.',
+  'settings.speed': 'Speed',
+  'settings.speedHint': 'Applies to everything you play.',
+  'settings.skipBack': 'Skip back',
+  'settings.skipBackHint': 'You skip back to re-hear something specific.',
+  'settings.skipForward': 'Skip forward',
+  'settings.skipForwardHint': 'And forward to escape an ad.',
+
+  'settings.language': 'Language',
+  'settings.languageCaption':
+    'Changes the app’s wording. Your shows stay in whatever language they were published in.',
+  'settings.languageHint': 'Applies everywhere, on this device and any other you sign in on.',
+
+  'settings.ai': 'AI',
+  'settings.aiCaption':
+    'Summaries, chapters and answers come from Groq. There is a shared daily allowance; your own key removes it and bills you instead — the free tier covers ordinary use.',
+  'settings.apiKey': 'Groq API key',
+  'settings.saveKey': 'Save key',
+  'settings.checkingKey': 'Checking…',
+  'settings.keySaved': 'Your key is saved (…{hint})',
+  'settings.keySavedHint': 'AI features are unlimited and billed to your Groq account.',
+  'settings.keyFailed': 'That key could not be saved',
+  'settings.removingKey': 'Removing…',
+  'settings.quotaWithout':
+    'Without one you get {limit} AI requests a day ({remaining} left).',
+  'settings.noOperatorKey': 'This server has no shared key, so AI features need your own.',
+
+  'settings.account': 'Account',
+  'settings.accountCaption':
+    'Browsing, searching and playing all work without one. An account is what carries your library and your place in each episode between devices.',
+  'settings.signedIn': 'Signed in',
+  'settings.signingOut': 'Signing out…',
+
+  // ----------------------------------------------------------------- auth --
+  'auth.email': 'Email',
+  'auth.password': 'Password',
+  'auth.name': 'Name',
+  'auth.signIn': 'Sign in',
+  'auth.signUp': 'Create an account',
+  'auth.signingIn': 'Signing in…',
+  'auth.noAccount': 'Create an account',
+  'auth.haveAccount': 'Sign in instead',
+
+  // --------------------------------------------------------------- format --
+  // Words that live inside otherwise numeric output. They belong in the
+  // catalog rather than in the formatter, because "min" is not the
+  // abbreviation for minutes in most languages.
+  'library.latest': 'Latest {date}',
+  'search.resultCount': '{count, plural, one {# result} other {# results}}',
+  'queue.after': '{count, plural, one {# episode after this one.} other {# episodes after this one.}}',
+  'queue.reorder': 'Reorder {title}',
+  'queue.removeTitle': 'Remove {title} from the queue',
+  'home.timeLeft': '{duration} left',
+  'home.resume': 'Resume {title}',
+
+  'settings.restartForDirection': 'Restart the app for the layout to follow the new language.',
+
+  'format.today': 'Today',
+  'format.yesterday': 'Yesterday',
+  'format.minutes': '{count} min',
+  'format.hours': '{count} hr',
+  'format.hoursMinutes': '{hours}h {minutes}m',
+} as const;
+
+export type MessageKey = keyof typeof en;
+export type Catalog = Record<MessageKey, string>;

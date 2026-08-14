@@ -1,0 +1,297 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+/**
+ * Bridge the generated tokens into Tailwind's theme so utilities like
+ * `bg-surface` and `text-secondary` resolve to the same variables the shared
+ * design package defines. Tailwind gets to be a shorthand for the design
+ * system rather than a second, competing one.
+ */
+@theme inline {
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface-raised: var(--color-surface-raised);
+  --color-surface-overlay: var(--color-surface-overlay);
+  --color-border: var(--color-border);
+  --color-border-strong: var(--color-border-strong);
+  --color-primary: var(--color-text-primary);
+  --color-secondary: var(--color-text-secondary);
+  --color-tertiary: var(--color-text-tertiary);
+  --color-accent: var(--color-accent);
+  --color-accent-text: var(--color-accent-text);
+  --color-accent-muted: var(--color-accent-muted);
+  --color-danger: var(--color-danger);
+  --color-skeleton: var(--color-skeleton);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-instrument-serif), ui-serif, Georgia, serif;
+
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+
+  /* Motion.
+     `--ease-*: initial` clears Tailwind's four built-in easings so the app has
+     exactly the four the token file defines. It is the enforcement, not the
+     tidiness: with `ease-out` still available a component can reach for a
+     fifth curve without anyone noticing, and the system quietly stops being
+     one. */
+  --ease-*: initial;
+  --ease-standard: var(--ease-standard);
+  --ease-enter: var(--ease-enter);
+  --ease-exit: var(--ease-exit);
+  --ease-in-out: var(--ease-in-out);
+
+  /* What a bare `transition-*` resolves to. Tailwind's own default is 150ms on
+     its own curve — a value this system does not have, which is exactly why
+     `duration-150` had spread across a dozen components. Pointing the default
+     at a token means the common case now needs no duration class at all and
+     still lands on the scale. */
+  --default-transition-duration: var(--duration-instant);
+  --default-transition-timing-function: var(--ease-standard);
+}
+
+/* ---------------------------------------------------------------- base -- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  /* Scroll position is restored by the router; smooth scrolling fights it. */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  letter-spacing: var(--text-body-tracking);
+
+  /* Grayscale antialiasing makes light text on a dark ground look thin and
+     grey. This keeps the intended weight on the dark-first design. */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+
+  /* Tabular figures everywhere: timestamps and durations sit in columns and
+     must not jitter as the digits change. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------ typography -- */
+
+.type-display {
+  font-family: var(--font-instrument-serif), ui-serif, Georgia, serif;
+  font-size: var(--text-display-size);
+  line-height: var(--text-display-line);
+  letter-spacing: var(--text-display-tracking);
+  font-weight: var(--text-display-weight);
+}
+
+.type-title1 {
+  font-size: var(--text-title1-size);
+  line-height: var(--text-title1-line);
+  letter-spacing: var(--text-title1-tracking);
+  font-weight: var(--text-title1-weight);
+}
+
+.type-title2 {
+  font-size: var(--text-title2-size);
+  line-height: var(--text-title2-line);
+  letter-spacing: var(--text-title2-tracking);
+  font-weight: var(--text-title2-weight);
+}
+
+.type-title3 {
+  font-size: var(--text-title3-size);
+  line-height: var(--text-title3-line);
+  letter-spacing: var(--text-title3-tracking);
+  font-weight: var(--text-title3-weight);
+}
+
+.type-body-strong {
+  font-size: var(--text-body-strong-size);
+  line-height: var(--text-body-strong-line);
+  letter-spacing: var(--text-body-strong-tracking);
+  font-weight: var(--text-body-strong-weight);
+}
+
+.type-callout {
+  font-size: var(--text-callout-size);
+  line-height: var(--text-callout-line);
+  letter-spacing: var(--text-callout-tracking);
+  font-weight: var(--text-callout-weight);
+}
+
+.type-caption {
+  font-size: var(--text-caption-size);
+  line-height: var(--text-caption-line);
+  letter-spacing: var(--text-caption-tracking);
+  font-weight: var(--text-caption-weight);
+}
+
+.type-overline {
+  font-size: var(--text-overline-size);
+  line-height: var(--text-overline-line);
+  letter-spacing: var(--text-overline-tracking);
+  font-weight: var(--text-overline-weight);
+  text-transform: uppercase;
+}
+
+/* Clamp a title to N lines. Episode titles vary from 4 words to 40, and an
+   unbounded one destroys the rhythm of a list. */
+.clamp-1,
+.clamp-2,
+.clamp-3 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.clamp-1 {
+  -webkit-line-clamp: 1;
+}
+.clamp-2 {
+  -webkit-line-clamp: 2;
+}
+.clamp-3 {
+  -webkit-line-clamp: 3;
+}
+
+/* -------------------------------------------------------- show notes ----- */
+
+/* Publisher show notes, sanitised at ingest (apps/api/src/feed/sanitize.ts).
+   The markup is theirs, so the spacing has to be defined here rather than by
+   utility classes we cannot attach to it. Only the tags the sanitiser's
+   allowlist can actually produce are styled. */
+.show-notes > :first-child {
+  margin-top: 0;
+}
+.show-notes > :last-child {
+  margin-bottom: 0;
+}
+
+.show-notes p,
+.show-notes ul,
+.show-notes ol,
+.show-notes blockquote,
+.show-notes pre {
+  margin-block: 0 1em;
+}
+
+.show-notes a {
+  color: var(--color-accent-text);
+  text-decoration: underline;
+  /* Feed links are frequently bare URLs longer than the measure. Without this
+     one of them widens the whole column. */
+  overflow-wrap: anywhere;
+}
+
+.show-notes ul,
+.show-notes ol {
+  padding-inline-start: 1.5em;
+}
+
+.show-notes li {
+  margin-block: 0.25em;
+}
+
+.show-notes h3,
+.show-notes h4,
+.show-notes h5,
+.show-notes h6 {
+  margin-block: 1.5em 0.5em;
+  color: var(--color-text-primary);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.show-notes blockquote {
+  padding-inline-start: 1em;
+  border-inline-start: 2px solid var(--color-border-strong);
+  color: var(--color-text-tertiary);
+}
+
+.show-notes code {
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius-xs);
+  background: var(--color-surface-raised);
+  font-size: 0.9em;
+}
+
+.show-notes pre {
+  padding: 0.75em 1em;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  overflow-x: auto;
+}
+
+.show-notes pre code {
+  padding: 0;
+  background: none;
+}
+
+/* ------------------------------------------------------------- a11y ------ */
+
+/* Visible focus, but only for keyboard users — a mouse click on a button
+   should not leave a ring behind. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/**
+ * Reduced motion: reduce, don't remove.
+ *
+ * Travel and springiness go; state changes stay visible as a short fade. A
+ * blanket `animation: none` would leave someone unable to tell that anything
+ * responded, which is a worse outcome than the motion itself.
+ *
+ * **This block only reaches CSS.** Motion for React writes `transform` as an
+ * inline style, so none of the player's expansion, the travelling artwork, or
+ * any `whileTap` is affected by a single line here — those read the same
+ * preference through `lib/motion.ts` instead. Treat this as the backstop for
+ * stylesheet animation, not as the app's reduced-motion story.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* Loops are the real vestibular risk in CSS: nothing ends, so there is no
+       "wait for it to finish". */
+    animation-duration: var(--duration-reduced) !important;
+    animation-iteration-count: 1 !important;
+
+    /* A backstop for any transform that slipped past a `motion-reduce:` class.
+       Capped at the shortest token rather than a fixed number so it can only
+       ever shorten a transition — flattening everything to one value would
+       make a 100ms hover *slower* for the people who asked for less. */
+    transition-duration: var(--duration-instant) !important;
+
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Screen-reader-only text that stays focusable. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

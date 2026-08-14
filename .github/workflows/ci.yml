@@ -5,30 +5,27 @@ on:
     branches: [main]
   pull_request:
 
+# A newer push makes an in-flight run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  verify:
+  check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
       - run: npm ci
 
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Unit tests
-        run: npm test --if-present
-
-      - name: Build
-        run: npm run build
-        env:
-          # The build never contacts Supabase — it only needs these to exist so
-          # module initialisation doesn't throw during page data collection.
-          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
-          DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+      # Turbo runs these across the workspace graph and caches by input hash,
+      # so an unchanged package is not rechecked.
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
