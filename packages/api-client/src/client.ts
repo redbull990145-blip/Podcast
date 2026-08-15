@@ -672,8 +672,24 @@ export type AiPanelState = {
     source: 'feed' | 'generated' | null;
     status: 'pending' | 'processing' | 'ready' | 'failed' | null;
     timed: boolean;
+    /**
+     * How far a running job has got, when the server answering knows.
+     *
+     * Null is not "no job" — it is "this instance is not the one doing it", or
+     * the job has not reached a countable stage yet. Callers should read it as
+     * extra detail on top of `status`, never as the thing that decides whether
+     * work is happening.
+     */
+    progress: TranscribeProgress | null;
   };
   quota: AiQuota;
+};
+
+export type TranscribeProgress = {
+  stage: 'fetching' | 'splitting' | 'transcribing' | 'saving';
+  /** Chunks finished, and how many there are. Both 0 before the split. */
+  done: number;
+  total: number;
 };
 
 export type AiGeneration = {

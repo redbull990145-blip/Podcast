@@ -3,8 +3,10 @@
 import { playableFromEpisode } from '@cue/core';
 import type { Episode } from '@cue/types';
 import * as m from 'motion/react-m';
+import { useRouter } from 'next/navigation';
 import { usePressScale, useTransition } from '@/lib/motion';
 import { usePlayerActions, usePlayerState } from '@/lib/player/store';
+import { useSession } from '@/lib/session';
 
 /**
  * Play an episode from a list.
@@ -19,17 +21,36 @@ export function PlayButton({
   podcastArtworkUrl,
   accentColor,
   tint,
+  requiresAccount = false,
 }: {
   episode: Episode;
   podcastTitle: string;
   podcastArtworkUrl: string | null;
   accentColor?: string | null;
   tint?: string | undefined;
+  /**
+   * This show came from the directory, so playing it needs an account.
+   *
+   * Whether there *is* an account is decided here rather than by the caller,
+   * because the callers are server components — the podcast page knows which
+   * shows are gated and cannot know who is looking at them, and passing a
+   * ready-made `locked` from there gated the show for everybody, signed in or
+   * not. The two halves of the question are answered where each is knowable.
+   *
+   * A product gate, not a security one: the audio streams from the publisher's
+   * own CDN and was never ours to withhold. So it lives in the control rather
+   * than pretending to be enforced somewhere it cannot be.
+   */
+  requiresAccount?: boolean;
 }) {
   const state = usePlayerState();
   const actions = usePlayerActions();
+  const router = useRouter();
+  const { isSignedIn } = useSession();
   const press = usePressScale(0.9);
   const transition = useTransition('snappy');
+
+  const locked = requiresAccount && !isSignedIn;
 
   const isCurrent = state.current?.id === episode.id;
   const isPlaying = isCurrent && state.status === 'playing';
@@ -44,6 +65,10 @@ export function PlayButton({
     <m.button
       type="button"
       onClick={() => {
+        if (locked) {
+          router.push('/signin');
+          return;
+        }
         // Already the current episode: toggle rather than reload it, which
         // would restart buffering and lose the position.
         if (isCurrent) {
@@ -53,7 +78,11 @@ export function PlayButton({
         void actions.play(playable);
       }}
       aria-label={
-        isPlaying ? `Pause ${episode.title}` : `Play ${episode.title}`
+        locked
+          ? `Sign in to play ${episode.title}`
+          : isPlaying
+            ? `Pause ${episode.title}`
+            : `Play ${episode.title}`
       }
       whileTap={{ scale: press }}
       transition={transition}

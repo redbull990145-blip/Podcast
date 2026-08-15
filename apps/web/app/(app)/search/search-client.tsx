@@ -4,10 +4,13 @@ import { queryKeys, staleTime } from '@cue/api-client';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import type { PodcastSearchResult } from '@cue/types';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { Route } from 'next';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useDeferredValue, useState } from 'react';
 import { Artwork } from '@/components/media/artwork';
 import { api, ApiClientError } from '@/lib/api';
+import { useSession } from '@/lib/session';
 
 /**
  * Languages offered as a filter.
@@ -156,26 +159,51 @@ export function SearchClient() {
  * One directory hit.
  *
  * These come from upstream and are not in our database, so they have no id and
- * nothing to link to. Choosing one ingests the feed, and *that* is what gives
- * the show an id — so the whole row is the control, and the navigation happens
- * after the ingest rather than before it.
+ * nothing to link to yet. Reading the feed is what gives a show an id, so both
+ * controls here have to do that first — but they are genuinely two different
+ * intentions and used to be one button.
+ *
+ * The whole row *was* "add", which meant looking at a show and keeping a show
+ * were the same gesture: you could not open one to see what it was without
+ * putting it in your library. Now the row opens it and the button on the end
+ * follows it. Reading the feed still happens either way, because there is no
+ * page to show without it — but that is a fetch, not a commitment, and nothing
+ * lands in anybody's library until the button is pressed.
  */
 function ResultRow({ result }: { result: PodcastSearchResult }) {
   const t = useTranslator();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { isSignedIn } = useSession();
 
-  const add = useMutation({
-    mutationFn: () => api.addPodcast(result.feedUrl),
-    onSuccess: ({ podcast }) => {
-      // Seed the detail page's cache so it renders instantly rather than
-      // re-fetching what we were just handed.
-      queryClient.setQueryData(queryKeys.podcast.detail(podcast.id), { podcast });
-      // The catalogue on Home has one more show in it now.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.podcast.list() });
-      router.push(`/podcast/${podcast.id}`);
+  /** Read the feed and hand back the id everything else needs. */
+  async function ingest() {
+    const { podcast } = await api.addPodcast(result.feedUrl);
+    // Seed the detail page's cache so it renders instantly rather than
+    // re-fetching what we were just handed.
+    queryClient.setQueryData(queryKeys.podcast.detail(podcast.id), { podcast });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.podcast.list() });
+    return podcast;
+  }
+
+  const open = useMutation({
+    mutationFn: ingest,
+    onSuccess: (podcast) => router.push(`/podcast/${podcast.id}`),
+  });
+
+  const follow = useMutation({
+    mutationFn: async () => {
+      const podcast = await ingest();
+      await api.subscribe(podcast.id);
+      return podcast;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.library.subscriptions() });
     },
   });
+
+  const busy = open.isPending || follow.isPending;
+  const error = open.error ?? follow.error;
 
   const meta = [
     result.author,
@@ -186,38 +214,58 @@ function ResultRow({ result }: { result: PodcastSearchResult }) {
 
   return (
     <div className="border-b border-[var(--color-border)] last:border-b-0">
-      <button
-        type="button"
-        onClick={() => add.mutate()}
-        disabled={add.isPending}
-        aria-busy={add.isPending || undefined}
-        className="flex w-full cursor-pointer items-center gap-4 border-0 bg-transparent px-1 py-4 text-start transition-colors hover:bg-[var(--color-surface-hover)] disabled:cursor-wait disabled:opacity-60"
-      >
-        <Artwork src={result.artworkUrl} alt={result.title} size={56} />
+      {/* A row, not a button containing a button — nesting one inside the other
+          is invalid HTML and the inner click would fire both. */}
+      <div className="flex items-center gap-4 px-1">
+        <button
+          type="button"
+          onClick={() => open.mutate()}
+          disabled={busy}
+          aria-busy={open.isPending || undefined}
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-4 border-0 bg-transparent py-4 text-start transition-opacity disabled:cursor-wait disabled:opacity-60"
+        >
+          <Artwork src={result.artworkUrl} alt={result.title} size={56} />
 
-        <span className="min-w-0 flex-1">
-          <span className="type-body-strong clamp-1 block text-[var(--color-text-primary)]">
-            {result.title}
-          </span>
-          {meta ? (
-            <span className="type-callout clamp-1 mt-0.5 block text-[var(--color-text-secondary)]">
-              {meta}
+          <span className="min-w-0 flex-1">
+            <span className="type-body-strong clamp-1 block text-[var(--color-text-primary)]">
+              {result.title}
             </span>
-          ) : null}
-        </span>
+            {meta ? (
+              <span className="type-callout clamp-1 mt-0.5 block text-[var(--color-text-secondary)]">
+                {meta}
+              </span>
+            ) : null}
+          </span>
+        </button>
 
-        {/* Says what choosing this row does. Without it the row looks like a
-            link to a page that does not exist yet. */}
-        <span className="type-caption shrink-0 text-[var(--color-text-tertiary)]">
-          {add.isPending ? 'Adding…' : 'Add'}
-        </span>
-      </button>
+        {/* Following needs an account, so signed out this is a link to sign in
+            rather than a button that fails after the fact. */}
+        {isSignedIn ? (
+          <button
+            type="button"
+            onClick={() => follow.mutate()}
+            disabled={busy || follow.isSuccess}
+            className="shrink-0 cursor-pointer rounded-full border border-[var(--color-border)] bg-transparent px-4 py-2 type-caption text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-primary)] disabled:cursor-default disabled:opacity-60"
+          >
+            {follow.isSuccess
+              ? t.t('search.added')
+              : follow.isPending
+                ? t.t('search.adding')
+                : t.t('search.add')}
+          </button>
+        ) : (
+          <Link
+            href={'/signin' as Route}
+            className="shrink-0 rounded-full border border-[var(--color-border)] px-4 py-2 type-caption text-[var(--color-text-secondary)] no-underline transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-primary)]"
+          >
+            {t.t('search.add')}
+          </Link>
+        )}
+      </div>
 
-      {add.isError ? (
+      {error ? (
         <p role="alert" className="type-caption mt-0 mb-3 px-1 text-[var(--color-danger)]">
-          {add.error instanceof ApiClientError
-            ? add.error.message
-            : 'Could not add that show.'}
+          {error instanceof ApiClientError ? error.message : 'Could not open that show.'}
         </p>
       ) : null}
     </div>

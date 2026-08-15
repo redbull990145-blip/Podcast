@@ -48,6 +48,31 @@ export function isTranscribing(episodeId: string): boolean {
 }
 
 /**
+ * How far along a running job is.
+ *
+ * Deliberately in memory and not in the database, for the same reason
+ * `inFlight` above is: the work happens in this process, so progress only means
+ * anything while this process is doing it. A crash takes the job with it, and a
+ * percentage left behind in a row would then be a number describing nothing.
+ *
+ * `stage` rather than a bare fraction, because the two phases fail and stall for
+ * completely different reasons and a listener watching a bar sit at 4% deserves
+ * to know whether we are downloading a publisher's audio or waiting on a model.
+ */
+export type TranscribeProgress = {
+  stage: 'fetching' | 'splitting' | 'transcribing' | 'saving';
+  /** Chunks finished and chunks total. Both 0 before the audio has been split. */
+  done: number;
+  total: number;
+};
+
+const progress = new Map<string, TranscribeProgress>();
+
+export function transcribeProgress(episodeId: string): TranscribeProgress | null {
+  return progress.get(episodeId) ?? null;
+}
+
+/**
  * Start transcribing, and return once it is under way rather than once it is
  * finished.
  *
@@ -93,6 +118,7 @@ export async function startTranscription(
   const funding = await resolve(app, userId);
 
   inFlight.add(episodeId);
+  progress.set(episodeId, { stage: 'fetching', done: 0, total: 0 });
   await mark(app, episodeId, 'processing', null);
 
   /**
@@ -110,7 +136,10 @@ export async function startTranscription(
       await funding.settle('failed');
       await mark(app, episodeId, 'failed', detailOf(error));
     })
-    .finally(() => inFlight.delete(episodeId));
+    .finally(() => {
+      inFlight.delete(episodeId);
+      progress.delete(episodeId);
+    });
 
   return { started: true, detail: null };
 }
@@ -154,6 +183,8 @@ async function run(
     throw new AppError('upstream_unavailable', `Could not fetch the audio: ${audio.detail}`);
   }
 
+  progress.set(episodeId, { stage: 'splitting', done: 0, total: 0 });
+
   const chunks = chunkMp3(audio.bytes, CHUNK_BYTES);
 
   /**
@@ -193,6 +224,9 @@ async function run(
    * hit the free tier's rate limit on the shared key, converting a slow success
    * into a fast failure for everyone.
    */
+  let done = 0;
+  progress.set(episodeId, { stage: 'transcribing', done, total: pieces.length });
+
   for (const piece of pieces) {
     const segments = await transcribeChunk({
       key: funding.key,
@@ -200,6 +234,9 @@ async function run(
       bytes: piece.bytes,
       filename: `${episodeId}-${piece.startMs}.mp3`,
     });
+
+    done += 1;
+    progress.set(episodeId, { stage: 'transcribing', done, total: pieces.length });
 
     for (const segment of shift(segments, piece.startMs)) {
       collected.push({
@@ -218,6 +255,8 @@ async function run(
   if (collected.length === 0) {
     throw new AppError('upstream_unavailable', 'The transcription came back empty');
   }
+
+  progress.set(episodeId, { stage: 'saving', done: pieces.length, total: pieces.length });
 
   await app.db
     .update(transcripts)

@@ -18,6 +18,7 @@ function show(overrides: Partial<LibraryPodcast> & { id: string }): LibraryPodca
     episodeCount: 10,
     lastPublishedAt: new Date(NOW - 86_400_000).toISOString(),
     accentColor: null,
+    source: 'seed',
     subscribedAt: new Date(NOW - 30 * 86_400_000).toISOString(),
     newEpisodeCount: 0,
     ...overrides,

@@ -25,7 +25,7 @@ import { buildAskMessages, citationsFrom, loadSegments } from '../ai/ask.ts';
 import { encryptSecret, keyHint } from '../ai/crypto.ts';
 import { cached, generateBrief, generateChapters } from '../ai/generate.ts';
 import { chatStream } from '../ai/groq.ts';
-import { isTranscribing, startTranscription } from '../ai/transcribe.ts';
+import { isTranscribing, startTranscription, transcribeProgress } from '../ai/transcribe.ts';
 import { rateLimit } from '../rate-limit.ts';
 
 const DEFAULT_LANGUAGE = 'en';
@@ -70,6 +70,11 @@ export function aiRoutes(app: FastifyInstance): void {
         // so a job that started a moment ago is visible before its write lands.
         status: isTranscribing(id) ? 'processing' : (row?.status ?? null),
         timed: Boolean(row?.segments.some((segment) => segment.endMs > 0)),
+        // Null unless a job is running in *this* process. Clients treat its
+        // absence as "working, no detail" rather than as "not working", because
+        // behind more than one instance the poll can land on a server that is
+        // not the one doing the work.
+        progress: transcribeProgress(id),
       },
       quota,
     });

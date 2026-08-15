@@ -91,13 +91,23 @@ export default async function EpisodePage({ params }: Params) {
   const length = t.duration(episode.durationSec);
 
   return (
-    <div className="relative mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
+    <div className="relative">
+      {/*
+        The wash lives out here, not inside the column below.
+
+        Inside it, `inset-x-0` means the width of the text rather than the width
+        of the page, so on any window wider than the content cap the colour
+        stopped in a hard vertical line with plain background beside it. Out
+        here it fills the content area edge to edge — and since that area is
+        already inset by the sidebar, it does so without having to know the
+        sidebar is there.
+      */}
       <EpisodeTint
         episodeId={episode.id}
         initialColor={episode.accentColor ?? podcast.accentColor}
       />
 
-      <div className="relative">
+      <div className="relative mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
         <header className="mb-8 flex flex-col gap-6 sm:flex-row sm:items-start">
           <Artwork src={artwork} alt={podcast.title} size={192} priority />
 

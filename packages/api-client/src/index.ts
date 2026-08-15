@@ -1,5 +1,11 @@
 export { ApiClientError, applyQueueMutation, createClient } from './client.ts';
-export type { AiGeneration, AiPanelState, ClientOptions, CueClient } from './client.ts';
+export type {
+  AiGeneration,
+  AiPanelState,
+  ClientOptions,
+  CueClient,
+  TranscribeProgress,
+} from './client.ts';
 
 export { queryKeys, staleTime } from './keys.ts';
 

@@ -61,6 +61,22 @@ export const podcasts = pgTable(
     /** PodcastIndex's id, when the show came from there. Lets us re-sync. */
     podcastIndexId: integer('podcastindex_id'),
 
+    /**
+     * How this show got into the catalogue.
+     *
+     * `seed` is a show the operator put here; `directory` is one a visitor
+     * pulled in from search. The catalogue is shared — anyone's search result
+     * becomes a row everyone can see — so without this there is no way to tell
+     * the shows we chose to offer from the long tail somebody typed in once.
+     *
+     * Written on insert only. A seeded show that somebody later searches for is
+     * still a seeded show, and the upsert leaves the column alone precisely so
+     * that a refresh cannot rewrite its own history.
+     */
+    source: text('source', { enum: ['seed', 'directory'] })
+      .notNull()
+      .default('seed'),
+
     // -- ingest bookkeeping ------------------------------------------------
     /**
      * `ETag` and `Last-Modified` from the last successful fetch. Sending these

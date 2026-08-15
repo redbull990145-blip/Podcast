@@ -1,0 +1,1 @@
+ALTER TABLE "podcasts" ADD COLUMN "source" text DEFAULT 'seed' NOT NULL;

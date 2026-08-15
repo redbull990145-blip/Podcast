@@ -23,12 +23,10 @@ import { readPosition, usePlayerActions } from '@/lib/player/store';
 export function ProgressBar({
   durationSec,
   isPlaying,
-  tint,
   compact = false,
 }: {
   durationSec: number | null;
   isPlaying: boolean;
-  tint?: string | undefined;
   compact?: boolean;
 }) {
   const { seek } = usePlayerActions();
@@ -126,19 +124,45 @@ export function ProgressBar({
         }}
         className={[
           'group relative w-full cursor-pointer touch-none',
-          // A 3px bar with a 16px hit area: thin enough to be chrome, tall
+          // A thin bar with a tall hit area: thin enough to be chrome, tall
           // enough to grab. Making the visible bar itself 16px would be a
           // ribbon across the player.
-          compact ? 'py-1' : 'py-2',
+          compact ? 'py-1' : 'py-2.5',
           seekable ? '' : 'cursor-default opacity-60',
         ].join(' ')}
       >
-        <div className="h-[3px] w-full overflow-hidden rounded-full bg-[var(--color-border-strong)]">
+        {/*
+          Thickens under the pointer, exactly as the volume bar does — same
+          gesture, same affordance, so they should answer the same way. Done
+          with `scaleY` rather than a height change: the box stays the height it
+          is and only its rendered thickness moves, which keeps the whole thing
+          on the compositor and stops the control row relaying out on hover.
+        */}
+        <div
+          className={[
+            'w-full origin-center overflow-hidden rounded-full bg-[var(--color-border-strong)]',
+            compact ? 'h-[3px]' : 'h-1.5',
+            'transition-transform duration-[var(--duration-fast)] ease-standard',
+            compact
+              ? ''
+              : scrubbing !== null
+                ? 'scale-y-100'
+                : 'scale-y-[0.55] group-hover:scale-y-100 group-focus-visible:scale-y-100',
+          ].join(' ')}
+        >
+          {/*
+            No transition on the fill, deliberately.
+
+            This one is already written every animation frame from the audio
+            clock, so it is as smooth as the display allows. A CSS transition on
+            top would restart a 160ms tween sixty times a second and the bar
+            would trail the audio it is supposed to be reporting — the one place
+            where adding easing makes something less smooth, not more.
+          */}
           <m.div
-            className="h-full w-full origin-left rounded-full"
+            className="h-full w-full origin-left rounded-full bg-[var(--color-text-primary)]"
             style={{
               scaleX: scrubbing !== null && durationSec ? scrubbing / durationSec : progress,
-              backgroundColor: tint ?? 'var(--color-accent)',
             }}
           />
         </div>

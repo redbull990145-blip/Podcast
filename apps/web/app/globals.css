@@ -252,6 +252,28 @@ body {
 }
 
 /**
+ * The indeterminate progress sweep.
+ *
+ * For the one case where a real fraction does not exist yet — the audio is
+ * being fetched from the publisher and there is nothing to count. `transform`
+ * only, so it costs a compositor frame and nothing else, and it stays out of
+ * the way of the determinate bar that replaces it a moment later.
+ *
+ * Guarded by `motion-safe:` at the call site rather than being switched off
+ * here, because the alternative under reduced motion is a pulse rather than
+ * nothing at all — a bar that neither moves nor changes is indistinguishable
+ * from a bar that has hung.
+ */
+@keyframes cue-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+/**
  * Reduced motion: reduce, don't remove.
  *
  * Travel and springiness go; state changes stay visible as a short fade. A

@@ -13,6 +13,8 @@ type EpisodeRowProps = {
   podcastTitle: string;
   accentColor?: string | null;
   tint?: string | undefined;
+  /** Show came from the directory; the play control decides what that means. */
+  requiresAccount?: boolean;
 };
 
 /**
@@ -29,6 +31,7 @@ export async function EpisodeRow({
   podcastTitle,
   accentColor,
   tint,
+  requiresAccount = false,
 }: EpisodeRowProps) {
   // A server component, so it takes the server translator. The client hook
   // cannot be called here — and TypeScript does not model that boundary, so
@@ -90,6 +93,7 @@ export async function EpisodeRow({
           podcastArtworkUrl={fallbackArtwork}
           accentColor={accentColor ?? null}
           tint={tint}
+          requiresAccount={requiresAccount}
         />
       </div>
     </article>

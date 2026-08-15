@@ -153,6 +153,14 @@ export type IngestOptions = {
   /** Skip the conditional-GET headers and re-read the whole feed. */
   force?: boolean;
   fetchImpl?: typeof fetch;
+  /**
+   * How this show reached us, recorded the first time we see it.
+   *
+   * Only ever applies on insert — the upsert below deliberately leaves the
+   * column out of its `set`, so a nightly refresh of a seeded show cannot
+   * relabel it as something a visitor found.
+   */
+  source?: 'seed' | 'directory';
 };
 
 export async function ingestFeed(
@@ -253,6 +261,7 @@ export async function ingestFeed(
     .insert(podcasts)
     .values({
       accentColor,
+      source: options.source ?? 'seed',
       // Store the URL we ended up at, so a permanent redirect is followed once
       // rather than on every refresh.
       feedUrl: outcome.finalUrl,

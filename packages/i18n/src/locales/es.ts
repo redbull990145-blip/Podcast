@@ -101,6 +101,12 @@ export const es: Catalog = {
   'player.stoppingAt': 'Se detiene a las {time}',
   'player.nowPlaying': 'Sonando: {title}. Abrir el reproductor.',
   'player.loading': 'Cargando…',
+  'podcast.needsAccount':
+    'Este programa vino de una búsqueda. Inicia sesión para reproducirlo y guardarlo si te gusta.',
+  'podcast.signIn': 'Iniciar sesión',
+  'podcast.enjoying': '¿Te está gustando? Añádelo a tu biblioteca para encontrarlo fácilmente.',
+  'podcast.addToLibrary': 'Añadir a la biblioteca',
+
   'player.volume': 'Volumen',
   'player.mute': 'Silenciar',
   'player.unmute': 'Activar el sonido',
@@ -191,6 +197,12 @@ export const es: Catalog = {
     'La editorial no incluyó una transcripción. Cue puede escuchar el episodio y escribir una.',
   'captions.generate': 'Generar subtítulos',
   'captions.generating': 'Escribiendo subtítulos…',
+  'captions.stageStarting': 'Empezando',
+  'captions.stageFetching': 'Obteniendo el audio',
+  'captions.stageSplitting': 'Dividiéndolo en partes',
+  'captions.stageListening': 'Escribiendo subtítulos: parte {done} de {total}',
+  'captions.stageAlmost': 'Casi listo',
+  'captions.stageSaving': 'Sincronizando las palabras con el audio',
   'captions.working':
     'Escuchando el episodio. En uno largo tarda unos minutos; puedes seguir reproduciéndolo mientras tanto.',
   'captions.cost':

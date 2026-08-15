@@ -293,13 +293,40 @@ export function Player() {
    * — reading `window` during render would be a hydration mismatch.
    */
   const wide = viewportWidth >= TWO_COLUMN_AT;
+
+  /**
+   * Whether the captions are showing.
+   *
+   * One control, two meanings. In one column the artwork and the words are each
+   * worth the full width, so they take turns and this says which you are
+   * looking at. In two columns they fit side by side, and this says whether the
+   * second column is there at all — because someone who just wants to look at
+   * the cover had no way to say so.
+   *
+   * `null` means nobody has said, so the width decides. Once the listener
+   * touches the control their answer holds at either width; a preference that
+   * resets when you resize the window is not a preference.
+   */
+  const [captionsChoice, setCaptionsChoice] = useState<boolean | null>(null);
+  const captionsOpen = captionsChoice ?? wide;
+
+  /**
+   * Whether the sheet is *actually* in two columns right now.
+   *
+   * Not the same question as "is the window wide". A wide window with the
+   * transcript turned off is a one-column layout that happens to be roomy, and
+   * everything below — how big the cover is, where it is centred, which way the
+   * row flows — has to follow what is on screen rather than what would fit.
+   */
+  const twoColumn = wide && captionsOpen;
+
   // The real box flexbox will hand each column, not half the window: the sheet
   // has padding on both edges and a gap down the middle, and all three come out
   // of the width before the split.
-  const columnWidth = wide
+  const columnWidth = twoColumn
     ? (viewportWidth - SHEET_PAD * 2 - COLUMN_GAP) / 2
     : viewportWidth;
-  const artFull = fullArt(wide, columnWidth, viewportWidth, viewportHeight);
+  const artFull = fullArt(twoColumn, columnWidth, viewportWidth, viewportHeight);
   const artMini = miniArt(sidebar);
 
   /**
@@ -319,18 +346,9 @@ export function Player() {
     observer.observe(node);
     setControlsHeight(node.offsetHeight);
     return () => observer.disconnect();
-  }, [episode?.id, wide]);
+  }, [episode?.id, twoColumn]);
 
   const artFullTop = artTop(viewportHeight, artFull.size, controlsHeight);
-
-  /**
-   * Whether the captions have the screen to themselves.
-   *
-   * Only meaningful in one column: at two, they are always on the right and
-   * this is ignored. Apple's own answer on a phone — the artwork and the words
-   * are both worth the full width, so they take turns rather than sharing.
-   */
-  const [captionsOpen, setCaptionsOpen] = useState(false);
 
   const sheetY = useTransform(expansion, [0, 1], [restY, 0]);
   const scrimOpacity = useTransform(expansion, [0, 1], [0, 1]);
@@ -528,12 +546,7 @@ export function Player() {
           </div>
 
           <div className="absolute inset-x-0 bottom-0 px-4">
-            <ProgressBar
-              durationSec={state.durationSec}
-              isPlaying={playing}
-              tint={accent?.fill}
-              compact
-            />
+            <ProgressBar durationSec={state.durationSec} isPlaying={playing} compact />
           </div>
         </m.div>
 
@@ -565,7 +578,7 @@ export function Player() {
             style={{ paddingTop: artFullTop - HEADER_H }}
             className={[
               'flex min-h-0 flex-1 px-6 pb-8',
-              wide ? 'flex-row items-stretch gap-8' : 'flex-col items-center',
+              twoColumn ? 'flex-row items-stretch gap-8' : 'flex-col items-center',
             ].join(' ')}
           >
             {/* ------------------------------------------- artwork column -- */}
@@ -574,8 +587,8 @@ export function Player() {
             <div
               className={[
                 'flex min-w-0 flex-col items-center',
-                wide ? 'flex-1 justify-start' : 'w-full',
-                !wide && captionsOpen ? 'hidden' : '',
+                twoColumn ? 'flex-1 justify-start' : 'w-full',
+                !twoColumn && captionsOpen ? 'hidden' : '',
               ].join(' ')}
             >
               {/* Artwork slot — the real artwork sits above this, travelling. */}
@@ -607,11 +620,7 @@ export function Player() {
                 </div>
 
                 <div className="mt-5">
-                  <ProgressBar
-                    durationSec={state.durationSec}
-                    isPlaying={playing}
-                    tint={accent?.fill}
-                  />
+                  <ProgressBar durationSec={state.durationSec} isPlaying={playing} />
                 </div>
 
                 {/* Transport. Bare glyphs on the backdrop, evenly spaced across
@@ -648,16 +657,15 @@ export function Player() {
                   <SpeedButton rate={state.rate} onChange={actions.setRate} />
 
                   <div className="flex items-center gap-1">
-                    {/* One column has to choose between the cover and the
-                        words, so it gets a switch. Two columns show both. */}
-                    {!wide ? (
-                      <IconButton
-                        label={t.t('captions.show')}
-                        path={icon.captions}
-                        pressed={captionsOpen}
-                        onClick={() => setCaptionsOpen(true)}
-                      />
-                    ) : null}
+                    {/* At both widths now. Two columns previously offered no
+                        way to turn the transcript off, which left anyone who
+                        just wanted to look at the cover stuck with it. */}
+                    <IconButton
+                      label={captionsOpen ? t.t('captions.hide') : t.t('captions.show')}
+                      path={icon.captions}
+                      pressed={captionsOpen}
+                      onClick={() => setCaptionsChoice(!captionsOpen)}
+                    />
 
                     <IconButton
                       label={t.t('player.openQueue')}
@@ -689,17 +697,23 @@ export function Player() {
             </div>
 
             {/* ------------------------------------------ captions column -- */}
-            {wide || captionsOpen ? (
+            {captionsOpen ? (
               <div
-                className={['flex min-h-0 flex-col', wide ? 'flex-1' : 'w-full flex-1'].join(' ')}
+                className={[
+                  'flex min-h-0 flex-col',
+                  twoColumn ? 'flex-1' : 'w-full flex-1',
+                ].join(' ')}
               >
-                {!wide ? (
+                {/* In one column the utility row is on the other screen, so the
+                    way back has to be here. In two it is always visible below
+                    the cover and a second copy would be clutter. */}
+                {!twoColumn ? (
                   <div className="mb-1 flex shrink-0 justify-end">
                     <IconButton
                       label={t.t('captions.hide')}
                       path={icon.captions}
                       pressed
-                      onClick={() => setCaptionsOpen(false)}
+                      onClick={() => setCaptionsChoice(false)}
                     />
                   </div>
                 ) : null}
@@ -718,7 +732,7 @@ export function Player() {
                 <Captions
                   key={episode.id}
                   episodeId={episode.id}
-                  className={['min-h-0 flex-1', wide ? '' : 'mx-auto'].join(' ')}
+                  className={['min-h-0 flex-1', twoColumn ? '' : 'mx-auto'].join(' ')}
                 />
               </div>
             ) : null}
@@ -738,7 +752,7 @@ export function Player() {
             // means hiding the artwork *column* does not hide it — it has to be
             // withdrawn explicitly, or it floats over the captions that just
             // took the screen.
-            !wide && captionsOpen ? 'hidden' : '',
+            !twoColumn && captionsOpen ? 'hidden' : '',
           ].join(' ')}
           style={
             travel

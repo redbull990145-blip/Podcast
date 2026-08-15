@@ -109,6 +109,12 @@ export const ar: Catalog = {
   'player.stoppingAt': 'سيتوقّف عند {time}',
   'player.nowPlaying': 'قيد التشغيل: {title}. افتح المشغّل.',
   'player.loading': 'جارٍ التحميل…',
+  'podcast.needsAccount':
+    'وصل هذا البرنامج من البحث. سجّل الدخول لتشغيله — وللاحتفاظ به إن أعجبك.',
+  'podcast.signIn': 'تسجيل الدخول',
+  'podcast.enjoying': 'يعجبك؟ أضفه إلى مكتبتك ليسهل العثور عليه لاحقًا.',
+  'podcast.addToLibrary': 'إضافة إلى المكتبة',
+
   'player.volume': 'مستوى الصوت',
   'player.mute': 'كتم الصوت',
   'player.unmute': 'إلغاء كتم الصوت',
@@ -199,6 +205,12 @@ export const ar: Catalog = {
   'captions.noneBody': 'لم يوفّر الناشر نصًا. يمكن لـ Cue الاستماع إلى الحلقة وكتابة واحد.',
   'captions.generate': 'إنشاء التسميات',
   'captions.generating': 'جارٍ كتابة التسميات…',
+  'captions.stageStarting': 'جارٍ البدء',
+  'captions.stageFetching': 'جارٍ جلب الصوت',
+  'captions.stageSplitting': 'جارٍ تقسيمه إلى أجزاء',
+  'captions.stageListening': 'جارٍ كتابة التسميات — الجزء {done} من {total}',
+  'captions.stageAlmost': 'أوشك على الانتهاء',
+  'captions.stageSaving': 'جارٍ مطابقة الكلمات مع الصوت',
   'captions.working':
     'يجري الاستماع إلى الحلقة. يستغرق ذلك دقائق في الحلقات الطويلة — يمكنك متابعة التشغيل أثناء ذلك.',
   'captions.cost':

@@ -87,7 +87,9 @@ export function podcastRoutes(app: FastifyInstance): void {
     const normalized = normalizeFeedUrl(body.feedUrl);
     if (!normalized) throw badRequest('That does not look like a URL', { feedUrl: 'Invalid URL' });
 
-    const result = await ingestFeed(app.db, normalized.href);
+    // Marked as coming from the directory, which is what makes it possible
+    // later to tell a show the operator curated from one a visitor typed in.
+    const result = await ingestFeed(app.db, normalized.href, { source: 'directory' });
 
     if (result.status === 'gone') {
       throw badRequest('That feed no longer exists', { feedUrl: result.detail });

@@ -1,6 +1,7 @@
 'use client';
 
 import { PLAYBACK_RATES, type PlaybackRate } from '@cue/core';
+import { icon } from '@cue/design';
 import * as m from 'motion/react-m';
 import { usePrefersReducedMotion, usePressScale, useTransition } from '@/lib/motion';
 
@@ -179,21 +180,28 @@ export function SkipButton({
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
         aria-hidden="true"
       >
-        {back ? (
-          <path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5" strokeLinecap="round" strokeLinejoin="round" />
-        ) : (
-          <path d="M12 5V2l5 4-5 4V7a5 5 0 1 0 5 5" strokeLinecap="round" strokeLinejoin="round" />
-        )}
+        <path d={back ? icon.skipBack : icon.skipForward} />
       </svg>
-      {/* The number lives inside the arrow, so the control says exactly how
-          far it jumps without a separate label. */}
+      {/*
+        The number lives inside the ring, so the control says exactly how far it
+        jumps without a separate label.
+
+        `inset-0` and centred with flex, not a bare `absolute`. An absolutely
+        positioned box with no insets falls back to its *static* position, which
+        inside a flex row is wherever it would have sat after the icon — so the
+        numeral rendered below and to the side of the ring instead of inside it,
+        and the control read as a glyph with a stray number attached. Given a
+        box the size of the button it centres on the same point the ring does.
+      */}
       <span
         aria-hidden="true"
-        className="absolute"
-        style={{ fontSize: glyph * 0.33, fontWeight: 600, marginTop: glyph * 0.11 }}
+        className="pointer-events-none absolute inset-0 flex items-center justify-center"
+        style={{ fontSize: glyph * 0.3, fontWeight: 600, lineHeight: 1 }}
       >
         {seconds}
       </span>

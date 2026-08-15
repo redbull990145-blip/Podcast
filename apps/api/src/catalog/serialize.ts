@@ -25,6 +25,7 @@ export function serializePodcast(row: PodcastRow, categories: string[] = []): Po
     episodeCount: row.episodeCount,
     lastPublishedAt: row.lastPublishedAt?.toISOString() ?? null,
     accentColor: row.accentColor,
+    source: row.source,
   };
 }
 

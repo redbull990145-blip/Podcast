@@ -53,11 +53,22 @@ export default async function HomePage() {
 
       {podcasts.length > 0 ? (
         <section aria-labelledby="catalogue-heading">
+          {/*
+            Not "in your catalogue", which it never was.
+
+            `GET /podcasts` returns every show anyone has added — it is one
+            shared catalogue, not a per-listener one. Calling it *yours* meant
+            that opening a search result, which has to read the feed to have
+            anything to show you, made a show appear under a heading claiming
+            you had collected it. That is why adding felt automatic: the label
+            was describing something that had not happened. Your shows live in
+            Library, behind Follow, and always did.
+          */}
           <h2
             id="catalogue-heading"
             className="type-overline mb-4 text-[var(--color-text-tertiary)]"
           >
-            IN YOUR CATALOGUE
+            EVERYTHING ON CUE
           </h2>
 
           <ul className="grid list-none grid-cols-2 gap-x-5 gap-y-8 p-0 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">

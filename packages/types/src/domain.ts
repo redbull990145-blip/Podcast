@@ -47,6 +47,15 @@ export type Podcast = {
    * directly — a raw cover colour is as likely to be fluorescent as not.
    */
   accentColor: string | null;
+  /**
+   * How the show got into the catalogue: curated by the operator, or pulled in
+   * from the directory by someone's search.
+   *
+   * The catalogue is shared, so a search result becomes a row everyone can see.
+   * This is what lets the clients treat the two differently without pretending
+   * the second kind does not exist.
+   */
+  source: 'seed' | 'directory';
 };
 
 export type Episode = {

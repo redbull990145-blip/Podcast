@@ -26,9 +26,29 @@ export const icon = {
   play: 'M8 5.5v13l11-6.5z',
   pause: 'M8 5.5h3.2v13H8zM12.8 5.5H16v13h-3.2z',
 
-  /** Skip arrows carry their own numerals in the UI, not in the path. */
-  skipBack: 'M11 5 5.5 9.5 11 14M5.5 9.5H14a4.5 4.5 0 0 1 0 9h-3',
-  skipForward: 'M13 5l5.5 4.5L13 14M18.5 9.5H10a4.5 4.5 0 0 0 0 9h3',
+  /**
+   * Skip arrows, drawn as a ring with a gap at the top.
+   *
+   * The numeral goes *inside* the ring, so the ring has to actually be a ring —
+   * one circle, centred on the icon's centre, with nothing else inside it. The
+   * previous pair were an arrowhead and an arc that did not share a centre, so
+   * the ring sat off to one side and the number landed on top of the stroke
+   * rather than in the middle of it, which is why they read as smudges at
+   * anything under about 32px.
+   *
+   * Centre (12,12), radius 8, a 30° gap at the top, and a chevron at the end
+   * the motion arrives from — pointing left to go back, right to go forward.
+   *
+   * The sweep flag is doing real work here, not decoration. Two endpoints and a
+   * radius describe *two* circles, and the flags pick which one; get them the
+   * wrong way round and the arc is drawn around the other centre, which put the
+   * ring at y −11 — almost entirely outside the 24×24 box, so all that survived
+   * on screen was the chevron and the whole control read as a stray tick.
+   * Large-arc 1 with sweep 1 going right-to-left is the combination that keeps
+   * the centre at (12,12); forward is its mirror, so its sweep is 0.
+   */
+  skipBack: 'M14.07 4.27A8 8 0 1 1 9.93 4.27M9.93 4.27 13 2.4M9.93 4.27 13 6.2',
+  skipForward: 'M9.93 4.27A8 8 0 1 0 14.07 4.27M14.07 4.27 11 2.4M14.07 4.27 11 6.2',
 
   chevronDown: 'M6 9.5 12 15.5l6-6',
   check: 'M5 12.5 9.5 17 19 7.5',

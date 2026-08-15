@@ -104,6 +104,12 @@ export const hi: Catalog = {
   'player.stoppingAt': '{time} पर रुकेगा',
   'player.nowPlaying': 'चल रहा है: {title}. प्लेयर खोलें।',
   'player.loading': 'लोड हो रहा है…',
+  'podcast.needsAccount':
+    'यह शो खोज से आया है। इसे चलाने के लिए साइन इन करें — और पसंद आए तो सहेजने के लिए भी।',
+  'podcast.signIn': 'साइन इन करें',
+  'podcast.enjoying': 'पसंद आ रहा है? इसे अपनी लाइब्रेरी में जोड़ें ताकि दोबारा आसानी से मिल जाए।',
+  'podcast.addToLibrary': 'लाइब्रेरी में जोड़ें',
+
   'player.volume': 'आवाज़',
   'player.mute': 'आवाज़ बंद करें',
   'player.unmute': 'आवाज़ चालू करें',
@@ -193,6 +199,12 @@ export const hi: Catalog = {
     'प्रकाशक ने ट्रांसक्रिप्ट नहीं दी। Cue एपिसोड सुनकर एक लिख सकता है।',
   'captions.generate': 'कैप्शन बनाएँ',
   'captions.generating': 'कैप्शन लिखे जा रहे हैं…',
+  'captions.stageStarting': 'शुरू हो रहा है',
+  'captions.stageFetching': 'ऑडियो लाया जा रहा है',
+  'captions.stageSplitting': 'हिस्सों में बाँटा जा रहा है',
+  'captions.stageListening': 'कैप्शन लिखे जा रहे हैं — हिस्सा {done}/{total}',
+  'captions.stageAlmost': 'बस पूरा होने वाला है',
+  'captions.stageSaving': 'शब्दों को ऑडियो से मिलाया जा रहा है',
   'captions.working':
     'एपिसोड सुना जा रहा है। लंबे एपिसोड में कुछ मिनट लगते हैं — इस बीच आप सुनते रह सकते हैं।',
   'captions.cost':

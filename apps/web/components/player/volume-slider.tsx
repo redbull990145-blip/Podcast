@@ -121,7 +121,14 @@ export function VolumeSlider({ volume, onChange }: { volume: number; onChange: (
           ].join(' ')}
         >
           <div
-            className="h-full w-full origin-left rounded-full bg-[var(--color-text-primary)]"
+            className={[
+              'h-full w-full origin-left rounded-full bg-[var(--color-text-primary)]',
+              // Eased when the level is set in steps — a keyboard press, or a
+              // click partway along the track — and instant while a finger is
+              // on it, where a transition is just lag between the pointer and
+              // the fill.
+              dragging ? '' : 'transition-transform duration-[var(--duration-fast)] ease-standard',
+            ].join(' ')}
             // Transform, not width — same reason as above, and it means the
             // fill tracks a dragging finger without touching layout.
             style={{ transform: `scaleX(${volume})` }}

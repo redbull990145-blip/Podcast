@@ -57,6 +57,13 @@
       "when": 1786817199040,
       "tag": "0007_mixed_mattie_franklin",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786834360514,
+      "tag": "0008_dapper_kronos",
+      "breakpoints": true
     }
   ]
 }

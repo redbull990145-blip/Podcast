@@ -38,6 +38,65 @@ export const CHAT_MODEL = 'llama-3.3-70b-versatile';
 export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
 /**
+ * Retrying the failures that are worth retrying.
+ *
+ * A 502 from Groq is not a statement about the request — it is a gateway in
+ * front of the model having a bad second, and the same bytes sent again a moment
+ * later usually work. Without this, one such blip killed an entire transcription:
+ * an hour-long episode is several sequential uploads, each of them tens of
+ * megabytes, and a failure on the last chunk threw away every chunk before it
+ * *and* spent the user's daily allowance to produce nothing. That is the shape
+ * of the bug, and it gets more likely the longer the episode — so it was worst
+ * exactly where the feature is most useful.
+ *
+ * Only transient classes are retried. A 401 is a wrong key and will be wrong
+ * again; a 429 is a real rate limit where retrying immediately is the least
+ * helpful possible response; a 413 is audio that is genuinely too big. Those
+ * surface at once, with the message that tells the user what to do.
+ */
+const RETRY_STATUS = new Set([408, 500, 502, 503, 504, 522, 524]);
+const MAX_ATTEMPTS = 3;
+
+/** Backoff before attempt n (1-indexed): 1s, then 3s. Jittered. */
+function backoffMs(attempt: number): number {
+  return attempt * 1000 * (1 + Math.random() * 0.5) + (attempt - 1) * 1000;
+}
+
+/** Exported for its tests; every caller in this module goes through it. */
+export async function withRetry(
+  send: () => Promise<Response>,
+  signal?: AbortSignal | undefined,
+): Promise<Response> {
+  let last: unknown = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await send();
+      if (response.ok || !RETRY_STATUS.has(response.status)) return response;
+
+      // The body has to be drained or the connection is held open for the life
+      // of the process — and on the final attempt the caller reads it for the
+      // error message, so only discard it when we are going round again.
+      if (attempt === MAX_ATTEMPTS) return response;
+      await response.body?.cancel();
+      last = response.status;
+    } catch (error) {
+      // A dropped socket mid-upload is the same class of problem as a 502, and
+      // on a 20MB request body it is not rare. An abort is not: that is the
+      // caller having gone away, and retrying would ignore them.
+      if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
+      if (attempt === MAX_ATTEMPTS) throw error;
+      last = error;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, backoffMs(attempt)));
+  }
+
+  // Unreachable: the loop either returns or throws on its final attempt.
+  throw last instanceof Error ? last : new AppError('upstream_unavailable', 'Groq did not respond');
+}
+
+/**
  * Turn a provider failure into something the client can act on.
  *
  * A user's own invalid key must not read as "our server is broken" — it is
@@ -105,21 +164,25 @@ export type ChatOptions = {
 };
 
 export async function chat(options: ChatOptions): Promise<string> {
-  const response = await fetch(`${BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${options.key}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: CHAT_MODEL,
-      messages: options.messages,
-      temperature: options.temperature ?? 0.2,
-      max_tokens: options.maxTokens ?? 2048,
-      ...(options.json ? { response_format: { type: 'json_object' } } : {}),
-    }),
-    ...(options.signal ? { signal: options.signal } : {}),
-  });
+  const response = await withRetry(
+    () =>
+      fetch(`${BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${options.key}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: CHAT_MODEL,
+          messages: options.messages,
+          temperature: options.temperature ?? 0.2,
+          max_tokens: options.maxTokens ?? 2048,
+          ...(options.json ? { response_format: { type: 'json_object' } } : {}),
+        }),
+        ...(options.signal ? { signal: options.signal } : {}),
+      }),
+    options.signal,
+  );
 
   if (!response.ok) throw await failure(response, options.byok);
 
@@ -216,26 +279,36 @@ export async function transcribe(options: {
   language?: string | null;
   signal?: AbortSignal;
 }): Promise<TranscribedSegment[]> {
-  const form = new FormData();
-
   // Copied into a fresh ArrayBuffer: chunks are subarrays of one large episode
   // buffer, and `new Blob([subarray])` would otherwise be free to reference the
   // whole backing store and upload far more than the slice.
   const copy = new Uint8Array(options.bytes.length);
   copy.set(options.bytes);
+  const blob = new Blob([copy], { type: 'audio/mpeg' });
 
-  form.append('file', new Blob([copy], { type: 'audio/mpeg' }), options.filename);
-  form.append('model', TRANSCRIBE_MODEL);
-  form.append('response_format', 'verbose_json');
-  form.append('timestamp_granularities[]', 'segment');
-  if (options.language) form.append('language', options.language);
+  /**
+   * A fresh `FormData` per attempt.
+   *
+   * The body of a `fetch` is a stream and a stream can only be read once, so
+   * reusing one across a retry sends an empty body — which fails in a way that
+   * looks nothing like the transient error that caused the retry. Rebuilding it
+   * is cheap: the `Blob` underneath is shared, so nothing is copied again.
+   */
+  const response = await withRetry(() => {
+    const form = new FormData();
+    form.append('file', blob, options.filename);
+    form.append('model', TRANSCRIBE_MODEL);
+    form.append('response_format', 'verbose_json');
+    form.append('timestamp_granularities[]', 'segment');
+    if (options.language) form.append('language', options.language);
 
-  const response = await fetch(`${BASE_URL}/audio/transcriptions`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${options.key}` },
-    body: form,
-    ...(options.signal ? { signal: options.signal } : {}),
-  });
+    return fetch(`${BASE_URL}/audio/transcriptions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${options.key}` },
+      body: form,
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+  }, options.signal);
 
   if (!response.ok) throw await failure(response, options.byok);
 

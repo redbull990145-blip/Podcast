@@ -4,6 +4,7 @@ import { ApiClientError } from '@cue/api-client';
 import { getTranslator } from '@/lib/i18n';
 import { deriveTint } from '@cue/design';
 import { Artwork } from '@/components/media/artwork';
+import { ShowNotice } from '@/components/podcast/show-notice';
 import { SubscribeButton } from '@/components/podcast/subscribe-button';
 import { EpisodeRow } from '@/components/episode/episode-row';
 import { api } from '@/lib/api';
@@ -64,7 +65,18 @@ export default async function PodcastPage({ params }: Params) {
   const t = await getTranslator();
 
   return (
-    <div className="relative mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
+    <div className="relative">
+      {/*
+        This wrapper exists so the wash can sit outside the width-capped column.
+
+        It used to be a child of that column, where `inset-x-0` means "the
+        column", not "the page" — so on any window wider than the content cap
+        the colour stopped dead at the text with plain background either side of
+        it. Light coming off a cover does not stop in a straight line. Out here
+        it fills the content area edge to edge, and because that area is already
+        inset by the sidebar it does so without needing to know the sidebar
+        exists — which a `100vw` box would have got wrong in the other direction.
+      */}
       {tint ? (
         <div
           aria-hidden="true"
@@ -81,7 +93,7 @@ export default async function PodcastPage({ params }: Params) {
         />
       ) : null}
 
-      <div className="relative">
+      <div className="relative mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
       <header className="mb-10 flex flex-col gap-6 sm:flex-row sm:items-end">
         <Artwork src={podcast.artworkUrl} alt={podcast.title} size={192} priority />
 
@@ -119,6 +131,12 @@ export default async function PodcastPage({ params }: Params) {
         </div>
       </header>
 
+      <ShowNotice
+        podcastId={podcast.id}
+        source={podcast.source}
+        {...(tint ? { tint: tint.fill } : {})}
+      />
+
       {podcast.description ? (
         <p className="type-body mb-10 max-w-[var(--measure-prose)] text-[var(--color-text-secondary)]">
           {podcast.description}
@@ -142,6 +160,7 @@ export default async function PodcastPage({ params }: Params) {
                 podcastTitle={podcast.title}
                 accentColor={podcast.accentColor}
                 {...(tint ? { tint: tint.fill } : {})}
+                requiresAccount={podcast.source === 'directory'}
               />
             ))}
           </div>
