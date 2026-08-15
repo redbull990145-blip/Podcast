@@ -182,6 +182,24 @@ export const hi: Catalog = {
   'share.playFrom': '{time} से चलाएँ',
   'share.sharedFrom': '{time} से साझा किया गया',
 
+  'captions.show': 'कैप्शन दिखाएँ',
+  'captions.hide': 'कैप्शन छिपाएँ',
+  'captions.none': 'इस एपिसोड के लिए कोई कैप्शन नहीं',
+  'captions.noneBody':
+    'प्रकाशक ने ट्रांसक्रिप्ट नहीं दी। Cue एपिसोड सुनकर एक लिख सकता है।',
+  'captions.generate': 'कैप्शन बनाएँ',
+  'captions.generating': 'कैप्शन लिखे जा रहे हैं…',
+  'captions.working':
+    'एपिसोड सुना जा रहा है। लंबे एपिसोड में कुछ मिनट लगते हैं — इस बीच आप सुनते रह सकते हैं।',
+  'captions.cost':
+    'आज की {remaining, plural, one {# बची हुई रिक्वेस्ट} other {# बची हुई रिक्वेस्ट}} में से एक लगेगी।',
+  'captions.costUnknown': 'आपकी रोज़ की रिक्वेस्ट में से एक लगेगी।',
+  'captions.noAllowance':
+    'आज की सीमा पूरी हो गई। जारी रखने के लिए सेटिंग्स में अपनी API कुंजी जोड़ें।',
+  'captions.signInToGenerate': 'कैप्शन बनाने के लिए साइन इन करें — रोज़ की सीमा हर खाते की अलग है।',
+  'captions.failed': 'कैप्शन बनाना शुरू नहीं हो सका।',
+  'captions.untimed': 'इस ट्रांसक्रिप्ट में समय नहीं है, इसलिए यह ऑडियो के साथ नहीं चल सकती।',
+
   'transcript.title': 'ट्रांसक्रिप्ट',
   'transcript.read': 'ट्रांसक्रिप्ट पढ़ें',
   'transcript.available': 'इस एपिसोड के साथ प्रकाशक का ट्रांसक्रिप्ट आता है।',

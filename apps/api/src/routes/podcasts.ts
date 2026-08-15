@@ -12,6 +12,7 @@ import { and, desc, eq, lt, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { PodcastIndexFeed } from '../catalog/podcastindex.ts';
 import { serializeEpisode, serializePodcast } from '../catalog/serialize.ts';
+import { extractArtworkColor } from '../feed/artwork-color.ts';
 import { ingestFeed } from '../feed/ingest.ts';
 import { normalizeFeedUrl } from '../feed/url-guard.ts';
 import { badRequest, notFound, ok } from '../errors.ts';
@@ -199,6 +200,74 @@ export function podcastRoutes(app: FastifyInstance): void {
 
     return ok({ episode: serializeEpisode(row) });
   });
+
+  /**
+   * The colour of this episode's own artwork.
+   *
+   * Its own route rather than part of the episode payload, because answering it
+   * can mean fetching and analysing an image from a publisher's CDN — hundreds
+   * of milliseconds that the episode page must not wait on. The player asks for
+   * it after playback has already started and repaints when it arrives; until
+   * then the show's colour stands in.
+   *
+   * Extracted once and stored. The second listener, and every listener after,
+   * gets a row read. `expensive` because a miss reaches out to the internet.
+   */
+  app.get(
+    '/episodes/:id/tint',
+    { preHandler: rateLimit(app, 'expensive') },
+    async (request) => {
+      const { id } = uuidParam.parse(request.params);
+
+      const [row] = await app.db
+        .select({
+          accentColor: episodes.accentColor,
+          artworkUrl: episodes.artworkUrl,
+          podcastId: episodes.podcastId,
+        })
+        .from(episodes)
+        .where(eq(episodes.id, id))
+        .limit(1);
+
+      if (!row) throw notFound('Episode');
+      if (row.accentColor) return ok({ accentColor: row.accentColor, source: 'episode' as const });
+
+      /**
+       * No episode art means there is nothing of its own to sample, so the
+       * show's colour is not a fallback here — it is the correct answer, and
+       * saying so stops the client asking again on every play.
+       */
+      if (!row.artworkUrl) {
+        const [show] = await app.db
+          .select({ accentColor: podcasts.accentColor })
+          .from(podcasts)
+          .where(eq(podcasts.id, row.podcastId))
+          .limit(1);
+
+        return ok({ accentColor: show?.accentColor ?? null, source: 'podcast' as const });
+      }
+
+      const extracted = await extractArtworkColor(row.artworkUrl);
+
+      /**
+       * A failed extraction is not stored.
+       *
+       * Null means "we could not tell" — an unreachable CDN, a timeout, a
+       * genuinely greyscale cover. Writing that back would make one bad minute
+       * permanent, so it stays null and the next play tries again. The cost of
+       * retrying is one image fetch; the cost of caching a wrong answer is an
+       * episode that never gets its colour.
+       */
+      if (extracted) {
+        await app.db
+          .update(episodes)
+          .set({ accentColor: extracted })
+          .where(eq(episodes.id, id));
+      }
+
+      return ok({ accentColor: extracted, source: 'episode' as const });
+    },
+  );
 }
 
 /** One query for a show's category names, rather than one per category. */

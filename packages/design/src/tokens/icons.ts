@@ -59,6 +59,14 @@ export const icon = {
    * branch to everyone else.
    */
   share: 'M12 4v10.5M7.5 8.5 12 4l4.5 4.5M5 14v5.5h14V14',
+  /**
+   * A speech bubble with two lines of text in it.
+   *
+   * The mark every media player uses for lyrics and captions, which is the
+   * point — a lettermark would need translating to keep meaning anything, and
+   * this one is already understood without being read.
+   */
+  captions: 'M4 5.5h16v11H9.5L5.5 20v-3.5H4zM7.5 9.5h9M7.5 12.5h5.5',
 } as const satisfies Record<string, IconPath>;
 
 export type IconToken = keyof typeof icon;

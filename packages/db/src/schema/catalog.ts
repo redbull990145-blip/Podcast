@@ -120,6 +120,23 @@ export const episodes = pgTable(
 
     publishedAt: timestamp('published_at', { withTimezone: true }).notNull(),
     artworkUrl: text('artwork_url'),
+
+    /**
+     * Dominant colour of *this episode's* artwork, as `#RRGGBB`.
+     *
+     * Separate from the show's colour because episode covers genuinely differ —
+     * across this catalogue, 5,008 episodes carry their own art spanning 2,804
+     * distinct images, so inheriting one colour per show would paint nine
+     * hundred episodes of a daily news podcast the same blue.
+     *
+     * Null until someone plays the episode. Filling it at ingest would mean
+     * fetching and analysing an image for every episode of every feed on the
+     * chance it is opened; instead the first play pays for it once and everyone
+     * after reads the stored value. Until then the show's colour stands in,
+     * which is a good approximation and never an empty screen.
+     */
+    accentColor: text('accent_color'),
+
     episodeNumber: integer('episode_number'),
     seasonNumber: integer('season_number'),
     explicit: boolean('explicit').notNull().default(false),

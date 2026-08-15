@@ -69,6 +69,14 @@ export type Episode = {
   publishedAt: IsoDateTime;
   /** Episode-specific art; falls back to the podcast's. */
   artworkUrl: string | null;
+  /**
+   * Dominant colour of this episode's own art, as `#RRGGBB`.
+   *
+   * Null until the episode has been played once — it is extracted on demand
+   * rather than for every episode of every feed. Callers fall back to the
+   * show's colour, which is why null here is a normal state and not an error.
+   */
+  accentColor: string | null;
   episodeNumber: number | null;
   seasonNumber: number | null;
   explicit: boolean;

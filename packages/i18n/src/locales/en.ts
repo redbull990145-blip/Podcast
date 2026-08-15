@@ -193,6 +193,22 @@ export const en = {
   'share.playFrom': 'Play from {time}',
   'share.sharedFrom': 'Shared from {time}',
 
+  // ------------------------------------------------------------- captions --
+  'captions.show': 'Show captions',
+  'captions.hide': 'Hide captions',
+  'captions.none': 'No captions for this episode',
+  'captions.noneBody':
+    'The publisher didn’t include a transcript. Cue can listen to the episode and write one.',
+  'captions.generate': 'Generate captions',
+  'captions.generating': 'Writing captions…',
+  'captions.working': 'Listening to the episode. This takes a few minutes for a long one — you can keep playing while it runs.',
+  'captions.cost': 'Uses one of your {remaining, plural, one {# remaining request} other {# remaining requests}} today.',
+  'captions.costUnknown': 'Uses one of your daily requests.',
+  'captions.noAllowance': 'You’ve used today’s allowance. Add your own API key in Settings to keep going.',
+  'captions.signInToGenerate': 'Sign in to generate captions — the daily allowance is per account.',
+  'captions.failed': 'Couldn’t start writing captions.',
+  'captions.untimed': 'This transcript has no timings, so it can’t follow along.',
+
   // ----------------------------------------------------------- transcript --
   'transcript.title': 'Transcript',
   'transcript.read': 'Read the transcript',

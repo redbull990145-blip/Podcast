@@ -40,6 +40,8 @@ export function serializeEpisode(row: EpisodeRow): Episode {
     durationSec: row.durationSec,
     publishedAt: row.publishedAt.toISOString(),
     artworkUrl: row.artworkUrl,
+    // Null until someone plays it; the client falls back to the show's colour.
+    accentColor: row.accentColor,
     episodeNumber: row.episodeNumber,
     seasonNumber: row.seasonNumber,
     explicit: row.explicit,

@@ -420,8 +420,31 @@ export function createClient(options: ClientOptions) {
       });
     },
 
-    getEpisode(id: string): Promise<{ episode: Episode }> {
-      return request(`/episodes/${id}`);
+    getEpisode(
+      id: string,
+      params: { signal?: AbortSignal } = {},
+    ): Promise<{ episode: Episode }> {
+      return request(`/episodes/${id}`, { signal: params.signal });
+    },
+
+    /**
+     * The dominant colour of an episode's artwork.
+     *
+     * Asked for separately from the episode itself because a first request can
+     * mean the server fetching the image from a publisher's CDN. The player
+     * shows the show's colour immediately and swaps when this answers, so this
+     * is never on the path to a first paint.
+     *
+     * `source` says which artwork the colour actually came from: `episode` when
+     * it was sampled from this episode's own cover, `podcast` when the episode
+     * has none of its own and the show's is the honest answer rather than a
+     * placeholder.
+     */
+    getEpisodeTint(
+      id: string,
+      params: { signal?: AbortSignal } = {},
+    ): Promise<{ accentColor: string | null; source: 'episode' | 'podcast' }> {
+      return request(`/episodes/${id}/tint`, { signal: params.signal });
     },
 
     /**

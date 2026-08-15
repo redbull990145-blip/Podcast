@@ -180,6 +180,25 @@ export const es: Catalog = {
   'share.playFrom': 'Reproducir desde {time}',
   'share.sharedFrom': 'Compartido desde {time}',
 
+  'captions.show': 'Mostrar subtítulos',
+  'captions.hide': 'Ocultar subtítulos',
+  'captions.none': 'Sin subtítulos para este episodio',
+  'captions.noneBody':
+    'La editorial no incluyó una transcripción. Cue puede escuchar el episodio y escribir una.',
+  'captions.generate': 'Generar subtítulos',
+  'captions.generating': 'Escribiendo subtítulos…',
+  'captions.working':
+    'Escuchando el episodio. En uno largo tarda unos minutos; puedes seguir reproduciéndolo mientras tanto.',
+  'captions.cost':
+    'Usa una de tus {remaining, plural, one {# solicitud restante} other {# solicitudes restantes}} de hoy.',
+  'captions.costUnknown': 'Usa una de tus solicitudes diarias.',
+  'captions.noAllowance':
+    'Has agotado el límite de hoy. Añade tu propia clave de API en Ajustes para continuar.',
+  'captions.signInToGenerate':
+    'Inicia sesión para generar subtítulos: el límite diario es por cuenta.',
+  'captions.failed': 'No se pudieron empezar los subtítulos.',
+  'captions.untimed': 'Esta transcripción no tiene marcas de tiempo, así que no puede seguir el audio.',
+
   'transcript.title': 'Transcripción',
   'transcript.read': 'Leer la transcripción',
   'transcript.available': 'Este episodio incluye una transcripción de la editorial.',

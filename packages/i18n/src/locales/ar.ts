@@ -189,6 +189,23 @@ export const ar: Catalog = {
   'share.playFrom': 'التشغيل من {time}',
   'share.sharedFrom': 'شورك من {time}',
 
+  'captions.show': 'إظهار التسميات',
+  'captions.hide': 'إخفاء التسميات',
+  'captions.none': 'لا توجد تسميات لهذه الحلقة',
+  'captions.noneBody': 'لم يوفّر الناشر نصًا. يمكن لـ Cue الاستماع إلى الحلقة وكتابة واحد.',
+  'captions.generate': 'إنشاء التسميات',
+  'captions.generating': 'جارٍ كتابة التسميات…',
+  'captions.working':
+    'يجري الاستماع إلى الحلقة. يستغرق ذلك دقائق في الحلقات الطويلة — يمكنك متابعة التشغيل أثناء ذلك.',
+  'captions.cost':
+    'يستهلك واحدًا من {remaining, plural, zero {# طلب متبقٍ} one {# طلب متبقٍ} two {# طلبين متبقيين} few {# طلبات متبقية} many {# طلبًا متبقيًا} other {# طلب متبقٍ}} اليوم.',
+  'captions.costUnknown': 'يستهلك واحدًا من طلباتك اليومية.',
+  'captions.noAllowance':
+    'استنفدت حصة اليوم. أضف مفتاح API الخاص بك في الإعدادات للمتابعة.',
+  'captions.signInToGenerate': 'سجّل الدخول لإنشاء التسميات — الحصة اليومية لكل حساب.',
+  'captions.failed': 'تعذّر بدء كتابة التسميات.',
+  'captions.untimed': 'هذا النص بلا توقيتات، لذا لا يمكنه مجاراة الصوت.',
+
   'transcript.title': 'النص',
   'transcript.read': 'اقرأ النص',
   'transcript.available': 'تأتي هذه الحلقة مع نص من الناشر.',

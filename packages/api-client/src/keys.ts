@@ -55,6 +55,8 @@ export const queryKeys = {
     detail: (id: string) => ['episode', id] as const,
     /** Under the episode, so invalidating one drops its transcript too. */
     transcript: (id: string) => ['episode', id, 'transcript'] as const,
+    /** The artwork's dominant colour. Effectively immutable once extracted. */
+    tint: (id: string) => ['episode', id, 'tint'] as const,
     /**
      * Generated artefacts, keyed by language as well — the same episode
      * summarised in another language is a different answer, not a translation
