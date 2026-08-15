@@ -1,6 +1,6 @@
 import { directionOf } from '@cue/i18n';
 import type { Metadata, Viewport } from 'next';
-import { Inter, Instrument_Serif } from 'next/font/google';
+import { Inter } from 'next/font/google';
 import type { ReactNode } from 'react';
 import { resolveLocale } from '@/lib/i18n';
 import { Providers } from './providers';
@@ -18,18 +18,6 @@ const inter = Inter({
   // Reserves the right metrics so swapping from the fallback doesn't shift
   // the page — the single biggest source of layout shift on a text-heavy app.
   adjustFontFallback: true,
-});
-
-/**
- * Instrument Serif for display only. Used on section headers and featured
- * blocks, where it does the work of making discovery feel curated rather than
- * generated. Never body copy.
- */
-const instrumentSerif = Instrument_Serif({
-  subsets: ['latin'],
-  weight: '400',
-  variable: '--font-instrument-serif',
-  display: 'swap',
 });
 
 export const metadata: Metadata = {
@@ -68,7 +56,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
 
   return (
     <html lang={locale} dir={direction} suppressHydrationWarning>
-      <body className={`${inter.variable} ${instrumentSerif.variable}`}>
+      <body className={inter.variable}>
         {/* The shell belongs to the (app) group, not here — auth renders
             without it. */}
         <Providers locale={locale}>{children}</Providers>

@@ -24,7 +24,6 @@
   --color-skeleton: var(--color-skeleton);
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-serif: var(--font-instrument-serif), ui-serif, Georgia, serif;
 
   --radius-xs: var(--radius-xs);
   --radius-sm: var(--radius-sm);
@@ -88,7 +87,8 @@ body {
 /* ------------------------------------------------------------ typography -- */
 
 .type-display {
-  font-family: var(--font-instrument-serif), ui-serif, Georgia, serif;
+  /* One family throughout — see the note in @cue/design's typography tokens. */
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   font-size: var(--text-display-size);
   line-height: var(--text-display-line);
   letter-spacing: var(--text-display-tracking);

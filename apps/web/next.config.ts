@@ -7,10 +7,25 @@ const config: NextConfig = {
   transpilePackages: ['@cue/api-client', '@cue/design', '@cue/motion', '@cue/types'],
 
   images: {
-    // Podcast artwork comes from whatever CDN each publisher uses, so the host
-    // list is unbounded by nature. Next still optimises and resizes; it just
-    // cannot allowlist hosts it has never heard of.
-    remotePatterns: [{ protocol: 'https', hostname: '**' }],
+    /**
+     * Podcast artwork comes from whatever CDN each publisher uses, so the host
+     * list is unbounded by nature. Next still optimises and resizes; it just
+     * cannot allowlist hosts it has never heard of.
+     *
+     * `http` is listed as well as `https`, and it has to be: plenty of feeds
+     * still advertise plain-http artwork — the BBC's `ichef.bbci.co.uk` among
+     * them — and without this entry `next/image` throws an unconfigured-host
+     * error that takes the whole route down. Search was crashing outright on
+     * any result whose cover was http.
+     *
+     * This does not put insecure content on the page. Next fetches the image
+     * server-side and serves the optimised copy from our own origin over
+     * https, so the browser never makes the plain-http request itself.
+     */
+    remotePatterns: [
+      { protocol: 'https', hostname: '**' },
+      { protocol: 'http', hostname: '**' },
+    ],
     // Artwork is square and displayed at a handful of fixed sizes.
     imageSizes: [48, 64, 96, 128, 192, 256, 384],
     minimumCacheTTL: 60 * 60 * 24 * 7,

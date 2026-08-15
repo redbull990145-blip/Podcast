@@ -81,10 +81,30 @@ export const nativeElevation = {
 /** Minimum hit target. Below this, a control is a bug on a touch device. */
 export const hitSlop = { minTarget: 44 } as const;
 
-/** Content width caps. Long measure is the enemy of readable show notes. */
+/**
+ * Content width caps.
+ *
+ * Two jobs, and they pull in opposite directions. `prose` is a reading measure
+ * — a line much past eighty characters makes the eye lose its place on the
+ * return sweep, so it stays capped however wide the window gets. `content` is
+ * the page's frame, and its only job is to stop a layout stretching to the
+ * width of an ultrawide monitor; it should otherwise get out of the way.
+ *
+ * `content` was 1180, which on a 1920 screen left roughly a third of the
+ * usable width empty next to a page that had plenty to put there. Widened so
+ * the frame follows the window rather than the paragraph.
+ *
+ * `wide` is new only in the sense of being *defined*: two screens already
+ * asked for `--measure-wide`, and because nothing declared it the variable
+ * resolved to nothing and `max-width` was dropped altogether. Those pages have
+ * been running uncapped — visibly so next to a capped one, which is most of
+ * why the app looked inconsistent from screen to screen.
+ */
 export const measure = {
-  /** Transcripts and show notes: ~68 characters at body size. */
-  prose: 660,
+  /** Transcripts and show notes: ~76 characters at body size. */
+  prose: 720,
   /** Main app column. */
-  content: 1180,
+  content: 1440,
+  /** Lists that are mostly rows and want the room — queue, playlists. */
+  wide: 1680,
 } as const;

@@ -8,6 +8,7 @@ import { notFound } from 'next/navigation';
 import { Suspense } from 'react';
 import { AiPanel } from '@/components/ai/ai-panel';
 import { EpisodeActions } from '@/components/episode/episode-actions';
+import { EpisodeTint } from '@/components/episode/episode-tint';
 import { SharedTimestamp } from '@/components/episode/shared-timestamp';
 import { ShowNotes } from '@/components/episode/show-notes';
 import { TranscriptPanel } from '@/components/transcript/transcript-panel';
@@ -65,23 +66,36 @@ export default async function EpisodePage({ params }: Params) {
 
   const { podcast } = await api.getPodcast(episode.podcastId);
 
-  const tint = podcast.accentColor ? deriveTint(podcast.accentColor, 'dark') : null;
+  /**
+   * The episode's own colour, falling back to the show's.
+   *
+   * The order matters and used to be the other way round, which produced the
+   * obvious wrong thing: a Planet Money episode with a yellow Caribbean cover
+   * sat under the show's dark green, because the show is green and nothing
+   * asked the episode. Episode covers vary far more than shows do — this
+   * catalogue has 2,804 distinct episode images across six shows — so the
+   * episode is the better answer whenever it has one.
+   *
+   * Null until the episode has been played once, since the colour is extracted
+   * on demand rather than for every episode of every feed. `EpisodeTint` below
+   * fills that gap from the client without making this page wait on an image.
+   */
+  const tint = episode.accentColor
+    ? deriveTint(episode.accentColor, 'dark')
+    : podcast.accentColor
+      ? deriveTint(podcast.accentColor, 'dark')
+      : null;
+
   const artwork = episode.artworkUrl ?? podcast.artworkUrl;
   const t = await getTranslator();
   const length = t.duration(episode.durationSec);
 
   return (
     <div className="relative mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
-      {tint ? (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 top-0 h-[300px] sm:h-[380px]"
-          style={{
-            background: `linear-gradient(to bottom, ${tint.wash} 0%, transparent 100%)`,
-            zIndex: 0,
-          }}
-        />
-      ) : null}
+      <EpisodeTint
+        episodeId={episode.id}
+        initialColor={episode.accentColor ?? podcast.accentColor}
+      />
 
       <div className="relative">
         <header className="mb-8 flex flex-col gap-6 sm:flex-row sm:items-start">
@@ -142,19 +156,32 @@ export default async function EpisodePage({ params }: Params) {
           </div>
         </header>
 
-        <ShowNotes html={episode.descriptionHtml} text={episode.description} />
+        {/*
+          Notes and the summary side by side, once there is room for both.
 
-        {/* Above the transcript, not below it: this is the short version, and
-            burying it under two thousand lines of prose would make it findable
-            only by people who did not need it. */}
-        <section className="mt-10">
-          <AiPanel
-            episode={episode}
-            podcastTitle={podcast.title}
-            podcastArtworkUrl={podcast.artworkUrl}
-            accentColor={podcast.accentColor}
-          />
-        </section>
+          Show notes are capped at a reading measure and always will be — a line
+          past about eighty characters makes the eye lose its place coming back.
+          That cap used to leave half a wide screen empty, which read as a page
+          that had not finished loading. Filling it with something worth reading
+          is the fix; stretching the paragraphs to the window is not.
+
+          The summary is the right neighbour because the two answer the same
+          question at different lengths — what is this episode about — so a
+          reader can take whichever one they have time for without scrolling
+          past the other. Below `xl` they stack, notes first.
+        */}
+        <div className="grid items-start gap-10 xl:grid-cols-[minmax(0,var(--measure-prose))_minmax(0,1fr)]">
+          <ShowNotes html={episode.descriptionHtml} text={episode.description} />
+
+          <section className="xl:sticky xl:top-8">
+            <AiPanel
+              episode={episode}
+              podcastTitle={podcast.title}
+              podcastArtworkUrl={podcast.artworkUrl}
+              accentColor={podcast.accentColor}
+            />
+          </section>
+        </div>
 
         {episode.transcriptUrl ? (
           <section className="mt-10">
