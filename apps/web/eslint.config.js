@@ -12,4 +12,16 @@ export default [
     files: ['public/sw.js'],
     languageOptions: { globals: { ...globals.serviceworker } },
   },
+  {
+    /**
+     * Build scripts talk to a terminal — that is the whole job.
+     *
+     * `no-console` exists to keep stray debugging out of shipped app code, and
+     * these never ship. Without this the rule pushes a build script's normal
+     * output through `console.warn`, which then reads as a warning in CI logs
+     * and buries the real ones.
+     */
+    files: ['scripts/**/*.js'],
+    rules: { 'no-console': 'off' },
+  },
 ];

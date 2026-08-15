@@ -18,6 +18,19 @@ const config: NextConfig = {
 
   typedRoutes: true,
 
+  /**
+   * Rewrite barrel imports into direct module imports before bundling.
+   *
+   * `motion/react` re-exports its entire surface from one module, and the
+   * bundler keeps the whole graph when any part of it is imported — so
+   * `AnimatePresence` in the shell dragged in the projection engine behind
+   * `Reorder`, on every route, despite nothing in the shell animating layout.
+   * Measured at ~31KB gzipped of the app-shell route.
+   */
+  experimental: {
+    optimizePackageImports: ['motion', '@tanstack/react-query'],
+  },
+
   async headers() {
     return [
       {

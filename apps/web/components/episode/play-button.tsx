@@ -2,7 +2,7 @@
 
 import { playableFromEpisode } from '@cue/core';
 import type { Episode } from '@cue/types';
-import { motion } from 'motion/react';
+import * as m from 'motion/react-m';
 import { usePressScale, useTransition } from '@/lib/motion';
 import { usePlayerActions, usePlayerState } from '@/lib/player/store';
 
@@ -41,7 +41,7 @@ export function PlayButton({
   });
 
   return (
-    <motion.button
+    <m.button
       type="button"
       onClick={() => {
         // Already the current episode: toggle rather than reload it, which
@@ -78,6 +78,6 @@ export function PlayButton({
           <path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14Z" />
         )}
       </svg>
-    </motion.button>
+    </m.button>
   );
 }

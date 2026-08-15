@@ -1,7 +1,8 @@
 'use client';
 
 import { formatTimestamp } from '@cue/core';
-import { motion, useMotionValue } from 'motion/react';
+import { useMotionValue } from 'motion/react';
+import * as m from 'motion/react-m';
 import { useEffect, useRef, useState } from 'react';
 import { readPosition, usePlayerActions } from '@/lib/player/store';
 
@@ -133,7 +134,7 @@ export function ProgressBar({
         ].join(' ')}
       >
         <div className="h-[3px] w-full overflow-hidden rounded-full bg-[var(--color-border-strong)]">
-          <motion.div
+          <m.div
             className="h-full w-full origin-left rounded-full"
             style={{
               scaleX: scrubbing !== null && durationSec ? scrubbing / durationSec : progress,

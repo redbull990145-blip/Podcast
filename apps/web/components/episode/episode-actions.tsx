@@ -2,7 +2,7 @@
 
 import { playableFromEpisode } from '@cue/core';
 import type { Episode } from '@cue/types';
-import { motion } from 'motion/react';
+import * as m from 'motion/react-m';
 import { ShareButton } from '@/components/episode/share-button';
 import { AddToPlaylist } from '@/components/playlist/add-to-playlist';
 import { usePressScale, useTransition } from '@/lib/motion';
@@ -49,7 +49,7 @@ export function EpisodeActions({
 
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <motion.button
+      <m.button
         type="button"
         onClick={() => {
           if (isCurrent) {
@@ -74,12 +74,12 @@ export function EpisodeActions({
         <span className="type-body-strong">
           {isPlaying ? 'Pause' : isCurrent ? 'Resume' : 'Play'}
         </span>
-      </motion.button>
+      </m.button>
 
       {/* Queueing what is already playing is meaningless, so the control goes
           away rather than sitting there doing nothing. */}
       {isCurrent ? null : (
-        <motion.button
+        <m.button
           type="button"
           onClick={() => {
             if (queued) {
@@ -94,7 +94,7 @@ export function EpisodeActions({
           className="type-body min-h-11 cursor-pointer rounded-[var(--radius-md)] border border-[var(--color-border-strong)] bg-transparent px-5 text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)]"
         >
           {queued ? 'In your queue' : 'Add to queue'}
-        </motion.button>
+        </m.button>
       )}
 
       {/* Collecting and passing on, side by side. Both are things you do

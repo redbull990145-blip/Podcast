@@ -1,0 +1,60 @@
+# Deploying the API.
+#
+# Render is named here because the plan picked it, but nothing in the service is
+# Render-specific — it is a Node process that reads its configuration from the
+# environment and listens on $PORT. Koyeb, Fly, or a container host take the
+# same three commands.
+#
+# The web app is not in this file. It deploys to Vercel from the same repo with
+# no config: root directory `apps/web`, and the environment variables under
+# "Client → API" in .env.example.
+
+services:
+  - type: web
+    name: cue-api
+    runtime: node
+    plan: free
+    # Builds from the monorepo root: the API imports workspace packages by name,
+    # so npm has to install the whole workspace for those links to resolve.
+    rootDir: .
+    buildCommand: npm ci && npm run build --workspace @cue/api
+    startCommand: npm run start --workspace @cue/api
+
+    # Liveness only. `/health/ready` touches the database, and a health check
+    # that fails when Postgres blips would have the platform restart a process
+    # that is working fine — turning a brief dependency outage into a crash loop.
+    healthCheckPath: /health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # One Render load balancer sits in front. This decides whose address a
+      # rate limit is counted against; see .env.example for why the number
+      # matters in both directions.
+      - key: TRUST_PROXY_HOPS
+        value: 1
+
+      # Everything below is a secret or an environment-specific URL, so it is
+      # set in the dashboard rather than committed. `sync: false` is what makes
+      # Render prompt for them instead of silently deploying without.
+      - key: DATABASE_URL
+        sync: false
+      - key: BETTER_AUTH_SECRET
+        sync: false
+      - key: BETTER_AUTH_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: REDIS_TOKEN
+        sync: false
+      - key: PODCASTINDEX_KEY
+        sync: false
+      - key: PODCASTINDEX_SECRET
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: API_KEY_ENCRYPTION_SECRET
+        sync: false

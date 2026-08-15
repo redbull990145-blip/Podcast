@@ -29,3 +29,8 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+
+      # Gates the pull request rather than the deploy: a bundle regression
+      # should be argued with before it ships, but it is not a reason to block
+      # a production release that is otherwise fine.
+      - run: npm run budget --workspace @cue/web

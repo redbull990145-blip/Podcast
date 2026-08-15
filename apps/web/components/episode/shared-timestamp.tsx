@@ -2,7 +2,7 @@
 
 import { formatTimestamp, parseShareTime, playableFromEpisode } from '@cue/core';
 import type { Episode } from '@cue/types';
-import { motion } from 'motion/react';
+import * as m from 'motion/react-m';
 import { useSearchParams } from 'next/navigation';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { useTransition } from '@/lib/motion';
@@ -59,7 +59,7 @@ export function SharedTimestamp({
         {t.t('share.sharedFrom', { time })}
       </p>
 
-      <motion.button
+      <m.button
         type="button"
         onClick={() => void actions.playAt(playable, seconds)}
         whileTap={{ scale: 0.97 }}
@@ -68,7 +68,7 @@ export function SharedTimestamp({
         style={{ backgroundColor: tint ?? 'var(--color-accent)' }}
       >
         {t.t('share.playFrom', { time })}
-      </motion.button>
+      </m.button>
     </div>
   );
 }

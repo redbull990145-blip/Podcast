@@ -3,7 +3,8 @@
 import { SKIP_BACK_SEC, SKIP_FORWARD_SEC } from '@cue/core';
 import { deriveTint } from '@cue/design';
 import { duration, gesture } from '@cue/motion';
-import { AnimatePresence, motion, useMotionValue, useTransform } from 'motion/react';
+import { AnimatePresence, useMotionValue, useTransform } from 'motion/react';
+import * as m from 'motion/react-m';
 import { animate } from 'motion/react';
 import { useEffect, useState } from 'react';
 import { Artwork } from '@/components/media/artwork';
@@ -131,20 +132,20 @@ export function Player() {
     <>
       {/* Scrim. Pointer events only once expanded, so it never intercepts
           clicks on the page behind the mini player. */}
-      <motion.div
+      <m.div
         aria-hidden="true"
         onClick={() => setExpanded(false)}
         className="fixed inset-0 z-30 bg-[var(--color-scrim)]"
         style={{ opacity: scrimOpacity, pointerEvents: expanded ? 'auto' : 'none' }}
       />
 
-      <motion.div
+      <m.div
         role="region"
         aria-label={t.t('nav.player')}
         // Dragging *is* travel, so there is nothing to gate down to — the
         // gesture is withdrawn and the buttons that do the same job stay. Both
         // the mini bar and the grab handle open and close without it, so no
-        // capability is lost with the motion.
+        // capability is lost with the m.
         drag={travel ? 'y' : false}
         dragConstraints={{ top: 0, bottom: 0 }}
         // Resistance past the edges: the sheet still tracks the finger, which
@@ -174,7 +175,7 @@ export function Player() {
         ].join(' ')}
       >
         {/* ------------------------------------------------------- mini -- */}
-        <motion.div
+        <m.div
           style={{ opacity: miniOpacity, pointerEvents: expanded ? 'none' : 'auto' }}
           className="absolute inset-x-0 top-0 h-[72px]"
         >
@@ -217,10 +218,10 @@ export function Player() {
               compact
             />
           </div>
-        </motion.div>
+        </m.div>
 
         {/* ------------------------------------------------------- full -- */}
-        <motion.div
+        <m.div
           style={{ opacity: fullOpacity, pointerEvents: expanded ? 'auto' : 'none' }}
           className="flex h-full flex-col items-center px-6 pt-4 pb-10"
         >
@@ -280,7 +281,7 @@ export function Player() {
 
           <AnimatePresence>
             {state.error ? (
-              <motion.p
+              <m.p
                 role="alert"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -292,16 +293,16 @@ export function Player() {
                 className="type-callout mt-6 mb-0 text-center text-[var(--color-danger)]"
               >
                 {state.error}
-              </motion.p>
+              </m.p>
             ) : null}
           </AnimatePresence>
-        </motion.div>
+        </m.div>
 
         {/* ------------------------------------------------- the artwork -- */}
         {/* Rendered exactly once and positioned from `expansion`, which is what
             makes it read as the same object moving rather than two images
             crossfading. */}
-        <motion.div
+        <m.div
           aria-hidden="true"
           className="pointer-events-none absolute overflow-hidden"
           style={
@@ -328,8 +329,8 @@ export function Player() {
               large resolution means the image is already sharp when expanded
               rather than upscaling as it grows. */}
           <Artwork src={episode.artworkUrl} alt={episode.podcastTitle} size={264} fill />
-        </motion.div>
-      </motion.div>
+        </m.div>
+      </m.div>
     </>
   );
 }

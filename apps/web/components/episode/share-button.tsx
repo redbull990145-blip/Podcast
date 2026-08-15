@@ -1,7 +1,8 @@
 'use client';
 
 import { episodeShareUrl, formatTimestamp, shouldShareTime } from '@cue/core';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence } from 'motion/react';
+import * as m from 'motion/react-m';
 import { useState } from 'react';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { useTransition } from '@/lib/motion';
@@ -70,7 +71,7 @@ export function ShareButton({ episodeId }: { episodeId: string }) {
 
   return (
     <div className="relative">
-      <motion.button
+      <m.button
         type="button"
         onClick={() => void share()}
         whileTap={{ scale: 0.97 }}
@@ -96,11 +97,11 @@ export function ShareButton({ episodeId }: { episodeId: string }) {
         {withTime && position !== null
           ? t.t('share.fromHere', { time: formatTimestamp(position) })
           : t.t('share.action')}
-      </motion.button>
+      </m.button>
 
       <AnimatePresence>
         {copied ? (
-          <motion.span
+          <m.span
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
@@ -109,7 +110,7 @@ export function ShareButton({ episodeId }: { episodeId: string }) {
             className="type-caption absolute top-[calc(100%+6px)] start-0 whitespace-nowrap rounded-[var(--radius-sm)] bg-[var(--color-surface-overlay)] px-2 py-1 text-[var(--color-text-secondary)]"
           >
             {t.t('share.copied')}
-          </motion.span>
+          </m.span>
         ) : null}
       </AnimatePresence>
     </div>

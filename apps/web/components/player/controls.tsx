@@ -1,7 +1,7 @@
 'use client';
 
 import { PLAYBACK_RATES, type PlaybackRate } from '@cue/core';
-import { motion } from 'motion/react';
+import * as m from 'motion/react-m';
 import { usePrefersReducedMotion, usePressScale, useTransition } from '@/lib/motion';
 
 /**
@@ -39,7 +39,7 @@ export function PlayPauseButton({
   const transition = useTransition('responsive');
 
   return (
-    <motion.button
+    <m.button
       type="button"
       onClick={onToggle}
       aria-label={playing ? 'Pause' : 'Play'}
@@ -60,7 +60,7 @@ export function PlayPauseButton({
           <path d={playing ? ICON.pause : ICON.play} />
         </svg>
       )}
-    </motion.button>
+    </m.button>
   );
 }
 
@@ -75,7 +75,7 @@ function LoadingRing() {
 
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-      <motion.circle
+      <m.circle
         cx="12"
         cy="12"
         r="9"
@@ -119,7 +119,7 @@ export function SkipButton({
   const transition = useTransition('snappy');
 
   return (
-    <motion.button
+    <m.button
       type="button"
       onClick={onClick}
       aria-label={back ? `Skip back ${seconds} seconds` : `Skip forward ${seconds} seconds`}
@@ -143,7 +143,7 @@ export function SkipButton({
       >
         {seconds}
       </span>
-    </motion.button>
+    </m.button>
   );
 }
 

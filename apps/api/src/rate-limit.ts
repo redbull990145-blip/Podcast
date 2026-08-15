@@ -5,8 +5,8 @@
  * whole budget in the last second of one window and again in the first second
  * of the next, which is a 2× burst exactly when you didn't want one.
  *
- * Limits are per-identifier. Once sessions exist the identifier becomes the
- * user id; until then it is the client IP.
+ * Limits are per-identifier: the signed-in user where there is one, the client
+ * address otherwise. See `rateLimitIdentity` for why that order matters.
  */
 
 import { Ratelimit } from '@upstash/ratelimit';
@@ -78,11 +78,27 @@ export function createRateLimiter(cache: Cache): RateLimiter {
 }
 
 /**
+ * Who a request is billed to.
+ *
+ * The session id wins over the address whenever there is one, for two reasons.
+ * It cannot be forged — a caller can put anything in a forwarding header, but
+ * not in a signed session. And it does not collide: carrier-grade NAT puts
+ * thousands of phones behind one address, so an IP-keyed budget silently
+ * rations a whole mobile network to one user's worth of requests, which arrives
+ * as "the app is broken on cellular" rather than as a limit being hit.
+ *
+ * Namespaced so a user id can never be confused with an address.
+ */
+export function rateLimitIdentity(request: FastifyRequest): string {
+  return request.user ? `u:${request.user.id}` : `ip:${request.ip}`;
+}
+
+/**
  * Route-level guard. Applied per route rather than globally so each endpoint
  * declares the tier it actually belongs to.
  */
 export function rateLimit(app: FastifyInstance, tier: RateLimitTier) {
   return async (request: FastifyRequest, _reply: FastifyReply): Promise<void> => {
-    await app.rateLimiter.check(request.ip, tier);
+    await app.rateLimiter.check(rateLimitIdentity(request), tier);
   };
 }

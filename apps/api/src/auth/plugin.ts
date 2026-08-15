@@ -114,6 +114,29 @@ export async function registerAuth(app: FastifyInstance, auth: Auth): Promise<vo
   });
 
   /**
+   * Drop Fastify's built-in `text/plain` parser.
+   *
+   * This is CSRF protection, not tidying. The session cookie is `SameSite=None`
+   * in production — it has to be, since the web app and this API are different
+   * registrable domains — so the browser attaches it to cross-site requests and
+   * the only thing standing in the way is that a `<form>` cannot produce
+   * `application/json`. `text/plain` it *can* produce, via
+   * `enctype="text/plain"`, and that needs no preflight and no JavaScript.
+   *
+   * With the parser present, a malicious page could submit such a form to
+   * `POST /episodes/:id/transcribe` — a route that reads no body at all, so a
+   * junk payload does not stop it — and spend a signed-in visitor's AI quota
+   * and the operator's Groq budget. The same held for `/ai/brief` and
+   * `/ai/chapters`. Routes that *do* read a body were already safe by accident,
+   * since a string fails their Zod parse; that is not a property worth relying
+   * on when the next body-less route would silently reintroduce the hole.
+   *
+   * Removed rather than made to reject, so the answer is Fastify's own 415
+   * before any handler, hook, or database call runs.
+   */
+  app.removeContentTypeParser('text/plain');
+
+  /**
    * Better Auth reads the raw body itself, so `/auth/*` gets the string
    * untouched. Everything else is parsed as Fastify normally would.
    *

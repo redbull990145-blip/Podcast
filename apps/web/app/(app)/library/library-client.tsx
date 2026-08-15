@@ -90,7 +90,25 @@ export function LibraryClient() {
 
           <ul className="m-0 list-none p-0">
             {group.items.map((item) => (
-              <li key={item.id}>
+              /*
+                Rows off screen are skipped for layout and paint.
+
+                This screen fetches up to a hundred shows, which is past the
+                point where mounting every row is free — each one decodes
+                artwork and computes a tint. `content-visibility` buys most of
+                what a windowed list would, without a windowed list: the whole
+                document stays present, so find-in-page still finds a show the
+                reader can't currently see, and the grouped sections keep their
+                real heights instead of needing a measured estimate.
+
+                `contain-intrinsic-size` is what keeps the scrollbar honest —
+                without it, unrendered rows measure as zero and the page grows
+                as you scroll into it.
+              */
+              <li
+                key={item.id}
+                style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 72px' }}
+              >
                 <ShowRow show={item} />
               </li>
             ))}

@@ -2,7 +2,7 @@
 
 import { playableFromEpisode } from '@cue/core';
 import type { Episode } from '@cue/types';
-import { motion } from 'motion/react';
+import * as m from 'motion/react-m';
 import { usePressScale, useTransition } from '@/lib/motion';
 import { usePlayerActions, usePlayerState } from '@/lib/player/store';
 
@@ -42,7 +42,7 @@ export function QueueButton({
   if (isCurrent) return null;
 
   return (
-    <motion.button
+    <m.button
       type="button"
       onClick={() => {
         if (queued) {
@@ -79,6 +79,6 @@ export function QueueButton({
         <path d="M4 7h11M4 12h11M4 17h7" />
         {queued ? <path d="M15 16.5 17.5 19l4.5-5" /> : <path d="M19 13v6M16 16h6" />}
       </svg>
-    </motion.button>
+    </m.button>
   );
 }

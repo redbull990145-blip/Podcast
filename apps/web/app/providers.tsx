@@ -3,6 +3,7 @@
 import { ApiClientError } from '@cue/api-client';
 import type { SupportedLocale } from '@cue/i18n';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { domAnimation, LazyMotion } from 'motion/react';
 import { useState, type ReactNode } from 'react';
 import { LocaleProvider } from '@/components/i18n/locale-provider';
 
@@ -84,7 +85,29 @@ export function Providers({
 
   return (
     <QueryClientProvider client={queryClient}>
-      <LocaleProvider locale={locale}>{children}</LocaleProvider>
+      {/*
+        Animation features, supplied once for the whole tree.
+
+        Components render `m.*` from `motion/react-m`, which is the element
+        wrapper with *no* behaviour compiled in; this is where the behaviour
+        comes from. The reason is bundle size: the full `motion` component
+        bundles every feature it might need, including the projection engine
+        that powers layout animation and drag. This app has no `layout` or
+        `layoutId` anywhere — the mini→full player is one persistent component
+        driven by a single value, deliberately, so nothing in the shell needs
+        projection at all. It was arriving anyway, on every route.
+
+        `domAnimation` is the subset actually used: transforms, opacity,
+        variants, gestures, exit animations. Drag and projection stay out, and
+        are pulled in only by the two routes that reorder a list — where the
+        cost lands on the route that asked for it.
+
+        Not `strict`: that mode throws on any full `motion` component rendered
+        inside, and `Reorder` on those two routes is built out of them.
+      */}
+      <LazyMotion features={domAnimation}>
+        <LocaleProvider locale={locale}>{children}</LocaleProvider>
+      </LazyMotion>
     </QueryClientProvider>
   );
 }

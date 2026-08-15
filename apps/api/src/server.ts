@@ -53,9 +53,11 @@ export async function buildServer(config: Config): Promise<FastifyInstance> {
         : { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss' } } }),
       redact: ['req.headers.authorization', 'req.headers.cookie'],
     },
-    // Trust the platform's proxy so `request.ip` is the caller, not the load
-    // balancer — otherwise every request rate-limits against one identifier.
-    trustProxy: config.isProduction,
+    // A hop count, never `true`. `true` trusts the whole X-Forwarded-For chain
+    // and returns its leftmost entry, which the caller writes — so `request.ip`
+    // becomes attacker-chosen and every IP-keyed limit is bypassed by rotating
+    // a header. See TRUST_PROXY_HOPS in config.ts.
+    trustProxy: config.trustProxy,
     // A podcast API takes URLs and search strings, never large uploads.
     bodyLimit: 256 * 1024,
   });

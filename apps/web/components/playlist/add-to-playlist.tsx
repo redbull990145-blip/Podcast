@@ -3,7 +3,8 @@
 import { queryKeys } from '@cue/api-client';
 import { PLAYLIST_TITLE_MAX } from '@cue/validation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence } from 'motion/react';
+import * as m from 'motion/react-m';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { api } from '@/lib/api';
@@ -121,7 +122,7 @@ function Sheet({ episodeId }: { episodeId: string }) {
   const [title, setTitle] = useState('');
 
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: -4 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -4 }}
@@ -202,6 +203,6 @@ function Sheet({ episodeId }: { episodeId: string }) {
           className="type-body min-h-11 w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[var(--color-text-primary)]"
         />
       </form>
-    </motion.div>
+    </m.div>
   );
 }

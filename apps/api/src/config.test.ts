@@ -46,6 +46,29 @@ describe('loadConfig', () => {
    * booting, with an error about string length that names neither the file nor
    * the fact that the value is simply blank.
    */
+  describe('proxy trust', () => {
+    it('trusts exactly one hop by default', () => {
+      // The default has to suit the deployment shape, because whoever forgets
+      // to set it is the person who most needs it to be right.
+      expect(loadConfig(minimal).trustProxy).toBe(1);
+    });
+
+    it('turns 0 into false rather than trusting zero hops of a header', () => {
+      // `trustProxy: 0` and `trustProxy: false` are not the same thing to
+      // Fastify. Zero is how someone spells "nothing is in front of me", and it
+      // has to reach Fastify as an instruction to ignore the headers outright.
+      expect(loadConfig({ ...minimal, TRUST_PROXY_HOPS: '0' }).trustProxy).toBe(false);
+    });
+
+    it('accepts a deeper chain for a CDN in front of a load balancer', () => {
+      expect(loadConfig({ ...minimal, TRUST_PROXY_HOPS: '2' }).trustProxy).toBe(2);
+    });
+
+    it('refuses a negative hop count', () => {
+      expect(() => loadConfig({ ...minimal, TRUST_PROXY_HOPS: '-1' })).toThrow(/TRUST_PROXY_HOPS/);
+    });
+  });
+
   describe('blank values', () => {
     it('starts with every optional variable left blank', () => {
       expect(() =>

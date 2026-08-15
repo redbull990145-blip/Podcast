@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "tokens": "node scripts/build-tokens.js",
     "icons": "node scripts/build-icons.js",
+    "budget": "node scripts/check-bundle.js",
     "prebuild": "node scripts/build-tokens.js",
     "test": "vitest run"
   },

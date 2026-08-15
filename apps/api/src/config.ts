@@ -62,6 +62,22 @@ const envSchema = z.object({
   CORS_ORIGINS: blankAsUnset(z.string().default('http://localhost:3000')),
 
   /**
+   * How many proxies sit in front of this API.
+   *
+   * This is a security control, not a formality. Fastify's `trustProxy: true`
+   * trusts the *entire* `X-Forwarded-For` chain and returns its leftmost entry —
+   * which is written by the caller, so `request.ip` becomes whatever they say
+   * it is, and every IP-keyed rate limit is bypassed by rotating a header. A
+   * hop count instead makes `proxy-addr` walk back exactly this many trusted
+   * hops and return the address the nearest trusted proxy actually observed.
+   *
+   * 1 is right for a single platform load balancer (Render, Koyeb, Fly). Behind
+   * Cloudflare *and* a platform LB it is 2. Set it to 0 when nothing proxies
+   * this server, so the socket address is used and headers are ignored entirely.
+   */
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(1),
+
+  /**
    * The operator's Groq key, which funds the free tier.
    *
    * Optional: without it the AI features still work, but only for users who
@@ -93,6 +109,8 @@ export type Config = {
   redis: { url: string; token: string } | null;
   podcastIndex: { key: string; secret: string } | null;
   corsOrigins: string[];
+  /** Hop count for `proxy-addr`, or `false` to ignore forwarding headers. */
+  trustProxy: number | false;
   authSecret: string;
   authUrl: string;
   ai: {
@@ -196,6 +214,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     corsOrigins: value.CORS_ORIGINS.split(',')
       .map((origin) => origin.trim())
       .filter(Boolean),
+    // 0 means "nothing in front of me" — express it as `false` so Fastify
+    // ignores forwarding headers rather than trusting zero hops of them.
+    trustProxy: value.TRUST_PROXY_HOPS === 0 ? false : value.TRUST_PROXY_HOPS,
     authSecret: value.BETTER_AUTH_SECRET ?? DEV_AUTH_SECRET,
     authUrl: value.BETTER_AUTH_URL ?? `http://localhost:${value.PORT}`,
     ai: {
