@@ -9,8 +9,10 @@ import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Artwork } from '@/components/artwork';
 import { ContinueListening } from '@/components/continue-listening';
+import { OfflineNotice } from '@/components/offline-notice';
 import { ScreenMessage } from '@/components/screen-message';
 import { api } from '@/lib/api';
+import { useOnline } from '@/lib/connectivity';
 import { usePlayerState } from '@/lib/player/store';
 import { TAB_BAR_HEIGHT, space, type, useTheme } from '@/theme';
 
@@ -25,6 +27,7 @@ export default function ListenScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const playing = usePlayerState().current !== null;
+  const online = useOnline();
 
   const { data, isPending, error, refetch, isRefetching } = useQuery({
     queryKey: queryKeys.podcast.list(),
@@ -44,12 +47,19 @@ export default function ListenScreen() {
       </View>
 
       {error ? (
-        <ScreenMessage
-          title="Couldn't reach the server"
-          // The LAN-address mistake is the overwhelmingly likely cause on a
-          // physical device, so the empty state says so rather than shrugging.
-          body="Set EXPO_PUBLIC_API_URL to your computer's LAN address — a phone resolves localhost to itself."
-        />
+        online ? (
+          <ScreenMessage
+            title="Couldn't reach the server"
+            // The LAN-address mistake is the overwhelmingly likely cause on a
+            // physical device, so the empty state says so rather than shrugging.
+            body="Set EXPO_PUBLIC_API_URL to your computer's LAN address — a phone resolves localhost to itself."
+          />
+        ) : (
+          // With no connection the server is not misconfigured, it is simply
+          // unreachable — and blaming an env var for a tunnel is how a working
+          // app sends someone to edit their setup.
+          <OfflineNotice />
+        )
       ) : null}
 
       {!error && isPending ? <ScreenMessage title="Loading…" /> : null}

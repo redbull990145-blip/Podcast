@@ -20,6 +20,7 @@ export const en = {
   'nav.queue': 'Queue',
   'nav.settings': 'Settings',
   'nav.player': 'Player',
+  'nav.downloads': 'Downloads',
 
   // --------------------------------------------------------------- common --
   'common.loading': 'Loading…',
@@ -118,6 +119,36 @@ export const en = {
   'queue.waiting': '{count, plural, =0 {Queue, empty} one {Queue, # waiting} other {Queue, # waiting}}',
   'queue.remove': 'Remove from queue',
   'queue.clear': 'Clear the queue',
+
+  // ------------------------------------------------------------ downloads --
+  'downloads.title': 'Downloads',
+  'downloads.save': 'Save for offline',
+  'downloads.saved': 'Saved to this device',
+  'downloads.remove': 'Remove the download',
+  'downloads.cancel': 'Stop downloading',
+  'downloads.retry': 'Try downloading again',
+  'downloads.waiting': 'Waiting',
+  'downloads.working': 'Downloading',
+  'downloads.failed': 'Didn’t save',
+  'downloads.empty': 'Nothing saved yet',
+  'downloads.emptyBody':
+    'Save an episode and it plays with no connection at all — on a plane, underground, or anywhere the signal goes.',
+  'downloads.usage': '{size} on this device',
+  'downloads.count': '{count, plural, one {# episode} other {# episodes}}',
+  'downloads.removeTitle': 'Remove the download of {title}',
+  'downloads.saveTitle': 'Save {title} for offline',
+  'downloads.pending': 'Waiting for a connection',
+
+  // -------------------------------------------------------------- offline --
+  'offline.banner': 'Offline — your downloads still play.',
+  'offline.bannerWeb': 'Offline — showing what was already loaded.',
+  'offline.pageBody':
+    'This page hasn’t been opened on this device yet, so there’s no copy of it to show. Anywhere you have already been still works.',
+  'offline.title': 'You’re offline',
+  'offline.body': 'Saved episodes play as normal. Everything else is waiting for a connection.',
+  'offline.openDownloads': 'Open downloads',
+  'offline.willSync': 'Where you got to in each episode syncs when you’re back.',
+  'offline.nothingSaved': 'Nothing is saved on this device yet, so there is nothing to play.',
 
   // ----------------------------------------------------------- transcript --
   'transcript.title': 'Transcript',

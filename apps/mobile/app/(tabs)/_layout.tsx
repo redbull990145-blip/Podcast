@@ -5,9 +5,11 @@ import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/components/icon';
 import { MiniPlayer } from '@/components/mini-player';
-import { hydrateQueue, setSyncState } from '@/lib/player/store';
+import { OfflineBanner } from '@/components/offline-banner';
+import { hydrateQueue, setSyncState, usePlayerState } from '@/lib/player/store';
 import { useSession } from '@/lib/session';
-import { TAB_BAR_HEIGHT, type, useTheme } from '@/theme';
+import { flushProgress } from '@/lib/sync/outbox';
+import { MINI_PLAYER_HEIGHT, TAB_BAR_HEIGHT, type, useTheme } from '@/theme';
 
 /**
  * The tab shell.
@@ -36,6 +38,7 @@ export default function TabsLayout() {
    * itself, so this is the one place that pushes it down.
    */
   const { isSignedIn, isLoading } = useSession();
+  const playing = usePlayerState().current !== null;
 
   useEffect(() => {
     // Stay `unknown` until the answer is real. Reporting "anonymous" while the
@@ -48,6 +51,20 @@ export default function TabsLayout() {
   useEffect(() => {
     if (!isSignedIn) return;
     void hydrateQueue();
+  }, [isSignedIn]);
+
+  /**
+   * Deliver anything held from a session spent offline.
+   *
+   * The outbox drains itself when the connection *changes*, which covers losing
+   * signal and getting it back inside one session. It does not cover the other
+   * shape: listen on a plane, close the app, land, reopen. Nothing changes on
+   * that launch — the phone simply has signal — so the flush has to be asked
+   * for once, here, where we also first learn there is an account to send to.
+   */
+  useEffect(() => {
+    if (!isSignedIn) return;
+    void flushProgress();
   }, [isSignedIn]);
 
   return (
@@ -106,6 +123,15 @@ export default function TabsLayout() {
       </Tabs>
 
       <MiniPlayer />
+
+      {/* Above the mini player rather than at the top of the screen: each tab
+          owns its own top inset, and a strip that appeared up there would push
+          three different layouts around. Down here it joins the chrome that is
+          already persistent, and is visible on every tab for the same reason
+          the mini player is. */}
+      <OfflineBanner
+        bottom={TAB_BAR_HEIGHT + insets.bottom + (playing ? MINI_PLAYER_HEIGHT + 8 : 0)}
+      />
     </View>
   );
 }

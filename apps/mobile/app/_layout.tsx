@@ -70,6 +70,10 @@ export default function RootLayout() {
               name="queue"
               options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
             />
+            <Stack.Screen
+              name="downloads"
+              options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+            />
             <Stack.Screen name="settings" options={{ presentation: 'modal' }} />
             <Stack.Screen name="signin" options={{ presentation: 'modal' }} />
           </Stack>

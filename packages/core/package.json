@@ -5,9 +5,11 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./download": "./src/download/index.ts",
     "./format": "./src/format/index.ts",
     "./library": "./src/library/index.ts",
-    "./player": "./src/player/index.ts"
+    "./player": "./src/player/index.ts",
+    "./sync": "./src/sync/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -14,6 +14,13 @@
       "runtimeArgs": ["run", "dev", "--workspace", "@cue/api"],
       "port": 8080,
       "autoPort": false
+    },
+    {
+      "name": "web-prod",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start", "--workspace", "@cue/web"],
+      "port": 3000,
+      "autoPort": false
     }
   ]
 }

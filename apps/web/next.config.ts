@@ -17,6 +17,40 @@ const config: NextConfig = {
   },
 
   typedRoutes: true,
+
+  async headers() {
+    return [
+      {
+        /**
+         * The worker script must never be served from the HTTP cache.
+         *
+         * A browser will otherwise hold it for up to a day, which means a
+         * caching policy — including a fix to one — takes a day to reach
+         * anybody. `updateViaCache: 'none'` on the registration covers the
+         * same ground from the other side; both are cheap and either alone is
+         * a single point of failure for every cache bug that follows.
+         */
+        source: '/sw.js',
+        headers: [
+          { key: 'Content-Type', value: 'application/javascript; charset=utf-8' },
+          { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
+          // A worker has the run of the origin, so it is worth being explicit
+          // that this one loads nothing from anywhere else.
+          { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self'" },
+        ],
+      },
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          // Nothing here is meant to be embedded. `SAMEORIGIN` rather than
+          // `DENY` so a future preview or dev tool can still frame it.
+          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+        ],
+      },
+    ];
+  },
 };
 
 export default config;

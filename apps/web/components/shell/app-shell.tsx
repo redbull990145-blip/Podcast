@@ -5,6 +5,8 @@ import { usePathname } from 'next/navigation';
 import { useEffect, type ReactNode } from 'react';
 import { useSession, useSignOut } from '@/lib/session';
 import { Player } from '@/components/player/player';
+import { OfflineBanner } from '@/components/pwa/offline-banner';
+import { ServiceWorker } from '@/components/pwa/service-worker';
 import { hydrateQueue, setSyncState } from '@/lib/player/store';
 import { NavIcon } from './nav-icon';
 import { useTranslator } from '@/components/i18n/locale-provider';
@@ -23,6 +25,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-dvh">
+      {/* Registered from the shell rather than the root layout: there is
+          nothing worth caching on the auth pages, and a worker claiming the
+          page mid-sign-in is a complication with no upside. */}
+      <ServiceWorker />
+      <OfflineBanner />
+
       <SidebarNav />
 
       {/* Left gutter on desktop clears the sidebar; bottom padding on mobile

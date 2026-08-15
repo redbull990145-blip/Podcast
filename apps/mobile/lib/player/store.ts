@@ -2,6 +2,8 @@ import { applyQueueMutation } from '@cue/api-client';
 import {
   PlayerMachine,
   playableFromQueueEntry,
+  preferLocal,
+  preferLocalAll,
   type PlayableEpisode,
   type PlaybackPreferences,
   type PlaybackRate,
@@ -13,6 +15,9 @@ import * as SecureStore from 'expo-secure-store';
 import { useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 import { api } from '@/lib/api';
+import { isOnline } from '@/lib/connectivity';
+import { currentDownloads, subscribeDownloads } from '@/lib/downloads/store';
+import { clearHeldProgress, holdProgress } from '@/lib/sync/outbox';
 import { NativeAudioEngine } from './native-engine';
 import { readPreferences, writePreferences } from './preferences';
 
@@ -118,18 +123,39 @@ function reportProgress(episodeId: string, record: ProgressRecord, force: boolea
   if (!force && now - lastWrite < PROGRESS_INTERVAL_MS) return;
   lastWrite = now;
 
+  const held = {
+    episodeId,
+    positionSec: record.positionSec,
+    durationSec: record.durationSec,
+    completed: record.completed,
+    deviceId: record.deviceId,
+    // The moment playback was here, not the moment it was sent. The server
+    // reconciles against other devices by this, so stamping it at send time
+    // would make an hour-old position look like the newest anyone reported and
+    // rewind a device that was genuinely ahead.
+    observedAt: record.updatedAt,
+  };
+
+  // Known offline: hold it rather than firing a request that cannot land. On a
+  // phone this is not an edge case — it is the tunnel, the lift, the flight.
+  if (!isOnline()) {
+    holdProgress(held);
+    return;
+  }
+
   void api
     .reportProgress(episodeId, {
-      positionSec: Math.round(record.positionSec),
-      durationSec: record.durationSec,
-      completed: record.completed,
-      deviceId: record.deviceId,
-      observedAt: record.updatedAt,
+      positionSec: Math.round(held.positionSec),
+      durationSec: held.durationSec,
+      completed: held.completed,
+      deviceId: held.deviceId,
+      observedAt: held.observedAt,
     })
     .catch(() => {
-      // A dropped progress write is not worth interrupting listening for — and
-      // on a phone, dropped is the normal case rather than the exception. The
-      // next write carries a later position anyway.
+      // Connectivity we believed in but did not have — a captive portal, a
+      // half-attached cell. Held for the next reconnect rather than dropped:
+      // this write is where someone's place in an episode lives.
+      holdProgress(held);
     });
 }
 
@@ -180,7 +206,50 @@ export function getPlayer(): PlayerMachine {
     if (next === 'background' || next === 'inactive') flushProgress();
   });
 
+  watchDownloads(machine);
+
   return machine;
+}
+
+/**
+ * Point queued episodes at their files as they finish downloading.
+ *
+ * The ordinary case is handled where episodes enter the player: everything is
+ * resolved against the index on the way in. The case that needs this is the
+ * other order — queue four episodes, *then* download them, then get on a train.
+ * Those queue entries are holding publisher URLs, and without this the player
+ * would stream episodes that are already on the device.
+ *
+ * `hydrateQueue` rather than a reorder: it replaces the queue without echoing
+ * the change back to the server, which is right, because nothing about the
+ * queue has actually changed — only where each episode is read from.
+ */
+function watchDownloads(player: PlayerMachine): void {
+  // Only completions matter, and they are rare. Comparing a signature keeps a
+  // progress tick four times a second from rewriting the queue.
+  let lastSaved = '';
+
+  subscribeDownloads(() => {
+    const index = currentDownloads();
+    const signature = Object.values(index)
+      .filter((record) => record.status === 'complete')
+      .map((record) => record.episodeId)
+      .sort()
+      .join(',');
+
+    if (signature === lastSaved) return;
+    lastSaved = signature;
+
+    const queue = player.getState().queue;
+    if (queue.length === 0) return;
+
+    // `preferLocal` returns the very same episode when there is nothing to
+    // swap, so identity is an exact test for "would this change anything".
+    const resolved = preferLocalAll(queue, index);
+    if (resolved.every((episode, position) => episode === queue[position])) return;
+
+    player.hydrateQueue(resolved);
+  });
 }
 
 function flushProgress(): void {
@@ -254,6 +323,11 @@ export const playerActions = {
   play: async (episode: PlayableEpisode) => {
     const player = getPlayer();
 
+    // Play the copy on disk when there is one. Done here rather than inside the
+    // machine so the player stays unaware that downloads exist — it is handed
+    // an episode and a URL, and where that URL points is not its problem.
+    const source = preferLocal(episode, currentDownloads());
+
     // Resume where this listener left off, reconciled server-side. There is
     // nothing stored for an anonymous listener, so the lookup is skipped
     // rather than sent and refused.
@@ -271,12 +345,13 @@ export const playerActions = {
           };
         }
       } catch {
-        // The request failed. Starting from the beginning is the right
-        // fallback — better than refusing to play.
+        // Offline, or the request failed. Starting from wherever this device
+        // last knew about is the right fallback — better than refusing to play
+        // an episode that is sitting on the handset.
       }
     }
 
-    await player.play(episode, resumeFrom);
+    await player.play(source, resumeFrom);
   },
   toggle: () => void getPlayer().toggle(),
   pause: () => getPlayer().pause(),
@@ -293,8 +368,12 @@ export const playerActions = {
   },
   setSleepTimer: (minutes: number | null) => getPlayer().setSleepTimer(minutes),
   next: () => void getPlayer().next(),
-  enqueue: (...episodes: PlayableEpisode[]) => getPlayer().enqueue(...episodes),
-  playNext: (episode: PlayableEpisode) => getPlayer().playNext(episode),
+  // Resolved on the way in, so an episode that was already saved plays from
+  // disk when the queue reaches it — including with no connection left.
+  enqueue: (...episodes: PlayableEpisode[]) =>
+    getPlayer().enqueue(...preferLocalAll(episodes, currentDownloads())),
+  playNext: (episode: PlayableEpisode) =>
+    getPlayer().playNext(preferLocal(episode, currentDownloads())),
   removeFromQueue: (episodeId: string) => getPlayer().removeFromQueue(episodeId),
   reorderQueue: (episodeIds: string[]) => getPlayer().reorderQueue(episodeIds),
   clearQueue: () => getPlayer().clearQueue(),
@@ -331,7 +410,9 @@ export async function hydrateQueue(): Promise<void> {
 
   try {
     const { items } = await api.getQueue();
-    getPlayer().hydrateQueue(items.map(playableFromQueueEntry));
+    getPlayer().hydrateQueue(
+      preferLocalAll(items.map(playableFromQueueEntry), currentDownloads()),
+    );
   } catch {
     // Signed out or offline. An empty local queue is the right fallback, and
     // the next launch will try again.
@@ -353,4 +434,9 @@ export async function hydrateQueue(): Promise<void> {
 export function resetQueue(): void {
   hydrated = false;
   getPlayer().hydrateQueue([]);
+
+  // Held positions belonged to the person who just left. Flushing them after
+  // the next sign-in would write their listening history onto someone else's
+  // account — signing out is not a reason to sync harder.
+  clearHeldProgress();
 }

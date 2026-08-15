@@ -20,6 +20,7 @@ export const hi: Catalog = {
   'nav.queue': 'कतार',
   'nav.settings': 'सेटिंग्ज़',
   'nav.player': 'प्लेयर',
+  'nav.downloads': 'डाउनलोड',
 
   'common.loading': 'लोड हो रहा है…',
   'common.retry': 'फिर कोशिश करें',
@@ -110,6 +111,35 @@ export const hi: Catalog = {
     '{count, plural, =0 {कतार खाली है} one {कतार, # इंतज़ार में} other {कतार, # इंतज़ार में}}',
   'queue.remove': 'कतार से हटाएँ',
   'queue.clear': 'कतार खाली करें',
+
+  'downloads.title': 'डाउनलोड',
+  'downloads.save': 'ऑफ़लाइन के लिए सहेजें',
+  'downloads.saved': 'इस डिवाइस पर सहेजा गया',
+  'downloads.remove': 'डाउनलोड हटाएँ',
+  'downloads.cancel': 'डाउनलोड रोकें',
+  'downloads.retry': 'डाउनलोड फिर से आज़माएँ',
+  'downloads.waiting': 'प्रतीक्षा में',
+  'downloads.working': 'डाउनलोड हो रहा है',
+  'downloads.failed': 'सहेजा नहीं गया',
+  'downloads.empty': 'अभी कुछ सहेजा नहीं गया',
+  'downloads.emptyBody':
+    'कोई एपिसोड सहेज लें और वह बिना किसी कनेक्शन के चलेगा — हवाई जहाज़ में, मेट्रो में, या जहाँ भी सिग्नल चला जाए।',
+  'downloads.usage': 'इस डिवाइस पर {size}',
+  'downloads.count': '{count, plural, one {# एपिसोड} other {# एपिसोड}}',
+  'downloads.removeTitle': '{title} का डाउनलोड हटाएँ',
+  'downloads.saveTitle': '{title} को ऑफ़लाइन के लिए सहेजें',
+  'downloads.pending': 'कनेक्शन की प्रतीक्षा में',
+
+  'offline.banner': 'ऑफ़लाइन — आपके डाउनलोड अब भी चलते हैं।',
+  'offline.bannerWeb': 'ऑफ़लाइन — जो पहले से लोड था वही दिखाया जा रहा है।',
+  'offline.pageBody':
+    'यह पेज इस डिवाइस पर अभी तक खोला नहीं गया, इसलिए दिखाने के लिए कोई प्रति नहीं है। जहाँ आप पहले जा चुके हैं, वह अब भी काम करता है।',
+  'offline.title': 'आप ऑफ़लाइन हैं',
+  'offline.body':
+    'सहेजे गए एपिसोड सामान्य रूप से चलते हैं। बाकी सब कनेक्शन लौटने का इंतज़ार कर रहा है।',
+  'offline.openDownloads': 'डाउनलोड खोलें',
+  'offline.willSync': 'हर एपिसोड में आप कहाँ तक पहुँचे, यह वापस आने पर सिंक हो जाएगा।',
+  'offline.nothingSaved': 'इस डिवाइस पर अभी कुछ सहेजा नहीं गया, इसलिए चलाने को कुछ नहीं है।',
 
   'transcript.title': 'ट्रांसक्रिप्ट',
   'transcript.read': 'ट्रांसक्रिप्ट पढ़ें',

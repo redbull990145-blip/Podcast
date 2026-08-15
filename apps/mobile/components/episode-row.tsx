@@ -4,6 +4,7 @@ import type { Episode } from '@cue/types';
 import { Link } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Artwork } from '@/components/artwork';
+import { DownloadButton } from '@/components/download-button';
 import { PlayButton } from '@/components/play-button';
 import { QueueButton } from '@/components/queue-button';
 import { usePlayerState } from '@/lib/player/store';
@@ -71,6 +72,7 @@ export function EpisodeRow({
         </Pressable>
       </Link>
 
+      <DownloadButton episode={playable} />
       <QueueButton episode={playable} />
       <PlayButton episode={playable} />
     </View>

@@ -5,6 +5,7 @@ import type { SessionUser } from '@cue/types';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { api } from './api';
+import { purgeCachedData } from './connectivity';
 import { resetQueue, setSyncState } from './player/store';
 
 /**
@@ -47,6 +48,9 @@ export function useSignOut() {
       // The queue lives in the player, not the cache, so it survives the line
       // above and has to be dropped by name.
       resetQueue();
+      // And the service worker holds its own copy of every API response it has
+      // seen, which outlives the tab entirely — the same leak, one layer down.
+      purgeCachedData();
       // Said here rather than left to the shell's effect: clearing the cache
       // puts the session query back into `isPending`, and the shell holds its
       // last answer while a query is in flight. Without this the player would

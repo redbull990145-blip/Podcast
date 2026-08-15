@@ -12,8 +12,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Artwork } from '@/components/artwork';
 import { Button } from '@/components/button';
 import { Icon } from '@/components/icon';
+import { OfflineNotice } from '@/components/offline-notice';
 import { ScreenMessage } from '@/components/screen-message';
 import { api } from '@/lib/api';
+import { useOnline } from '@/lib/connectivity';
+import { useDownloadIndex } from '@/lib/downloads/store';
 import { usePlayerState } from '@/lib/player/store';
 import { useSession } from '@/lib/session';
 import { TAB_BAR_HEIGHT, radius, space, type, useTheme } from '@/theme';
@@ -32,6 +35,11 @@ export default function LibraryScreen() {
   const router = useRouter();
   const { isSignedIn, isLoading: sessionLoading } = useSession();
   const playing = usePlayerState().current !== null;
+  const online = useOnline();
+
+  // Downloads belong to the handset, not the account, so this is counted even
+  // when signed out — an episode saved before signing out is still on the phone.
+  const savedCount = Object.keys(useDownloadIndex()).length;
 
   const { data, isPending, error } = useQuery({
     queryKey: queryKeys.library.subscriptions(),
@@ -63,18 +71,36 @@ export default function LibraryScreen() {
     <View style={styles.header}>
       <Text style={[type('title1'), { color: theme.textPrimary }]}>{t.t('library.title')}</Text>
 
-      {/* Settings lives here rather than in the tab bar: it is not a place you
-          go to find something to listen to, and Library is the screen whose
-          contents depend on being signed in. */}
-      <Pressable
-        onPress={() => router.push('/settings')}
-        accessibilityRole="button"
-        accessibilityLabel={t.t('nav.settings')}
-        hitSlop={space[3]}
-        style={styles.settings}
-      >
-        <Icon path={icon.settings} size={22} color={theme.textSecondary} />
-      </Pressable>
+      <View style={styles.headerActions}>
+        {/* Downloads belongs beside the library rather than in the tab bar:
+            it is the same idea — your things — and a fourth tab that is empty
+            until someone saves an episode is chrome advertising a feature they
+            have not reached. It appears only once there is something in it. */}
+        {savedCount > 0 ? (
+          <Pressable
+            onPress={() => router.push('/downloads')}
+            accessibilityRole="button"
+            accessibilityLabel={t.t('downloads.title')}
+            hitSlop={space[3]}
+            style={styles.settings}
+          >
+            <Icon path={icon.downloaded} size={22} color={theme.textSecondary} />
+          </Pressable>
+        ) : null}
+
+        {/* Settings lives here rather than in the tab bar: it is not a place you
+            go to find something to listen to, and Library is the screen whose
+            contents depend on being signed in. */}
+        <Pressable
+          onPress={() => router.push('/settings')}
+          accessibilityRole="button"
+          accessibilityLabel={t.t('nav.settings')}
+          hitSlop={space[3]}
+          style={styles.settings}
+        >
+          <Icon path={icon.settings} size={22} color={theme.textSecondary} />
+        </Pressable>
+      </View>
     </View>
   );
 
@@ -97,11 +123,16 @@ export default function LibraryScreen() {
     <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
       {header}
 
+      {/* A failed request has two very different meanings, and only one of them
+          is a fault. Offline is a situation with an answer — the downloads on
+          this handset — so it gets its own state rather than being reported as
+          a library that could not be loaded. */}
       {error ? (
-        <ScreenMessage
-          title={t.t('library.failed')}
-          body={t.t('common.checkConnection')}
-        />
+        online ? (
+          <ScreenMessage title={t.t('library.failed')} body={t.t('common.checkConnection')} />
+        ) : (
+          <OfflineNotice />
+        )
       ) : null}
 
       {!error && (isPending || sessionLoading) ? <ScreenMessage title={t.t('common.loading')} /> : null}
@@ -225,6 +256,7 @@ const styles = StyleSheet.create({
     paddingTop: space[6],
     paddingBottom: space[4],
   },
+  headerActions: { flexDirection: 'row', alignItems: 'center' },
   settings: { padding: space[2] },
   // Top margin rather than a gap on a container: the group separation now has
   // to be carried by the heading itself, since there is no wrapper any more.

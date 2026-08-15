@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "tokens": "node scripts/build-tokens.js",
+    "icons": "node scripts/build-icons.js",
     "prebuild": "node scripts/build-tokens.js",
     "test": "vitest run"
   },
@@ -19,6 +20,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "eslint-config-next": "^16.3.0",
+    "sharp": "^0.35.3",
     "tailwindcss": "^4.3.3",
     "vitest": "^4.1.10"
   },

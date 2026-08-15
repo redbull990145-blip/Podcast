@@ -33,6 +33,24 @@ export const icon = {
   chevronDown: 'M6 9.5 12 15.5l6-6',
   check: 'M5 12.5 9.5 17 19 7.5',
   plus: 'M12 5v14M5 12h14',
+
+  /** An arrow coming down onto a shelf — arriving on the device, not leaving. */
+  download: 'M12 4v10.5M7.5 10 12 14.5 16.5 10M5 19.5h14',
+  /**
+   * The same shelf with the arrow already landed, as a tick.
+   *
+   * Deliberately built from `download`'s bottom line rather than reusing
+   * `check`: a download button that swaps a distinct glyph for a bare tick
+   * reads as two unrelated controls, where keeping the shelf makes it obvious
+   * the state changed rather than the button.
+   */
+  downloaded: 'M8 10.7 11 13.7 16.5 7.5M5 19.5h14',
+  /** Signal arcs with a line through them. */
+  offline: 'M2.5 8.5a15.5 15.5 0 0 1 6-3.6M15.5 5A15.5 15.5 0 0 1 21.5 8.5M6 12.3a10 10 0 0 1 3-1.8M15.5 11a10 10 0 0 1 2.5 1.3M9.5 16.1a5 5 0 0 1 5 0M3 3l18 18',
+  /** A bin: the only destructive action in the app, and it should look like it. */
+  trash: 'M4.5 6.5h15M9.5 6.5V4.5h5v2M7 6.5l.9 12.2a1 1 0 0 0 1 .8h6.2a1 1 0 0 0 1-.8l.9-12.2',
+  /** A cross, for stopping something already under way. */
+  close: 'M6 6l12 12M18 6 6 18',
 } as const satisfies Record<string, IconPath>;
 
 export type IconToken = keyof typeof icon;

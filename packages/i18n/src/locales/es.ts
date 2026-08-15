@@ -16,6 +16,7 @@ export const es: Catalog = {
   'nav.queue': 'Cola',
   'nav.settings': 'Ajustes',
   'nav.player': 'Reproductor',
+  'nav.downloads': 'Descargas',
 
   'common.loading': 'Cargando…',
   'common.retry': 'Reintentar',
@@ -107,6 +108,36 @@ export const es: Catalog = {
     '{count, plural, =0 {Cola, vacía} one {Cola, # en espera} other {Cola, # en espera}}',
   'queue.remove': 'Quitar de la cola',
   'queue.clear': 'Vaciar la cola',
+
+  'downloads.title': 'Descargas',
+  'downloads.save': 'Guardar sin conexión',
+  'downloads.saved': 'Guardado en este dispositivo',
+  'downloads.remove': 'Eliminar la descarga',
+  'downloads.cancel': 'Detener la descarga',
+  'downloads.retry': 'Volver a intentar la descarga',
+  'downloads.waiting': 'En espera',
+  'downloads.working': 'Descargando',
+  'downloads.failed': 'No se guardó',
+  'downloads.empty': 'Todavía no hay nada guardado',
+  'downloads.emptyBody':
+    'Guarda un episodio y se reproduce sin ninguna conexión: en un avión, en el metro o donde se caiga la señal.',
+  'downloads.usage': '{size} en este dispositivo',
+  'downloads.count': '{count, plural, one {# episodio} other {# episodios}}',
+  'downloads.removeTitle': 'Eliminar la descarga de {title}',
+  'downloads.saveTitle': 'Guardar {title} sin conexión',
+  'downloads.pending': 'Esperando una conexión',
+
+  'offline.banner': 'Sin conexión: tus descargas se siguen reproduciendo.',
+  'offline.bannerWeb': 'Sin conexión: mostrando lo que ya se había cargado.',
+  'offline.pageBody':
+    'Esta página todavía no se ha abierto en este dispositivo, así que no hay copia que mostrar. Todo donde ya has estado sigue funcionando.',
+  'offline.title': 'Estás sin conexión',
+  'offline.body':
+    'Los episodios guardados se reproducen con normalidad. Todo lo demás espera a que vuelva la conexión.',
+  'offline.openDownloads': 'Abrir descargas',
+  'offline.willSync': 'Dónde te quedaste en cada episodio se sincroniza al volver.',
+  'offline.nothingSaved':
+    'Aún no hay nada guardado en este dispositivo, así que no hay nada que reproducir.',
 
   'transcript.title': 'Transcripción',
   'transcript.read': 'Leer la transcripción',

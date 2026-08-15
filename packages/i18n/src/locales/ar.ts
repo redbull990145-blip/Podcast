@@ -23,6 +23,7 @@ export const ar: Catalog = {
   'nav.queue': 'قائمة التشغيل',
   'nav.settings': 'الإعدادات',
   'nav.player': 'المشغّل',
+  'nav.downloads': 'التنزيلات',
 
   'common.loading': 'جارٍ التحميل…',
   'common.retry': 'أعد المحاولة',
@@ -115,6 +116,35 @@ export const ar: Catalog = {
     '{count, plural, =0 {القائمة فارغة} one {القائمة، حلقة واحدة في الانتظار} two {القائمة، حلقتان في الانتظار} few {القائمة، # حلقات في الانتظار} many {القائمة، # حلقة في الانتظار} other {القائمة، # حلقة في الانتظار}}',
   'queue.remove': 'أزل من القائمة',
   'queue.clear': 'أفرغ القائمة',
+
+  'downloads.title': 'التنزيلات',
+  'downloads.save': 'حفظ للاستماع دون اتصال',
+  'downloads.saved': 'محفوظة على هذا الجهاز',
+  'downloads.remove': 'إزالة التنزيل',
+  'downloads.cancel': 'إيقاف التنزيل',
+  'downloads.retry': 'إعادة محاولة التنزيل',
+  'downloads.waiting': 'في الانتظار',
+  'downloads.working': 'جارٍ التنزيل',
+  'downloads.failed': 'لم يتم الحفظ',
+  'downloads.empty': 'لا شيء محفوظ بعد',
+  'downloads.emptyBody':
+    'احفظ حلقة لتعمل دون أي اتصال — في الطائرة أو مترو الأنفاق أو أي مكان تنقطع فيه الإشارة.',
+  'downloads.usage': '{size} على هذا الجهاز',
+  'downloads.count':
+    '{count, plural, zero {لا حلقات} one {حلقة واحدة} two {حلقتان} few {# حلقات} many {# حلقة} other {# حلقة}}',
+  'downloads.removeTitle': 'إزالة تنزيل {title}',
+  'downloads.saveTitle': 'حفظ {title} للاستماع دون اتصال',
+  'downloads.pending': 'في انتظار الاتصال',
+
+  'offline.banner': 'دون اتصال — تنزيلاتك ما زالت تعمل.',
+  'offline.bannerWeb': 'دون اتصال — نعرض ما سبق تحميله.',
+  'offline.pageBody':
+    'لم تُفتح هذه الصفحة على هذا الجهاز بعد، فلا توجد نسخة منها لعرضها. وكل ما زرته من قبل ما زال يعمل.',
+  'offline.title': 'أنت دون اتصال',
+  'offline.body': 'الحلقات المحفوظة تعمل كالمعتاد. وكل ما عداها ينتظر عودة الاتصال.',
+  'offline.openDownloads': 'فتح التنزيلات',
+  'offline.willSync': 'موضعك في كل حلقة سيُزامَن عند عودتك.',
+  'offline.nothingSaved': 'لا شيء محفوظ على هذا الجهاز بعد، فلا يوجد ما يمكن تشغيله.',
 
   'transcript.title': 'النص',
   'transcript.read': 'اقرأ النص',

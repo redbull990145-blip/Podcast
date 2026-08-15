@@ -9,6 +9,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Artwork } from '@/components/artwork';
 import { Button } from '@/components/button';
+import { DownloadButton } from '@/components/download-button';
 import { Icon } from '@/components/icon';
 import { PlayButton } from '@/components/play-button';
 import { QueueButton } from '@/components/queue-button';
@@ -155,6 +156,7 @@ export default function EpisodeScreen() {
         <View style={styles.actions}>
           <PlayButton episode={playable} size={52} />
           <QueueButton episode={playable} />
+          <DownloadButton episode={playable} />
         </View>
 
         {/* Above the notes rather than below them: this is the short version,

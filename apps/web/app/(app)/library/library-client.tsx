@@ -11,6 +11,7 @@ import { useMemo } from 'react';
 import { Artwork } from '@/components/media/artwork';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
+import { useOnline } from '@/lib/connectivity';
 import { useSession } from '@/lib/session';
 
 /**
@@ -23,6 +24,7 @@ import { useSession } from '@/lib/session';
  */
 export function LibraryClient() {
   const t = useTranslator();
+  const online = useOnline();
   const { isSignedIn, isLoading: sessionLoading } = useSession();
 
   const { data, isPending, error } = useQuery({
@@ -47,12 +49,14 @@ export function LibraryClient() {
     );
   }
 
+  // A failed request has two meanings and only one of them is a fault. With no
+  // connection there is nothing wrong to report — the library is simply behind
+  // a network that is not there, and saying so beats blaming the server.
   if (error) {
-    return (
-      <Empty
-        heading={t.t('library.failed')}
-        body={t.t('common.offline')}
-      />
+    return online ? (
+      <Empty heading={t.t('library.failed')} body={t.t('common.offline')} />
+    ) : (
+      <Empty heading={t.t('offline.title')} body={t.t('offline.pageBody')} />
     );
   }
 
