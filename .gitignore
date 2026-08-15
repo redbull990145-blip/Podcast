@@ -39,6 +39,10 @@ expo-env.d.ts
 coverage/
 .vitest/
 
+# local PGlite dev database — a real on-disk Postgres, not a fixture;
+# never belongs in git (see .pglite-dev leak, commit 01ded196)
+.pglite-dev/
+
 # logs
 *.log
 npm-debug.log*
