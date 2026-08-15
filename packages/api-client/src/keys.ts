@@ -29,6 +29,21 @@ export const queryKeys = {
    */
   queue: ['queue'] as const,
 
+  playlists: {
+    all: ['playlists'] as const,
+    list: () => ['playlists', 'list'] as const,
+    detail: (id: string) => ['playlists', id] as const,
+    /**
+     * Which playlists hold a given episode.
+     *
+     * Under `playlists` rather than under the episode, because adding to one
+     * invalidates *this* answer for every episode — and invalidating
+     * `['playlists']` after any change is then correct without anyone naming
+     * the membership queries individually.
+     */
+    containing: (episodeId: string) => ['playlists', 'containing', episodeId] as const,
+  },
+
   podcast: {
     all: ['podcast'] as const,
     list: () => ['podcast', 'list'] as const,

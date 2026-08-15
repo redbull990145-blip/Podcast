@@ -23,6 +23,7 @@ import { aiRoutes } from './routes/ai.ts';
 import { healthRoutes } from './routes/health.ts';
 import { libraryRoutes } from './routes/library.ts';
 import { playbackRoutes } from './routes/playback.ts';
+import { playlistRoutes } from './routes/playlists.ts';
 import { podcastRoutes } from './routes/podcasts.ts';
 import { profileRoutes } from './routes/profile.ts';
 import { transcriptRoutes } from './routes/transcripts.ts';
@@ -112,6 +113,7 @@ export async function buildServer(config: Config): Promise<FastifyInstance> {
   podcastRoutes(app);
   libraryRoutes(app);
   playbackRoutes(app);
+  playlistRoutes(app);
   transcriptRoutes(app);
   aiRoutes(app);
   profileRoutes(app);

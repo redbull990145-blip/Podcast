@@ -135,8 +135,23 @@ export class PlayerMachine {
    * to start lives in one tested place rather than at each call site.
    */
   async play(episode: PlayableEpisode, resumeFrom: ProgressRecord | null = null): Promise<void> {
-    const startAt = resumePosition(resumeFrom);
+    await this.start(episode, resumePosition(resumeFrom));
+  }
 
+  /**
+   * Play from an exact point.
+   *
+   * Separate from `play` because a shared timestamp is an instruction, not a
+   * resume. The resume rules deliberately drop back a few seconds and treat a
+   * position near the start as never having begun — both right when picking up
+   * your own listening, and both wrong when somebody has said "listen from
+   * 24:31" and 24:31 is where they meant.
+   */
+  async playAt(episode: PlayableEpisode, positionSec: number): Promise<void> {
+    await this.start(episode, Math.max(0, positionSec));
+  }
+
+  private async start(episode: PlayableEpisode, startAt: number): Promise<void> {
     this.set({
       status: 'loading',
       current: episode,

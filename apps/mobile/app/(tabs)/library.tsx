@@ -72,6 +72,19 @@ export default function LibraryScreen() {
       <Text style={[type('title1'), { color: theme.textPrimary }]}>{t.t('library.title')}</Text>
 
       <View style={styles.headerActions}>
+        {/* Playlists live beside the library for the same reason downloads do:
+            they are your things rather than a fourth place to look for
+            something to listen to. */}
+        <Pressable
+          onPress={() => router.push('/playlists')}
+          accessibilityRole="button"
+          accessibilityLabel={t.t('playlists.title')}
+          hitSlop={space[3]}
+          style={styles.settings}
+        >
+          <Icon path={icon.queue} size={22} color={theme.textSecondary} />
+        </Pressable>
+
         {/* Downloads belongs beside the library rather than in the tab bar:
             it is the same idea — your things — and a fourth tab that is empty
             until someone saves an episode is chrome advertising a feature they

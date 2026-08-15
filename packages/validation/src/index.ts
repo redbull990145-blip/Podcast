@@ -29,4 +29,24 @@ export type {
 export { aiLanguageQuery, apiKeyInput, askInput, QUESTION_MAX } from './ai.ts';
 export type { ApiKeyInput, AskInput } from './ai.ts';
 
+export {
+  addToPlaylistInput,
+  createPlaylistInput,
+  PLAYLIST_DESCRIPTION_MAX,
+  PLAYLIST_ITEMS_MAX,
+  PLAYLIST_MAX,
+  PLAYLIST_TITLE_MAX,
+  playlistDescription,
+  playlistTitle,
+  reorderPlaylistInput,
+  updatePlaylistInput,
+} from './playlist.ts';
+
+export type {
+  AddToPlaylistInput,
+  CreatePlaylistInput,
+  ReorderPlaylistInput,
+  UpdatePlaylistInput,
+} from './playlist.ts';
+
 export { formatFieldErrors } from './errors.ts';

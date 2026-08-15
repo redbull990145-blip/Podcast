@@ -5,8 +5,10 @@ import type { Metadata } from 'next';
 import type { Route } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { Suspense } from 'react';
 import { AiPanel } from '@/components/ai/ai-panel';
 import { EpisodeActions } from '@/components/episode/episode-actions';
+import { SharedTimestamp } from '@/components/episode/shared-timestamp';
 import { ShowNotes } from '@/components/episode/show-notes';
 import { TranscriptPanel } from '@/components/transcript/transcript-panel';
 import { Artwork } from '@/components/media/artwork';
@@ -114,7 +116,21 @@ export default async function EpisodePage({ params }: Params) {
               ) : null}
             </p>
 
+            {/* A shared link arrives with `?t=`, which is a search param, and
+                reading one bails this statically-rendered page out of its
+                shell unless it sits behind its own boundary. Suspense keeps
+                the rest of the page prerendered. */}
             <div className="mt-5">
+              <Suspense fallback={null}>
+                <SharedTimestamp
+                  episode={episode}
+                  podcastTitle={podcast.title}
+                  podcastArtworkUrl={podcast.artworkUrl}
+                  accentColor={podcast.accentColor}
+                  {...(tint ? { tint: tint.fill } : {})}
+                />
+              </Suspense>
+
               <EpisodeActions
                 episode={episode}
                 podcastTitle={podcast.title}

@@ -287,6 +287,38 @@ describe('queue', () => {
   });
 });
 
+describe('playAt', () => {
+  it('starts exactly where it was told, not where the resume rules would', async () => {
+    // `play` with a record at 1471 would rewind five seconds. A shared link is
+    // an instruction rather than a resume, and 24:31 means 24:31.
+    await machine.playAt(episode('a'), 1471);
+
+    expect(engine.loaded).toEqual({ url: 'https://cdn.example.com/a.mp3', startAt: 1471 });
+    expect(machine.getState().positionSec).toBe(1471);
+  });
+
+  it('does not treat an early position as never having started', async () => {
+    // `resumePosition` sends anything under ten seconds back to zero. A link
+    // that says "from 0:12" has to land on 0:12.
+    await machine.playAt(episode('a'), 12);
+
+    expect(engine.loaded?.startAt).toBe(12);
+  });
+
+  it('refuses a negative position rather than handing it to the engine', async () => {
+    await machine.playAt(episode('a'), -30);
+
+    expect(engine.loaded?.startAt).toBe(0);
+  });
+
+  it('still applies the saved playback speed', async () => {
+    machine.setRate(1.5);
+    await machine.playAt(episode('a'), 900);
+
+    expect(engine.rate).toBe(1.5);
+  });
+});
+
 describe('sleep timer', () => {
   it('stops playback once the deadline passes', async () => {
     await machine.play(episode('a'));

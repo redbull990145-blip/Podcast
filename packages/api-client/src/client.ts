@@ -19,6 +19,8 @@ import type {
   Episode,
   LibraryPodcast,
   Page,
+  Playlist,
+  PlaylistDetail,
   Podcast,
   PodcastSearchResult,
   QueueEntry,
@@ -297,6 +299,75 @@ export function createClient(options: ClientOptions) {
 
     clearQueue(): Promise<{ cleared: boolean }> {
       return request('/me/queue', { method: 'DELETE' });
+    },
+
+    // ----------------------------------------------------------- playlists --
+
+    listPlaylists(
+      params: { cursor?: Cursor | null; limit?: number } = {},
+    ): Promise<Page<Playlist>> {
+      return request('/me/playlists', {
+        query: { cursor: params.cursor, limit: params.limit },
+      });
+    },
+
+    /** A playlist with its episodes, in order. */
+    getPlaylist(id: string): Promise<{ playlist: PlaylistDetail }> {
+      return request(`/me/playlists/${id}`);
+    },
+
+    createPlaylist(input: {
+      title: string;
+      description?: string | null;
+    }): Promise<{ playlist: Playlist }> {
+      return request('/me/playlists', { method: 'POST', body: input });
+    },
+
+    /**
+     * Rename or re-describe. Both fields optional and independent — sending
+     * only a title must not blank a description that was already there.
+     */
+    updatePlaylist(
+      id: string,
+      input: { title?: string; description?: string | null },
+    ): Promise<{ playlist: Playlist }> {
+      return request(`/me/playlists/${id}`, { method: 'PATCH', body: input });
+    },
+
+    deletePlaylist(id: string): Promise<{ deleted: boolean }> {
+      return request(`/me/playlists/${id}`, { method: 'DELETE' });
+    },
+
+    addToPlaylist(
+      playlistId: string,
+      episodeId: string,
+      position: 'start' | 'end' = 'end',
+    ): Promise<{ added: boolean }> {
+      return request(`/me/playlists/${playlistId}/items`, {
+        method: 'POST',
+        body: { episodeId, position },
+      });
+    },
+
+    removeFromPlaylist(playlistId: string, episodeId: string): Promise<{ removed: boolean }> {
+      return request(`/me/playlists/${playlistId}/items/${episodeId}`, { method: 'DELETE' });
+    },
+
+    reorderPlaylist(playlistId: string, episodeIds: string[]): Promise<{ reordered: number }> {
+      return request(`/me/playlists/${playlistId}/order`, {
+        method: 'PUT',
+        body: { episodeIds },
+      });
+    },
+
+    /**
+     * Which playlists already hold this episode.
+     *
+     * One request for the whole answer, so an "add to playlist" sheet shows its
+     * ticks the moment it opens rather than firing a membership check per row.
+     */
+    playlistsContaining(episodeId: string): Promise<{ playlistIds: string[] }> {
+      return request(`/me/playlists/containing/${episodeId}`);
     },
 
     /**

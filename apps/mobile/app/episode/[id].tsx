@@ -1,5 +1,5 @@
 import { queryKeys, staleTime } from '@cue/api-client';
-import { playableFromEpisode } from '@cue/core';
+import { formatTimestamp, parseShareTime, playableFromEpisode } from '@cue/core';
 import { useTranslator } from '@/lib/i18n';
 import { deriveTint, icon } from '@cue/design';
 import { useQuery } from '@tanstack/react-query';
@@ -7,6 +7,7 @@ import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AddToPlaylist } from '@/components/add-to-playlist';
 import { Artwork } from '@/components/artwork';
 import { Button } from '@/components/button';
 import { DownloadButton } from '@/components/download-button';
@@ -14,9 +15,10 @@ import { Icon } from '@/components/icon';
 import { PlayButton } from '@/components/play-button';
 import { QueueButton } from '@/components/queue-button';
 import { ScreenMessage } from '@/components/screen-message';
+import { ShareButton } from '@/components/share-button';
 import { api } from '@/lib/api';
-import { usePlayerState } from '@/lib/player/store';
-import { TAB_BAR_HEIGHT, space, type, useTheme } from '@/theme';
+import { playerActions, usePlayerState } from '@/lib/player/store';
+import { TAB_BAR_HEIGHT, radius, space, type, useTheme } from '@/theme';
 
 /**
  * One episode.
@@ -32,7 +34,8 @@ export default function EpisodeScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // `t` arrives on a shared link — `cue://episode/<id>?t=24m31s`.
+  const { id, t: sharedAt } = useLocalSearchParams<{ id: string; t?: string }>();
   const playing = usePlayerState().current !== null;
 
   const { data, error, isPending } = useQuery({
@@ -101,6 +104,18 @@ export default function EpisodeScreen() {
     accentColor: podcast?.accentColor ?? null,
   });
 
+  /**
+   * A shared moment, if this page was opened by one.
+   *
+   * Null for a link that was mangled, and null for one that points past the end
+   * of the episode — better to show nothing than to offer a jump into silence.
+   */
+  const parsed = parseShareTime(sharedAt ?? null);
+  const sharedFrom =
+    parsed !== null && (episode.durationSec === null || parsed < episode.durationSec)
+      ? parsed
+      : null;
+
   const meta = [
     t.episodeDate(episode.publishedAt),
     length,
@@ -153,10 +168,27 @@ export default function EpisodeScreen() {
           </Text>
         ) : null}
 
+        {/* Somebody sent this. A prompt rather than autoplay: a link tapped out
+            of a chat usually arrives while something else is already playing,
+            and interrupting it uninvited is not a welcome. */}
+        {sharedFrom !== null ? (
+          <View style={[styles.shared, { borderColor: theme.border, backgroundColor: theme.surfaceRaised }]}>
+            <Text style={[type('callout'), { color: theme.textSecondary }]}>
+              {t.t('share.sharedFrom', { time: formatTimestamp(sharedFrom) })}
+            </Text>
+            <Button
+              label={t.t('share.playFrom', { time: formatTimestamp(sharedFrom) })}
+              onPress={() => void playerActions.playAt(playable, sharedFrom)}
+            />
+          </View>
+        ) : null}
+
         <View style={styles.actions}>
           <PlayButton episode={playable} size={52} />
           <QueueButton episode={playable} />
           <DownloadButton episode={playable} />
+          <AddToPlaylist episodeId={episode.id} />
+          <ShareButton episodeId={episode.id} title={episode.title} />
         </View>
 
         {/* Above the notes rather than below them: this is the short version,
@@ -221,8 +253,16 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space[4],
+    flexWrap: 'wrap',
+    gap: space[3],
     marginTop: space[5],
+  },
+  shared: {
+    gap: space[3],
+    marginTop: space[5],
+    padding: space[4],
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
   },
   aiButton: { marginTop: space[5], alignSelf: 'flex-start' },
   transcript: { marginTop: space[8] },

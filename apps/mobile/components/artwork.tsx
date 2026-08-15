@@ -15,14 +15,23 @@ export function Artwork({
   url,
   size,
   label,
+  radius,
 }: {
   url: string | null;
   size: number;
   /** What the image is of. Omitted for decorative art beside its own title. */
   label?: string;
+  /**
+   * Override the size-derived radius.
+   *
+   * For artwork that is not the outer edge of anything — a quadrant of a
+   * playlist's cover stack, where the rounding belongs to the tile around it
+   * and rounding each quarter as well would cut four bites out of the middle.
+   */
+  radius?: number;
 }) {
   const theme = useTheme();
-  const borderRadius = radiusForArtwork(size);
+  const borderRadius = radius ?? radiusForArtwork(size);
 
   const frame = {
     width: size,

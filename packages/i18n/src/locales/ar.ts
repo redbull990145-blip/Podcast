@@ -24,6 +24,7 @@ export const ar: Catalog = {
   'nav.settings': 'الإعدادات',
   'nav.player': 'المشغّل',
   'nav.downloads': 'التنزيلات',
+  'nav.playlists': 'قوائم التشغيل',
 
   'common.loading': 'جارٍ التحميل…',
   'common.retry': 'أعد المحاولة',
@@ -145,6 +146,48 @@ export const ar: Catalog = {
   'offline.openDownloads': 'فتح التنزيلات',
   'offline.willSync': 'موضعك في كل حلقة سيُزامَن عند عودتك.',
   'offline.nothingSaved': 'لا شيء محفوظ على هذا الجهاز بعد، فلا يوجد ما يمكن تشغيله.',
+
+  'playlists.title': 'قوائم التشغيل',
+  'playlists.empty': 'لا توجد قوائم بعد',
+  'playlists.emptyBody':
+    'القائمة التالية تجيب عن «ما التالي». أما قائمة التشغيل فتجيب عن «لماذا» — الرحلات الطويلة، وما يستحق سماعًا ثانيًا، والأربع التي ألحّ عليها أحدهم.',
+  'playlists.create': 'قائمة جديدة',
+  'playlists.creating': 'جارٍ الإنشاء…',
+  'playlists.name': 'الاسم',
+  'playlists.namePlaceholder': 'رحلات طويلة',
+  'playlists.describe': 'الوصف',
+  'playlists.describePlaceholder': 'اختياري',
+  'playlists.count':
+    '{count, plural, =0 {فارغة} zero {فارغة} one {حلقة واحدة} two {حلقتان} few {# حلقات} many {# حلقة} other {# حلقة}}',
+  'playlists.addTo': 'إضافة إلى قائمة',
+  'playlists.inPlaylist':
+    'في {count, plural, zero {لا قوائم} one {قائمة واحدة} two {قائمتين} few {# قوائم} many {# قائمة} other {# قائمة}}',
+  'playlists.remove': 'إزالة من هذه القائمة',
+  'playlists.removeTitle': 'إزالة {title} من هذه القائمة',
+  'playlists.playAll': 'تشغيل الكل',
+  'playlists.rename': 'إعادة التسمية',
+  'playlists.save': 'حفظ',
+  'playlists.delete': 'حذف هذه القائمة',
+  'playlists.deleteConfirm': 'حذف «{title}»؟ الحلقات نفسها تبقى كما هي.',
+  'playlists.noEpisodes': 'لا شيء هنا بعد',
+  'playlists.noEpisodesBody':
+    'أضف حلقة من أي مكان في التطبيق فتتجمّع هنا بالترتيب الذي تضعها به.',
+  'playlists.failed': 'تعذّر تحميل قوائمك',
+  'playlists.notFound': 'لم تعد هذه القائمة موجودة',
+  'playlists.signedOut': 'قوائم التشغيل تحتاج حسابًا',
+  'playlists.signedOutBody':
+    'تعيش مع مكتبتك، فالقائمة التي تبنيها على جهاز تجدها على الجهاز التالي.',
+  'playlists.moveUp': 'رفع {title}',
+  'playlists.moveDown': 'خفض {title}',
+  'playlists.full': 'هذه القائمة ممتلئة',
+
+  'share.action': 'مشاركة',
+  'share.episode': 'مشاركة هذه الحلقة',
+  'share.fromHere': 'مشاركة من {time}',
+  'share.copied': 'تم نسخ الرابط',
+  'share.failed': 'تعذّر نسخ الرابط',
+  'share.playFrom': 'التشغيل من {time}',
+  'share.sharedFrom': 'شورك من {time}',
 
   'transcript.title': 'النص',
   'transcript.read': 'اقرأ النص',

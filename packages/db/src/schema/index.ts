@@ -30,6 +30,9 @@ export type { ProfileRow, SubscriptionRow } from './library.ts';
 export { playbackProgress, queueItems } from './playback.ts';
 export type { PlaybackProgressRow, QueueItemRow } from './playback.ts';
 
+export { playlistItems, playlists } from './playlist.ts';
+export type { PlaylistItemRow, PlaylistRow } from './playlist.ts';
+
 export { transcripts } from './transcript.ts';
 export type { NewTranscriptRow, StoredSegment, TranscriptRow } from './transcript.ts';
 

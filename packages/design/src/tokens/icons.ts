@@ -51,6 +51,14 @@ export const icon = {
   trash: 'M4.5 6.5h15M9.5 6.5V4.5h5v2M7 6.5l.9 12.2a1 1 0 0 0 1 .8h6.2a1 1 0 0 0 1-.8l.9-12.2',
   /** A cross, for stopping something already under way. */
   close: 'M6 6l12 12M18 6 6 18',
+  /**
+   * An arrow leaving a tray — the mirror of `download`.
+   *
+   * Deliberately not the three-connected-dots glyph: that mark means "share"
+   * only to people who already know it does, and it reads as a graph or a
+   * branch to everyone else.
+   */
+  share: 'M12 4v10.5M7.5 8.5 12 4l4.5 4.5M5 14v5.5h14V14',
 } as const satisfies Record<string, IconPath>;
 
 export type IconToken = keyof typeof icon;

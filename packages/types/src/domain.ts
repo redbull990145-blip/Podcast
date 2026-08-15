@@ -324,3 +324,45 @@ export type ContinueEntry = QueueEntry & {
   durationSec: number | null;
   updatedAt: IsoDateTime;
 };
+
+// ------------------------------------------------------------- playlists --
+
+export type PlaylistId = string;
+
+/**
+ * A playlist, as a list of them renders it.
+ *
+ * Private to its owner: there is no visibility, no author, and no share URL,
+ * because none of those exist yet. A queue answers "what next"; this answers
+ * "what for".
+ */
+export type Playlist = {
+  id: PlaylistId;
+  title: string;
+  description: string | null;
+  episodeCount: number;
+  /**
+   * Covers of the first few episodes, in playlist order, for a stacked tile.
+   *
+   * On the wire rather than derived per row in the client, because deriving it
+   * means either fetching every playlist's contents to draw a list of names, or
+   * drawing a list of names. Empty for a playlist nobody has filled yet.
+   */
+  artworkUrls: string[];
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+};
+
+/**
+ * One episode in a playlist.
+ *
+ * Identical to a queue entry, and deliberately so — both are "an episode with
+ * enough of its show attached to render standalone", both feed the same row
+ * component, and both are handed to the same player.
+ */
+export type PlaylistEntry = QueueEntry;
+
+/** A playlist with its contents. */
+export type PlaylistDetail = Playlist & {
+  items: PlaylistEntry[];
+};

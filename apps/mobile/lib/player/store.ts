@@ -353,6 +353,16 @@ export const playerActions = {
 
     await player.play(source, resumeFrom);
   },
+  /**
+   * Play from an exact point, ignoring wherever this listener had got to.
+   *
+   * For a shared link. The resume lookup is skipped deliberately: somebody who
+   * followed "listen from 24:31" wants 24:31, not the place they abandoned the
+   * episode last week.
+   */
+  playAt: async (episode: PlayableEpisode, positionSec: number) => {
+    await getPlayer().playAt(preferLocal(episode, currentDownloads()), positionSec);
+  },
   toggle: () => void getPlayer().toggle(),
   pause: () => getPlayer().pause(),
   seek: (sec: number) => getPlayer().seek(sec),

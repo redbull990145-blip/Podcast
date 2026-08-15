@@ -57,6 +57,7 @@ export default function RootLayout() {
             <Stack.Screen name="episode/[id]" />
             <Stack.Screen name="transcript/[id]" />
             <Stack.Screen name="ai/[id]" />
+            <Stack.Screen name="playlist/[id]" />
             {/*
               Now Playing rises from the bottom, the way a thing you summoned
               rather than navigated to should. It is the one screen in the app
@@ -72,6 +73,10 @@ export default function RootLayout() {
             />
             <Stack.Screen
               name="downloads"
+              options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+            />
+            <Stack.Screen
+              name="playlists"
               options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
             />
             <Stack.Screen name="settings" options={{ presentation: 'modal' }} />

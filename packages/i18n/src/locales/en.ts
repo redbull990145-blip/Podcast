@@ -21,6 +21,7 @@ export const en = {
   'nav.settings': 'Settings',
   'nav.player': 'Player',
   'nav.downloads': 'Downloads',
+  'nav.playlists': 'Playlists',
 
   // --------------------------------------------------------------- common --
   'common.loading': 'Loading…',
@@ -149,6 +150,48 @@ export const en = {
   'offline.openDownloads': 'Open downloads',
   'offline.willSync': 'Where you got to in each episode syncs when you’re back.',
   'offline.nothingSaved': 'Nothing is saved on this device yet, so there is nothing to play.',
+
+  // ------------------------------------------------------------ playlists --
+  'playlists.title': 'Playlists',
+  'playlists.empty': 'No playlists yet',
+  'playlists.emptyBody':
+    'A queue answers what to play next. A playlist answers what for — long drives, the ones worth a second listen, the four somebody insisted on.',
+  'playlists.create': 'New playlist',
+  'playlists.creating': 'Creating…',
+  'playlists.name': 'Name',
+  'playlists.namePlaceholder': 'Long drives',
+  'playlists.describe': 'Description',
+  'playlists.describePlaceholder': 'Optional',
+  'playlists.count': '{count, plural, =0 {Empty} one {# episode} other {# episodes}}',
+  'playlists.addTo': 'Add to a playlist',
+  'playlists.inPlaylist': 'In {count, plural, one {# playlist} other {# playlists}}',
+  'playlists.remove': 'Remove from this playlist',
+  'playlists.removeTitle': 'Remove {title} from this playlist',
+  'playlists.playAll': 'Play all',
+  'playlists.rename': 'Rename',
+  'playlists.save': 'Save',
+  'playlists.delete': 'Delete this playlist',
+  'playlists.deleteConfirm': 'Delete “{title}”? The episodes themselves stay where they are.',
+  'playlists.noEpisodes': 'Nothing in here yet',
+  'playlists.noEpisodesBody':
+    'Add an episode from anywhere in the app and it collects here, in the order you put it.',
+  'playlists.failed': 'Couldn’t load your playlists',
+  'playlists.notFound': 'That playlist is gone',
+  'playlists.signedOut': 'Playlists need an account',
+  'playlists.signedOutBody':
+    'They live with your library, so the list you build on one device is there on the next.',
+  'playlists.moveUp': 'Move {title} up',
+  'playlists.moveDown': 'Move {title} down',
+  'playlists.full': 'That playlist is full',
+
+  // ---------------------------------------------------------------- share --
+  'share.action': 'Share',
+  'share.episode': 'Share this episode',
+  'share.fromHere': 'Share from {time}',
+  'share.copied': 'Link copied',
+  'share.failed': 'Couldn’t copy that link',
+  'share.playFrom': 'Play from {time}',
+  'share.sharedFrom': 'Shared from {time}',
 
   // ----------------------------------------------------------- transcript --
   'transcript.title': 'Transcript',

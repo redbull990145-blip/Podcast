@@ -3,6 +3,8 @@
 import { playableFromEpisode } from '@cue/core';
 import type { Episode } from '@cue/types';
 import { motion } from 'motion/react';
+import { ShareButton } from '@/components/episode/share-button';
+import { AddToPlaylist } from '@/components/playlist/add-to-playlist';
 import { usePressScale, useTransition } from '@/lib/motion';
 import { usePlayerActions, usePlayerState } from '@/lib/player/store';
 
@@ -94,6 +96,12 @@ export function EpisodeActions({
           {queued ? 'In your queue' : 'Add to queue'}
         </motion.button>
       )}
+
+      {/* Collecting and passing on, side by side. Both are things you do
+          *about* an episode rather than to the player, which is why they sit
+          after the transport controls rather than among them. */}
+      <AddToPlaylist episodeId={episode.id} />
+      <ShareButton episodeId={episode.id} />
     </div>
   );
 }
