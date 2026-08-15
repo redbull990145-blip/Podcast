@@ -22,6 +22,23 @@ export type Spring = {
   mass: number;
 };
 
+/**
+ * Why these particular numbers — the "weight" question.
+ *
+ * A spring has exactly two perceptual dials, and neither of them is a raw
+ * stiffness number:
+ *
+ *   ω₀ = √(k/m)          how *fast* it resolves
+ *   ζ  = c / 2√(k·m)     how *tightly* it is controlled
+ *
+ * Weight is low ω₀ at a ζ just under 1. Something heavy takes longer to get
+ * moving, keeps going a touch past its target, and settles once. Something
+ * weightless has high ω₀ and ζ near 1: it snaps to its destination and stops
+ * dead, which reads as a value being assigned rather than an object moving.
+ *
+ * Raising stiffness and mass together therefore changes nothing at all — ω₀
+ * only moves when their *ratio* does. That is the trap in tuning these by feel.
+ */
 export const spring = {
   /** Ambient, non-urgent. Background wash, ambient artwork drift. */
   gentle: { stiffness: 120, damping: 20, mass: 1 },
@@ -29,14 +46,33 @@ export const spring = {
   /** The default. Anything moving without a strong opinion uses this. */
   standard: { stiffness: 260, damping: 30, mass: 1 },
 
-  /** Direct feedback on a control the finger is on. */
-  responsive: { stiffness: 400, damping: 34, mass: 0.9 },
+  /**
+   * Direct feedback on a control the finger is on. ω₀ 21.1, ζ 0.71.
+   *
+   * Damping was 34, which is ζ 0.90 — so a released button crept back to full
+   * size and stopped exactly there. Correct, and lifeless: a real button
+   * rebounds slightly past its resting size when you let go, and that single
+   * overshoot is most of what separates a control that feels sprung from one
+   * that feels drawn. ω₀ is untouched, so the press still *responds* just as
+   * fast; only the release has life in it now.
+   */
+  responsive: { stiffness: 400, damping: 27, mass: 0.9 },
 
   /** Small, immediate, near-instant settle. Toggles, checkmarks. */
   snappy: { stiffness: 560, damping: 40, mass: 0.8 },
 
-  /** Large travel that should feel weighty: player expansion, sheets. */
-  expressive: { stiffness: 300, damping: 28, mass: 1.05 },
+  /**
+   * Large travel that should feel weighty: player expansion, sheets.
+   * ω₀ 12.2, ζ 0.82.
+   *
+   * Was 300/28/1.05 — ω₀ 16.9, which resolved in about 0.4s. For a surface
+   * that covers the entire window that is too eager; a panel the size of the
+   * screen that arrives in 0.4s reads as a `display` change with an animation
+   * painted over it. Dropping ω₀ by ~28% puts the settle near 0.55s, which is
+   * where full-screen presentation sits across the platforms that get this
+   * right, and holds ζ below 1 so it still overshoots once on the way in.
+   */
+  expressive: { stiffness: 210, damping: 28, mass: 1.4 },
 } as const satisfies Record<string, Spring>;
 
 export type SpringToken = keyof typeof spring;

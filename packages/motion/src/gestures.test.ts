@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gesture, rubberBand, shouldCommit } from './gestures.ts';
+import { gesture, rubberBand, settleVelocity, shouldCommit } from './gestures.ts';
 
 describe('rubberBand', () => {
   it('resists but still tracks the finger', () => {
@@ -44,5 +44,36 @@ describe('shouldCommit', () => {
 
   it('treats zero travel as non-committal rather than dividing by zero', () => {
     expect(shouldCommit(0, 0, 0)).toBe(false);
+  });
+});
+
+describe('settleVelocity', () => {
+  const travel = 800;
+
+  it('converts screen velocity into progress-per-second', () => {
+    // Half the travel per second, so the 0→1 value should move at 0.5/s.
+    expect(settleVelocity(400, travel)).toBeCloseTo(0.5);
+  });
+
+  it('keeps direction, so a downward throw settles downward', () => {
+    expect(settleVelocity(-400, travel)).toBeCloseTo(-0.5);
+  });
+
+  it('caps a hard flick instead of letting it overshoot', () => {
+    // Trackpads happily report five-figure velocities. Passing one straight
+    // into a spring throws the sheet far past its target and back, which reads
+    // as a rendering fault rather than as momentum.
+    const wild = settleVelocity(50_000, travel);
+    expect(wild).toBeCloseTo(gesture.maxSettleVelocity / travel);
+  });
+
+  it('caps in the negative direction too', () => {
+    expect(settleVelocity(-50_000, travel)).toBeCloseTo(-gesture.maxSettleVelocity / travel);
+  });
+
+  it('is zero before the travel distance has been measured', () => {
+    // The first client render has not measured the viewport yet. Dividing by
+    // it would hand the spring Infinity.
+    expect(settleVelocity(400, 0)).toBe(0);
   });
 });

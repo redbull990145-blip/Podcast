@@ -71,9 +71,21 @@ export function AmbientBackdrop({
             // Scaled up and pushed off its own edges so the blur has material
             // to work with — a blur applied inside the frame samples the page
             // background at the borders and leaves a pale halo around the edge.
-            transform: 'scale(1.8)',
+            //
+            // `translateZ(0)` is not cargo cult here, and it is the difference
+            // between this screen running at frame rate and not. A 72px blur
+            // over the full viewport is expensive to produce *once*; the player
+            // fades this whole backdrop in behind an opacity animation, and an
+            // un-promoted subtree is re-rasterised on every frame of that fade
+            // — so the most expensive thing on the screen was being redrawn
+            // sixty times to accomplish one appearance. Promoted, it is
+            // rasterised once and the compositor fades the finished texture.
+            transform: 'scale(1.8) translateZ(0)',
             filter: 'blur(72px) saturate(1.6)',
             opacity: 0.55,
+            // Nothing inside affects layout outside it, so the browser can skip
+            // this subtree entirely when anything else on the sheet changes.
+            contain: 'paint',
           }}
         />
       ) : null}

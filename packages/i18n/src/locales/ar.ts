@@ -109,6 +109,10 @@ export const ar: Catalog = {
   'player.stoppingAt': 'سيتوقّف عند {time}',
   'player.nowPlaying': 'قيد التشغيل: {title}. افتح المشغّل.',
   'player.loading': 'جارٍ التحميل…',
+  'player.volume': 'مستوى الصوت',
+  'player.mute': 'كتم الصوت',
+  'player.unmute': 'إلغاء كتم الصوت',
+  'player.openQueue': 'فتح قائمة التشغيل',
 
   'queue.title': 'قائمة التشغيل',
   'queue.empty': 'القائمة فارغة',

@@ -112,6 +112,10 @@ export const en = {
   'player.stoppingAt': 'Stopping at {time}',
   'player.nowPlaying': 'Now playing: {title}. Open the player.',
   'player.loading': 'Loading…',
+  'player.volume': 'Volume',
+  'player.mute': 'Mute',
+  'player.unmute': 'Unmute',
+  'player.openQueue': 'Open the queue',
 
   // ---------------------------------------------------------------- queue --
   'queue.title': 'Queue',

@@ -67,6 +67,19 @@ export const icon = {
    * this one is already understood without being read.
    */
   captions: 'M4 5.5h16v11H9.5L5.5 20v-3.5H4zM7.5 9.5h9M7.5 12.5h5.5',
+
+  /**
+   * Volume, as a pair rather than a single glyph with a state.
+   *
+   * The two ends of a volume slider are labels, not controls: the cone alone
+   * means "quiet end", the cone with arcs means "loud end". Drawing one icon
+   * and animating the arcs in and out would be the same picture doing two
+   * different jobs, and the slider already says where the level is.
+   */
+  volumeLow: 'M4.5 9.5h3L11 6v12l-3.5-3.5h-3z',
+  volumeHigh: 'M4.5 9.5h3L11 6v12l-3.5-3.5h-3zM14 9.9a3.3 3.3 0 0 1 0 4.2M16.6 7.6a7 7 0 0 1 0 8.8',
+  /** The cone with the arcs struck through — silence, not merely quiet. */
+  volumeMuted: 'M4.5 9.5h3L11 6v12l-3.5-3.5h-3zM15 10l4.5 4M19.5 10 15 14',
 } as const satisfies Record<string, IconPath>;
 
 export type IconToken = keyof typeof icon;

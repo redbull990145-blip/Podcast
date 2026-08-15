@@ -28,14 +28,25 @@ export function PlayPauseButton({
   onToggle,
   size = 44,
   tint,
+  variant = 'filled',
 }: {
   playing: boolean;
   loading: boolean;
   onToggle: () => void;
   size?: number;
   tint?: string | undefined;
+  /**
+   * `filled` is a tinted disc — the one obvious action in a dense bar of text.
+   * `bare` is the glyph alone, for the full player, where it sits in open space
+   * on a backdrop taken from the artwork. A coloured disc there competes with
+   * the cover it was sampled from; the glyph does not.
+   */
+  variant?: 'filled' | 'bare';
 }) {
-  const press = usePressScale(0.92);
+  const bare = variant === 'bare';
+  // A bare glyph has no edge to squash, so it needs to travel further before
+  // the press reads at all. A disc reads at 0.92 because its outline moves.
+  const press = usePressScale(bare ? 0.86 : 0.92);
   const transition = useTransition('responsive');
 
   return (
@@ -48,13 +59,30 @@ export function PlayPauseButton({
       // rather than a state toggle.
       whileTap={{ scale: press }}
       transition={transition}
-      className="flex shrink-0 cursor-pointer items-center justify-center rounded-full border-0 text-[var(--color-text-on-accent)]"
-      style={{ width: size, height: size, backgroundColor: tint ?? 'var(--color-accent)' }}
+      className={[
+        'flex shrink-0 cursor-pointer items-center justify-center rounded-full border-0',
+        bare
+          ? 'bg-transparent text-[var(--color-text-primary)]'
+          : 'text-[var(--color-text-on-accent)]',
+      ].join(' ')}
+      style={{
+        width: size,
+        height: size,
+        ...(bare ? {} : { backgroundColor: tint ?? 'var(--color-accent)' }),
+      }}
     >
       {loading ? (
         <LoadingRing />
       ) : (
-        <svg width={size * 0.42} height={size * 0.42} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <svg
+          // The glyph carries the whole control when there is no disc behind
+          // it, so it is drawn much larger relative to its hit area.
+          width={size * (bare ? 0.78 : 0.42)}
+          height={size * (bare ? 0.78 : 0.42)}
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          aria-hidden="true"
+        >
           {/* The icon swaps instantly. Crossfading play and pause reads as
               lag on the one control that must feel immediate. */}
           <path d={playing ? ICON.pause : ICON.play} />
@@ -105,18 +133,35 @@ function LoadingRing() {
   );
 }
 
+/**
+ * Skip, not previous/next.
+ *
+ * Apple Music puts ⏪ ⏯ ⏩ here because a track is the unit and the next one is
+ * three minutes away. A podcast episode is forty minutes long and its unit is
+ * the digression you want to jump over, so this stays a timed skip with the
+ * number drawn inside the arrow — the same choice Apple's own Podcasts app
+ * makes, on the same reasoning. Copying the music glyph here would look right
+ * and be wrong.
+ */
 export function SkipButton({
   direction,
   seconds,
   onClick,
+  size = 44,
 }: {
   direction: 'back' | 'forward';
   seconds: number;
   onClick: () => void;
+  /** Hit area. The glyph and its numeral scale with it. */
+  size?: number;
 }) {
   const back = direction === 'back';
-  const press = usePressScale(0.9);
-  const transition = useTransition('snappy');
+  const press = usePressScale(0.86);
+  // `responsive` rather than `snappy`: these sit either side of the play
+  // button, and a neighbour that settles on different physics is visible even
+  // when you cannot say what changed.
+  const transition = useTransition('responsive');
+  const glyph = size * 0.62;
 
   return (
     <m.button
@@ -125,9 +170,18 @@ export function SkipButton({
       aria-label={back ? `Skip back ${seconds} seconds` : `Skip forward ${seconds} seconds`}
       whileTap={{ scale: press }}
       transition={transition}
-      className="relative flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+      className="relative flex shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-[var(--color-text-primary)] transition-opacity hover:opacity-100"
+      style={{ width: size, height: size, opacity: 0.75 }}
     >
-      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+      <svg
+        width={glyph}
+        height={glyph}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        aria-hidden="true"
+      >
         {back ? (
           <path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5" strokeLinecap="round" strokeLinejoin="round" />
         ) : (
@@ -138,8 +192,8 @@ export function SkipButton({
           far it jumps without a separate label. */}
       <span
         aria-hidden="true"
-        className="absolute type-caption"
-        style={{ fontSize: 9, fontWeight: 600, marginTop: 3 }}
+        className="absolute"
+        style={{ fontSize: glyph * 0.33, fontWeight: 600, marginTop: glyph * 0.11 }}
       >
         {seconds}
       </span>
@@ -161,19 +215,24 @@ export function SpeedButton({
   rate: PlaybackRate;
   onChange: (rate: PlaybackRate) => void;
 }) {
+  const press = usePressScale(0.9);
+  const transition = useTransition('responsive');
+
   function cycle() {
     const index = PLAYBACK_RATES.indexOf(rate);
     onChange(PLAYBACK_RATES[(index + 1) % PLAYBACK_RATES.length]!);
   }
 
   return (
-    <button
+    <m.button
       type="button"
       onClick={cycle}
       aria-label={`Playback speed: ${rate}×. Tap to change.`}
-      className="h-11 min-w-11 cursor-pointer rounded-[var(--radius-md)] border-0 bg-transparent px-2 type-caption text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+      whileTap={{ scale: press }}
+      transition={transition}
+      className="h-9 min-w-11 cursor-pointer rounded-full border-0 bg-[var(--color-surface-hover)] px-3 type-caption text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
     >
       {rate}×
-    </button>
+    </m.button>
   );
 }

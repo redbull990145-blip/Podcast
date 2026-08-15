@@ -101,6 +101,10 @@ export const es: Catalog = {
   'player.stoppingAt': 'Se detiene a las {time}',
   'player.nowPlaying': 'Sonando: {title}. Abrir el reproductor.',
   'player.loading': 'Cargando…',
+  'player.volume': 'Volumen',
+  'player.mute': 'Silenciar',
+  'player.unmute': 'Activar el sonido',
+  'player.openQueue': 'Abrir la cola',
 
   'queue.title': 'Cola',
   'queue.empty': 'No hay nada en la cola',

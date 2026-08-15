@@ -54,3 +54,31 @@ export function shouldCommit(offset: number, velocity: number, total: number): b
   }
   return total > 0 && offset / total >= gesture.commitDistanceRatio;
 }
+
+/**
+ * The hand-off from finger to spring.
+ *
+ * A settle animation that starts from zero velocity is the single most common
+ * reason a draggable surface feels weightless: the finger throws the sheet, the
+ * finger lifts, and the sheet forgets it was moving and starts again from
+ * standstill. Seeding the spring with the velocity the gesture actually ended
+ * on is what makes the release read as *letting go of* something rather than
+ * *triggering* something.
+ *
+ * @param pxPerSecond pointer velocity at release, signed, in screen pixels
+ * @param travelPx    screen distance the progress value 0→1 corresponds to
+ * @returns velocity in units of the progress value per second
+ */
+export function settleVelocity(pxPerSecond: number, travelPx: number): number {
+  if (travelPx <= 0) return 0;
+
+  // Capped before the conversion. An uncapped flick — trackpads report several
+  // thousand px/s — produces an overshoot far past the target that reads as the
+  // animation glitching rather than as momentum.
+  const capped = Math.max(
+    -gesture.maxSettleVelocity,
+    Math.min(gesture.maxSettleVelocity, pxPerSecond),
+  );
+
+  return capped / travelPx;
+}

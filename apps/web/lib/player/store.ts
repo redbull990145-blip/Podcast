@@ -319,6 +319,16 @@ export function usePlayerActions() {
       // only until the next reload.
       writePreferences(player.getPreferences());
     },
+    /**
+     * Volume goes through the machine, never straight at `audio.volume`.
+     *
+     * The element would honour a direct write — it is a singleton, so the value
+     * would even survive the next episode. What it would not do is tell anyone.
+     * `state.volume` is what the slider renders, so a direct write moves the
+     * audio and leaves the control sitting where it was, which is the shape of
+     * a slider that does not work. The clamp is there too, and tested.
+     */
+    setVolume: (volume: number) => getPlayer().setVolume(volume),
     setSleepTimer: (minutes: number | null) => getPlayer().setSleepTimer(minutes),
     next: () => void getPlayer().next(),
     enqueue: (...episodes: PlayableEpisode[]) => getPlayer().enqueue(...episodes),

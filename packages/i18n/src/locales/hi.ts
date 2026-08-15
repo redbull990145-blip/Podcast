@@ -104,6 +104,10 @@ export const hi: Catalog = {
   'player.stoppingAt': '{time} पर रुकेगा',
   'player.nowPlaying': 'चल रहा है: {title}. प्लेयर खोलें।',
   'player.loading': 'लोड हो रहा है…',
+  'player.volume': 'आवाज़',
+  'player.mute': 'आवाज़ बंद करें',
+  'player.unmute': 'आवाज़ चालू करें',
+  'player.openQueue': 'कतार खोलें',
 
   'queue.title': 'कतार',
   'queue.empty': 'कतार में कुछ नहीं',

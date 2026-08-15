@@ -18,7 +18,7 @@ export type { Spring, SpringToken } from './springs.ts';
 export { cssEasing, duration, easing } from './timing.ts';
 export type { DurationToken, Easing, EasingToken } from './timing.ts';
 
-export { gesture, rubberBand, shouldCommit } from './gestures.ts';
+export { gesture, rubberBand, settleVelocity, shouldCommit } from './gestures.ts';
 
 export {
   canTravel,
