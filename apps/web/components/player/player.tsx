@@ -202,6 +202,40 @@ export function Player() {
     return () => window.removeEventListener('keydown', onKey);
   }, [expanded]);
 
+  /**
+   * Hold the page still underneath, and take its scrollbar with it.
+   *
+   * Two things, one cause. Scrolling a page nobody can see is the usual sheet
+   * complaint — you come back and the screen you left has moved. The scrollbar
+   * is the more visible one here: the sheet is `inset-0` and covers the
+   * viewport, but the scrollbar is *beside* the viewport, so a full-screen
+   * player still had a strip of page chrome down its edge. Which rather
+   * undercuts "full screen".
+   *
+   * The padding is what makes it free. Remove a 15px scrollbar and the page
+   * behind gets 15px wider and reflows; that reflow is invisible while covered
+   * and very visible during the closing animation, as the page is revealed
+   * mid-shuffle. Replacing the scrollbar's width with padding means the layout
+   * never learns it went away. `Inline` rather than `right` because under
+   * Arabic the scrollbar is on the other side.
+   */
+  useEffect(() => {
+    if (!expanded) return;
+
+    const root = document.documentElement;
+    const gutter = window.innerWidth - root.clientWidth;
+    const previousOverflow = root.style.overflow;
+    const previousPadding = document.body.style.paddingInlineEnd;
+
+    root.style.overflow = 'hidden';
+    if (gutter > 0) document.body.style.paddingInlineEnd = `${gutter}px`;
+
+    return () => {
+      root.style.overflow = previousOverflow;
+      document.body.style.paddingInlineEnd = previousPadding;
+    };
+  }, [expanded]);
+
   const episode = state.current;
 
   // Everything from here down runs before the early return below. React
