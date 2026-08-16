@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import type { NextConfig } from 'next';
 
 const config: NextConfig = {
@@ -5,6 +6,27 @@ const config: NextConfig = {
   // Next compiles them alongside the app. That keeps edits to a shared token
   // or type instant instead of requiring a rebuild in another package.
   transpilePackages: ['@cue/api-client', '@cue/design', '@cue/motion', '@cue/types'],
+
+  /**
+   * Pin the root Next.js traces from, rather than let it infer one.
+   *
+   * Deploying with the API's `apps/api/tsconfig.json` header comment
+   * documents two different ways a monorepo's implicit-resolution guess can
+   * go wrong; this is a third. Without this set, Next looks for the nearest
+   * lockfile to decide where the workspace root is, and on a platform build
+   * that ships this app's source outside its own directory (Vercel's "include
+   * files outside the Root Directory" — required here, since this app imports
+   * `@cue/*` packages that live above it) that guess can land on the
+   * monorepo root and trace sibling workspace packages into the serverless
+   * function it should never have needed. `apps/api`'s `@cue/db` — a
+   * Postgres/Drizzle package with no import anywhere in this app or its
+   * dependencies — ended up bundled that way once, and Node's runtime cannot
+   * execute the raw `.ts` source workspace packages ship, so the function
+   * failed with `ERR_MODULE_NOT_FOUND` on every request rather than at build
+   * time, when it would have been obvious. Pinning the root removes the
+   * guess.
+   */
+  outputFileTracingRoot: join(import.meta.dirname, '../..'),
 
   images: {
     /**
