@@ -31,6 +31,22 @@ declare module 'fastify' {
   }
 }
 
+/**
+ * The Better Auth endpoints that check or mint a credential.
+ *
+ * These are the guessing surface (`sign-in`), and the account-spam and
+ * enumeration surface (`sign-up`, `forget-password`, `reset-password`). The
+ * read-only `get-session` that fires on every page load is deliberately not
+ * here — throttling it would rate-limit ordinary browsing. Matched by substring
+ * so `/auth/sign-in/email` and `/auth/sign-in/social` are both covered.
+ */
+const SENSITIVE_AUTH_PATHS = ['/sign-in', '/sign-up', '/forget-password', '/reset-password'];
+
+export function isSensitiveAuthPath(url: string): boolean {
+  const path = url.split('?')[0] ?? url;
+  return SENSITIVE_AUTH_PATHS.some((needle) => path.includes(needle));
+}
+
 /** Rebuild the incoming Fastify request as a Web `Request`. */
 function toWebRequest(request: FastifyRequest, baseUrl: string): Request {
   const url = new URL(request.url, baseUrl);
@@ -87,8 +103,19 @@ export async function registerAuth(app: FastifyInstance, auth: Auth): Promise<vo
    * can never forget to check, and `request.user` is always trustworthy.
    */
   app.addHook('onRequest', async (request) => {
-    // The auth routes manage their own session handling.
-    if (request.url.startsWith('/auth/')) return;
+    // The auth routes manage their own session handling — but the credential
+    // endpoints get an address-keyed throttle before Better Auth ever sees them.
+    // Better Auth's own limiter is disabled outside production and in-memory
+    // (so per-instance, and reset on every deploy) within it; neither is a
+    // durable brake on password guessing. Without this a signed-out caller can
+    // spray sign-in as fast as the network allows, which — tested — was
+    // completely unthrottled.
+    if (request.url.startsWith('/auth/')) {
+      if (request.method === 'POST' && isSensitiveAuthPath(request.url)) {
+        await request.server.rateLimiter.check(`auth:${request.ip}`, 'auth');
+      }
+      return;
+    }
 
     const headers = new Headers();
     for (const [key, value] of Object.entries(request.headers)) {

@@ -20,7 +20,10 @@
 
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { isSensitiveAuthPath } from './auth/plugin.ts';
 import { loadConfig } from './config.ts';
+import { AppError } from './errors.ts';
+import type { RateLimiter } from './rate-limit.ts';
 import { buildServer } from './server.ts';
 
 describe('cross-site request forgery', () => {
@@ -133,6 +136,95 @@ describe('session cookie attributes', () => {
       secure: false,
       sameSite: 'lax',
     });
+    await app.close();
+  });
+});
+
+/**
+ * Online password guessing.
+ *
+ * The `/auth/*` routes are Better Auth's, and they bypass the app's per-route
+ * rate-limit preHandler entirely. Better Auth's own limiter is off outside
+ * production and in-memory within it — so a signed-out attacker could spray
+ * sign-in as fast as the network allowed, which under test was completely
+ * unthrottled. The credential endpoints now go through the app's own limiter
+ * first, keyed by address.
+ */
+describe('credential-endpoint throttling', () => {
+  it('classifies only the credential-checking auth paths as sensitive', () => {
+    expect(isSensitiveAuthPath('/auth/sign-in/email')).toBe(true);
+    expect(isSensitiveAuthPath('/auth/sign-in/social')).toBe(true);
+    expect(isSensitiveAuthPath('/auth/sign-up/email')).toBe(true);
+    expect(isSensitiveAuthPath('/auth/forget-password')).toBe(true);
+    expect(isSensitiveAuthPath('/auth/reset-password?token=abc')).toBe(true);
+
+    // The read-only lookups every page load makes must not be throttled.
+    expect(isSensitiveAuthPath('/auth/get-session')).toBe(false);
+    expect(isSensitiveAuthPath('/auth/sign-out')).toBe(false);
+  });
+
+  async function withStubLimiter(): Promise<{
+    app: FastifyInstance;
+    seen: string[];
+    reset: () => void;
+  }> {
+    const app = await buildServer(
+      loadConfig({
+        NODE_ENV: 'test',
+        DATABASE_URL: 'pglite://memory',
+        CORS_ORIGINS: 'https://cue.example',
+      }),
+    );
+
+    // The Redis-backed limiter is a no-op without Redis (dev/test), so stand a
+    // counting one in its place to prove the credential routes are wired to it.
+    const seen: string[] = [];
+    let authCalls = 0;
+    const stub: RateLimiter = {
+      check: async (identifier, tier) => {
+        seen.push(`${tier} ${identifier}`);
+        if (tier === 'auth' && ++authCalls > 3) {
+          throw new AppError('rate_limited', 'Too many attempts — slow down');
+        }
+      },
+    };
+    (app as unknown as { rateLimiter: RateLimiter }).rateLimiter = stub;
+
+    return { app, seen, reset: () => (authCalls = 0) };
+  }
+
+  it('refuses repeated sign-in attempts from one address once the budget is spent', async () => {
+    const { app, seen } = await withStubLimiter();
+
+    const attempt = () =>
+      app.inject({
+        method: 'POST',
+        url: '/auth/sign-in/email',
+        headers: { 'content-type': 'application/json' },
+        payload: JSON.stringify({ email: 'nobody@cue.example', password: 'guessing' }),
+      });
+
+    const codes: number[] = [];
+    for (let i = 0; i < 6; i += 1) codes.push((await attempt()).statusCode);
+
+    // The first few pass the limiter and fail auth; the rest are refused before
+    // Better Auth — and its scrypt — ever runs.
+    expect(codes.filter((code) => code === 429).length).toBeGreaterThan(0);
+    // Keyed by address, in the auth tier.
+    expect(seen.every((entry) => entry.startsWith('auth '))).toBe(true);
+    expect(seen[0]).toContain('auth:127.0.0.1');
+
+    await app.close();
+  });
+
+  it('does not throttle the read-only session lookup', async () => {
+    const { app, seen } = await withStubLimiter();
+
+    for (let i = 0; i < 5; i += 1) {
+      await app.inject({ method: 'GET', url: '/auth/get-session' });
+    }
+
+    expect(seen).toHaveLength(0);
     await app.close();
   });
 });
