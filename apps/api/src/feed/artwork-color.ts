@@ -13,10 +13,15 @@
  */
 
 import sharp from 'sharp';
+import { checkUrl } from './url-guard.ts';
 
 /** Artwork is small; anything larger is not a cover. */
 const MAX_BYTES = 8 * 1024 * 1024;
 const TIMEOUT_MS = 15_000;
+
+/** Podcast art redirects through CDNs constantly; each hop is re-validated. */
+const MAX_REDIRECTS = 5;
+const USER_AGENT = 'Cue/0.1';
 
 /** Sample grid. 16×16 is enough to find a dominant region and costs nothing. */
 const GRID = 16;
@@ -45,6 +50,106 @@ function vibrance(r: number, g: number, b: number): number {
 export type ExtractOptions = { fetchImpl?: typeof fetch };
 
 /**
+ * Fetch artwork bytes through the same SSRF guard the feed fetcher uses.
+ *
+ * An artwork URL comes out of RSS that anyone can publish, so it is exactly as
+ * attacker-controlled as the feed that carried it — and this fetch runs
+ * server-side, inside the deployment's own network. Without the guard it is a
+ * proxy into that network: an `<itunes:image href="http://169.254.169.254/…">`
+ * turns colour extraction into a read of the cloud metadata endpoint, reachable
+ * unauthenticated through both ingest and the public `/episodes/:id/tint` route.
+ *
+ * So every hop is re-validated with `redirect: 'manual'` — a public URL that
+ * 302s to a private one is the whole redirect-based bypass, and the plain
+ * `fetch` this replaced followed those silently. The body is streamed under a
+ * hard ceiling rather than buffered whole, because `content-length` is written
+ * by the same server we are declining to trust: a tiny declared length in front
+ * of a multi-gigabyte body would otherwise exhaust the container's memory before
+ * the old post-hoc size check ever ran.
+ */
+async function fetchArtwork(url: string, doFetch: typeof fetch): Promise<Buffer | null> {
+  let currentUrl = url;
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+    const check = await checkUrl(currentUrl);
+    if (!check.allowed) return null;
+
+    let response: Response;
+    try {
+      response = await doFetch(check.url.href, {
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+        headers: { 'user-agent': USER_AGENT, accept: 'image/*' },
+        redirect: 'manual',
+      });
+    } catch {
+      return null;
+    }
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+      if (!location) return null;
+      // Resolved against the current URL, then re-checked at the top of the loop.
+      currentUrl = new URL(location, check.url).href;
+      continue;
+    }
+
+    if (!response.ok) return null;
+
+    const declared = Number(response.headers.get('content-length') ?? '0');
+    if (declared > MAX_BYTES) return null;
+
+    return readCappedImage(response);
+  }
+
+  return null;
+}
+
+/**
+ * Read a response body into a Buffer, aborting the moment it passes MAX_BYTES.
+ *
+ * Counts bytes as they arrive rather than trusting `content-length`, which is
+ * the only ceiling that holds against a server lying about its own body size.
+ */
+async function readCappedImage(response: Response): Promise<Buffer | null> {
+  const body = response.body as ReadableStream<Uint8Array> | null;
+
+  // A runtime or test double without a streaming body: buffer whole, still
+  // bounded by the length check that follows.
+  if (!body || typeof body.getReader !== 'function') {
+    const bytes = await response.arrayBuffer();
+    return bytes.byteLength > MAX_BYTES ? null : Buffer.from(bytes);
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > MAX_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const merged = Buffer.allocUnsafe(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return merged;
+}
+
+/**
  * Returns `#RRGGBB`, or null when there is nothing usable.
  *
  * Null is a real answer: a show with no artwork, an unreachable CDN, or a
@@ -59,27 +164,11 @@ export async function extractArtworkColor(
 
   const doFetch = options.fetchImpl ?? fetch;
 
-  let buffer: Buffer;
-  try {
-    const response = await doFetch(artworkUrl, {
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-      headers: { 'user-agent': 'Cue/0.1', accept: 'image/*' },
-    });
-
-    if (!response.ok) return null;
-
-    const declared = Number(response.headers.get('content-length') ?? '0');
-    if (declared > MAX_BYTES) return null;
-
-    const bytes = await response.arrayBuffer();
-    if (bytes.byteLength > MAX_BYTES) return null;
-
-    buffer = Buffer.from(bytes);
-  } catch {
-    // Artwork is decoration. A CDN being slow must never fail an ingest that
-    // otherwise succeeded.
-    return null;
-  }
+  // Artwork is decoration. A CDN being slow — or a URL the SSRF guard refuses —
+  // must never fail an ingest that otherwise succeeded, so any problem here is
+  // simply "no tint".
+  const buffer = await fetchArtwork(artworkUrl, doFetch);
+  if (!buffer) return null;
 
   try {
     const { data } = await sharp(buffer)
