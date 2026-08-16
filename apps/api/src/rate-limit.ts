@@ -14,17 +14,25 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Cache } from './cache.ts';
 import { AppError } from './errors.ts';
 
-export type RateLimitTier = 'default' | 'search' | 'expensive';
+export type RateLimitTier = 'default' | 'search' | 'expensive' | 'auth';
 
 /**
  * `search` is tighter because each miss costs an upstream call to PodcastIndex,
  * whose budget is shared by everyone using this deployment. `expensive` is for
  * anything that starts a transcription or an LLM call.
+ *
+ * `auth` guards the credential endpoints — sign-in, sign-up, password reset.
+ * It is keyed by address, because there is no session yet to key on and the
+ * threat is automated guessing from one origin. Ten attempts a minute stops a
+ * spray (the demonstrated attack ran hundreds a minute unthrottled) without the
+ * account-lockout approach's own flaw, where an attacker locks a victim out by
+ * guessing at their account on purpose.
  */
 const TIERS: Record<RateLimitTier, { tokens: number; window: `${number} ${'s' | 'm'}` }> = {
   default: { tokens: 120, window: '1 m' },
   search: { tokens: 20, window: '1 m' },
   expensive: { tokens: 10, window: '1 m' },
+  auth: { tokens: 10, window: '1 m' },
 };
 
 export type RateLimiter = {

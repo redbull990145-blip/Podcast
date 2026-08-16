@@ -72,9 +72,14 @@ beforeAll(async () => {
     .insert(episodes)
     .values(
       [
-        { guid: 'tint-art', artworkUrl: 'https://cdn.example.com/ep-art.jpg' },
+        // Literal public IPs, not a hostname: the SSRF guard added in
+        // artwork-color.ts resolves hostnames and would refuse a non-resolving
+        // test host before fetch is ever reached. A literal IP skips DNS, and
+        // these documentation-range addresses (TEST-NET-2) are treated as public
+        // by the guard, so the mocked fetch below is what actually answers.
+        { guid: 'tint-art', artworkUrl: 'http://198.51.100.10/ep-art.jpg' },
         { guid: 'tint-none', artworkUrl: null },
-        { guid: 'tint-broken', artworkUrl: 'https://cdn.example.com/ep-broken.jpg' },
+        { guid: 'tint-broken', artworkUrl: 'http://198.51.100.11/ep-broken.jpg' },
       ].map((e, n) => ({
         podcastId: showId,
         guid: e.guid,
@@ -125,8 +130,8 @@ describe('an episode whose artwork cannot be read', () => {
   it('answers null rather than failing the request', async () => {
     // A dead CDN is not a broken endpoint. The player has a colour already —
     // the show's — and a 500 here would turn a cosmetic miss into an error.
-    mockArtworkFetch('https://cdn.example.com/ep-broken.jpg', () =>
-      Promise.reject(new Error('ENOTFOUND cdn.example.com')),
+    mockArtworkFetch('http://198.51.100.11/ep-broken.jpg', () =>
+      Promise.reject(new Error('ENOTFOUND 198.51.100.11')),
     );
 
     const response = await tintOf(brokenArt);
@@ -157,7 +162,7 @@ describe('an episode with its own artwork', () => {
       'base64',
     );
 
-    const fetchSpy = mockArtworkFetch('https://cdn.example.com/ep-art.jpg', () =>
+    const fetchSpy = mockArtworkFetch('http://198.51.100.10/ep-art.jpg', () =>
       Promise.resolve(
         new Response(red, { status: 200, headers: { 'content-type': 'image/png' } }),
       ),
