@@ -10,16 +10,26 @@
  * It writes into the same `transcripts` row the publisher's would occupy, with
  * `source: 'generated'`. An episode has one transcript; where it came from is a
  * property of that transcript, not a reason for a second table.
+ *
+ * **The work happens in a worker, not in the request.** Asking only writes a
+ * row to the queue. This used to run inline — `void run(...)` after the response
+ * had gone out — and the state that tracked it lived in module-level `Map`s,
+ * which is correct exactly as long as the process survives. It routinely did
+ * not: a deploy, a crash, or a free-tier instance being reaped mid-job left the
+ * transcript saying `processing` with nothing working on it and no way to tell,
+ * so the client polled a job that would never finish and never fail. See
+ * `queue.ts` for the state that replaced those maps.
  */
 
-import { episodes, transcripts, type StoredSegment } from '@cue/db';
+import { episodes, transcripts, type Database, type StoredSegment } from '@cue/db';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { AppError } from '../errors.ts';
-import { resolve } from './access.ts';
+import { claimQuota, keyFor, refundQuota } from './access.ts';
 import { fetchAudio } from './audio.ts';
 import { transcribe as transcribeChunk, type TranscribedSegment } from './groq.ts';
 import { chunkMp3, durationMs } from './mp3.ts';
+import { complete, enqueue, fail, heartbeat, isActive, jobFor, type JobProgress } from './queue.ts';
 
 /**
  * Upload budget per request.
@@ -30,57 +40,19 @@ import { chunkMp3, durationMs } from './mp3.ts';
  */
 const CHUNK_BYTES = 20 * 1024 * 1024;
 
-/**
- * How long a `processing` row is believed before it is treated as abandoned.
- *
- * Transcription runs in this process, so a deploy or a crash mid-job leaves a
- * row claiming to be in progress with nothing working on it. Without this, that
- * episode could never be transcribed again — the guard against double-starting
- * would keep refusing forever.
- */
-const STALE_PROCESSING_MS = 20 * 60 * 1000;
+export type TranscribeProgress = JobProgress;
 
-/** Jobs in flight in *this* process, so two requests cannot start the same one. */
-const inFlight = new Set<string>();
-
-export function isTranscribing(episodeId: string): boolean {
-  return inFlight.has(episodeId);
+/** Whether an episode is queued or running, anywhere. */
+export function isTranscribing(app: FastifyInstance, episodeId: string): Promise<boolean> {
+  return isActive(app.db, episodeId);
 }
 
 /**
- * How far along a running job is.
+ * Ask for a transcript.
  *
- * Deliberately in memory and not in the database, for the same reason
- * `inFlight` above is: the work happens in this process, so progress only means
- * anything while this process is doing it. A crash takes the job with it, and a
- * percentage left behind in a row would then be a number describing nothing.
- *
- * `stage` rather than a bare fraction, because the two phases fail and stall for
- * completely different reasons and a listener watching a bar sit at 4% deserves
- * to know whether we are downloading a publisher's audio or waiting on a model.
- */
-export type TranscribeProgress = {
-  stage: 'fetching' | 'splitting' | 'transcribing' | 'saving';
-  /** Chunks finished and chunks total. Both 0 before the audio has been split. */
-  done: number;
-  total: number;
-};
-
-const progress = new Map<string, TranscribeProgress>();
-
-export function transcribeProgress(episodeId: string): TranscribeProgress | null {
-  return progress.get(episodeId) ?? null;
-}
-
-/**
- * Start transcribing, and return once it is under way rather than once it is
- * finished.
- *
- * An hour of audio is a couple of minutes of work — several uploads, each of
- * them tens of megabytes. Holding an HTTP request open for that would time out
- * at every proxy between here and the client. So the row moves to `processing`,
- * the caller gets that immediately, and the clients poll the transcript
- * endpoint they already use.
+ * Returns as soon as the job is *recorded*, not when it is started and
+ * certainly not when it is finished — an hour of audio is several large uploads
+ * and minutes of work, which no HTTP request should be held open for.
  */
 export async function startTranscription(
   app: FastifyInstance,
@@ -88,7 +60,7 @@ export async function startTranscription(
   userId: string,
 ): Promise<{ started: boolean; detail: string | null }> {
   const [episode] = await app.db
-    .select()
+    .select({ id: episodes.id })
     .from(episodes)
     .where(eq(episodes.id, episodeId))
     .limit(1);
@@ -105,52 +77,46 @@ export async function startTranscription(
     return { started: false, detail: 'This episode already has a transcript' };
   }
 
-  const stale =
-    existing?.status === 'processing' &&
-    Date.now() - existing.fetchedAt.getTime() > STALE_PROCESSING_MS;
-
-  if (inFlight.has(episodeId) || (existing?.status === 'processing' && !stale)) {
+  // Asked twice for the same episode: join the job that exists rather than
+  // starting a second one against the same audio.
+  if (await isActive(app.db, episodeId)) {
     return { started: false, detail: 'Already being transcribed' };
   }
 
-  // The quota is claimed here, before any work, so two people asking for the
-  // same episode at once cannot both pass a limit of one.
-  const funding = await resolve(app, userId);
-
-  inFlight.add(episodeId);
-  progress.set(episodeId, { stage: 'fetching', done: 0, total: 0 });
-  await mark(app, episodeId, 'processing', null);
-
   /**
-   * Deliberately not awaited.
+   * Charged here, before the job is visible to a worker.
    *
-   * The work continues after this function returns and after the HTTP response
-   * is sent. `void` with a `catch` rather than a floating promise: an
-   * unhandled rejection here would take down the process, and the failure it
-   * would take it down for is a publisher's dead audio URL.
+   * Quota belongs to the asking, not to the doing: two people requesting the
+   * same episode at once must not both pass a limit of one, and someone must
+   * not be able to queue a hundred episodes and be billed for the first. What
+   * the job stores is the *day* it was charged to, so a worker in another
+   * process can put it back if the work never happens.
    */
-  void run(app, episodeId, episode.audioUrl, funding)
-    .then(() => funding.settle('ok'))
-    .catch(async (error: unknown) => {
-      app.log.error({ err: error, episodeId }, 'transcription failed');
-      await funding.settle('failed');
-      await mark(app, episodeId, 'failed', detailOf(error));
-    })
-    .finally(() => {
-      inFlight.delete(episodeId);
-      progress.delete(episodeId);
-    });
+  const { metered, day } = await claimQuota(app, userId);
+
+  await enqueue(app.db, { episodeId, userId, quotaDay: metered ? day : null });
+  await mark(app.db, episodeId, 'processing', null);
 
   return { started: true, detail: null };
 }
 
-function detailOf(error: unknown): string {
-  if (error instanceof AppError) return error.message;
-  return 'Transcription failed. It can be tried again.';
+/** How far along, read from the row so any instance can answer. */
+export async function transcribeProgress(
+  app: FastifyInstance,
+  episodeId: string,
+): Promise<TranscribeProgress | null> {
+  const job = await jobFor(app.db, episodeId);
+  if (!job || job.status !== 'running' || !job.stage) return null;
+
+  return {
+    stage: job.stage as TranscribeProgress['stage'],
+    done: job.done,
+    total: job.total,
+  };
 }
 
 async function mark(
-  app: FastifyInstance,
+  db: Database,
   episodeId: string,
   status: 'processing' | 'failed',
   detail: string | null,
@@ -165,10 +131,66 @@ async function mark(
     fetchedAt: new Date(),
   };
 
-  await app.db
+  await db
     .insert(transcripts)
     .values(values)
     .onConflictDoUpdate({ target: transcripts.episodeId, set: values });
+}
+
+function detailOf(error: unknown): string {
+  if (error instanceof AppError) return error.message;
+  return 'Transcription failed. It can be tried again.';
+}
+
+/**
+ * Do one job, start to finish.
+ *
+ * Called by the worker loop with a job it has already claimed. Everything that
+ * can fail is inside the try: the caller's contract is that this settles the
+ * job either way and never throws, because a rejection escaping here would take
+ * the loop — and every job behind it — down with it.
+ */
+export async function runJob(
+  app: FastifyInstance,
+  job: { episodeId: string; userId: string | null; quotaDay: string | null },
+): Promise<void> {
+  const { episodeId } = job;
+
+  try {
+    const [episode] = await app.db
+      .select({ audioUrl: episodes.audioUrl })
+      .from(episodes)
+      .where(eq(episodes.id, episodeId))
+      .limit(1);
+
+    if (!episode) throw new AppError('not_found', 'Episode not found');
+    if (!job.userId) throw new AppError('bad_request', 'The account that asked for this is gone');
+
+    // Resolved now rather than carried from the request: this may be a different
+    // process, and a provider key is not something to store on a queue row.
+    const funding = await keyFor(app, job.userId);
+
+    await run(app, episodeId, episode.audioUrl, funding);
+    await complete(app.db, episodeId);
+  } catch (error) {
+    const detail = detailOf(error);
+    const { exhausted } = await fail(app.db, episodeId, detail);
+
+    app.log.error({ err: error, episodeId, exhausted }, 'transcription attempt failed');
+
+    if (exhausted) {
+      // Only now is this a dead end worth showing. Marking the transcript
+      // failed while a retry is still queued would report one to a reader who
+      // is about to get a transcript.
+      await mark(app.db, episodeId, 'failed', detail);
+
+      // The work was charged for and will not happen. Refunded here rather than
+      // per attempt, because a retry spends nothing new.
+      if (job.userId && job.quotaDay) {
+        await refundQuota(app, job.userId, job.quotaDay).catch(() => undefined);
+      }
+    }
+  }
 }
 
 async function run(
@@ -177,13 +199,15 @@ async function run(
   audioUrl: string,
   funding: { key: string; byok: boolean },
 ): Promise<void> {
+  await heartbeat(app.db, episodeId, { stage: 'fetching', done: 0, total: 0 });
+
   const audio = await fetchAudio(audioUrl);
 
   if (audio.status !== 'ok') {
     throw new AppError('upstream_unavailable', `Could not fetch the audio: ${audio.detail}`);
   }
 
-  progress.set(episodeId, { stage: 'splitting', done: 0, total: 0 });
+  await heartbeat(app.db, episodeId, { stage: 'splitting', done: 0, total: 0 });
 
   const chunks = chunkMp3(audio.bytes, CHUNK_BYTES);
 
@@ -225,7 +249,7 @@ async function run(
    * into a fast failure for everyone.
    */
   let done = 0;
-  progress.set(episodeId, { stage: 'transcribing', done, total: pieces.length });
+  await heartbeat(app.db, episodeId, { stage: 'transcribing', done, total: pieces.length });
 
   for (const piece of pieces) {
     const segments = await transcribeChunk({
@@ -236,7 +260,10 @@ async function run(
     });
 
     done += 1;
-    progress.set(episodeId, { stage: 'transcribing', done, total: pieces.length });
+    // Doubles as the liveness beat. A chunk is minutes of work, so a job that
+    // did not report between them would look abandoned and be taken by another
+    // worker halfway through.
+    await heartbeat(app.db, episodeId, { stage: 'transcribing', done, total: pieces.length });
 
     for (const segment of shift(segments, piece.startMs)) {
       collected.push({
@@ -256,7 +283,11 @@ async function run(
     throw new AppError('upstream_unavailable', 'The transcription came back empty');
   }
 
-  progress.set(episodeId, { stage: 'saving', done: pieces.length, total: pieces.length });
+  await heartbeat(app.db, episodeId, {
+    stage: 'saving',
+    done: pieces.length,
+    total: pieces.length,
+  });
 
   await app.db
     .update(transcripts)

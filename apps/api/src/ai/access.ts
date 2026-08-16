@@ -134,6 +134,102 @@ export async function resolve(
   };
 }
 
+/**
+ * Whose key pays, without touching the quota.
+ *
+ * Split out for work that is charged when it is *asked for* and run later by
+ * something else. A transcription claims its quota when it is queued — that is
+ * what stops one person queueing a hundred episodes — but the key it runs with
+ * has to be resolved when a worker actually picks it up, in a different process
+ * from the one that took the payment, and possibly after a restart.
+ *
+ * A key is never stored on the job for the same reason it is encrypted at rest:
+ * a credential that bills someone real money does not belong in a queue row.
+ * Deriving it again costs one indexed read and a decrypt.
+ */
+export async function keyFor(
+  app: FastifyInstance,
+  userId: string,
+): Promise<Funding> {
+  const own = await userKey(app, userId);
+  if (own) return { key: own, byok: true };
+
+  const operator = app.config.ai.operatorKey;
+  if (!operator) {
+    throw new AppError(
+      'bad_request',
+      'AI features need a Groq API key. Add one in Settings — the free tier is enough.',
+    );
+  }
+
+  return { key: operator, byok: false };
+}
+
+/**
+ * Claim one unit against a user's day, or throw if they are out.
+ *
+ * Returns the day it was charged to so a refund can find it later. Recomputing
+ * `utcDay()` at refund time would miss for any job that crossed midnight
+ * between being queued and failing — rare, but it would quietly hand out a
+ * credit on a day nobody was charged for.
+ */
+export async function claimQuota(
+  app: FastifyInstance,
+  userId: string,
+): Promise<{ metered: boolean; day: string | null }> {
+  // Their own key is their own bill: never counted, never capped.
+  const own = await userKey(app, userId);
+  if (own) return { metered: false, day: null };
+
+  if (!app.config.ai.operatorKey) {
+    throw new AppError(
+      'bad_request',
+      'AI features need a Groq API key. Add one in Settings — the free tier is enough.',
+    );
+  }
+
+  const day = utcDay();
+  const limit = app.config.ai.dailyQuota;
+
+  const [row] = await app.db
+    .insert(aiUsage)
+    .values({ userId, day, count: 1 })
+    .onConflictDoUpdate({
+      target: [aiUsage.userId, aiUsage.day],
+      set: { count: sql`${aiUsage.count} + 1` },
+    })
+    .returning({ count: aiUsage.count });
+
+  const used = row?.count ?? limit + 1;
+
+  if (used > limit) {
+    await refund(app, userId, day);
+    throw new AppError(
+      'rate_limited',
+      `That is your ${limit} AI requests for today. Add your own Groq key in Settings for unlimited use — the free tier covers this easily.`,
+      { retryAfterSec: secondsUntilUtcMidnight() },
+    );
+  }
+
+  return { metered: true, day };
+}
+
+/**
+ * Give a claimed unit back.
+ *
+ * Exported because the refund may happen in a different process than the claim
+ * — a worker failing a job the API queued. The previous design held this as a
+ * closure, which is exactly the state a restart destroys: the work was charged
+ * for, the job died, and nobody was ever credited.
+ */
+export async function refundQuota(
+  app: FastifyInstance,
+  userId: string,
+  day: string,
+): Promise<void> {
+  await refund(app, userId, day);
+}
+
 async function refund(app: FastifyInstance, userId: string, day: string): Promise<void> {
   await app.db
     .update(aiUsage)

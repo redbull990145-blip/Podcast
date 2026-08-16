@@ -146,6 +146,32 @@ happily without them, but rate limiting is disabled entirely when they are
 absent — including the throttle that stands between the sign-in endpoint and an
 online password-guessing attack.
 
+### Transcription runs in a worker
+
+Asking for a transcript writes a row to `transcription_jobs`; a worker claims it
+and does the work. The request returns as soon as the job is *recorded*, because
+an hour of audio is several large uploads and minutes of work — nothing an HTTP
+request should be held open for.
+
+The queue is Postgres, not a broker. What is needed here is a claim two workers
+cannot both win, a heartbeat, and a retry ceiling, and `FOR UPDATE SKIP LOCKED`
+already gives all three — a broker would be another service to run, pay for and
+lose data in, holding a queue that is usually empty.
+
+The state is in the database rather than in the process, which is the whole
+point. It used to be in module-level maps, so a restart — a deploy, a crash, an
+idle instance being reaped — left the transcript saying `processing` with
+nothing working on it, and the client polling a job that would never finish and
+never fail. Now an abandoned job stops reporting, and the next worker takes it.
+
+By default the worker runs inside the API. `TRANSCRIBE_WORKER=off` plus
+`npm run worker` moves it to its own process — same code, same queue, so it is a
+deployment change and not a rewrite. Worth doing when transcription starts
+hurting the API: a job holds an entire episode in memory to walk its frame
+boundaries, and on a small instance that is enough to get the process killed,
+taking every in-flight request with it. See `render.yaml` for the second
+service.
+
 ### Email verification
 
 Sign-up emails a six-digit code, and an account cannot be used until it is

@@ -100,6 +100,16 @@ const envSchema = z.object({
   AI_DAILY_QUOTA: z.coerce.number().int().min(0).default(20),
 
   /**
+   * Whether this process also runs the transcription worker.
+   *
+   * On by default, which keeps a single-service deployment working with no
+   * configuration. Set it to `off` when the worker runs as its own service
+   * (`npm run worker`), so the API stays a request handler and a job cannot
+   * take a web instance's memory with it.
+   */
+  TRANSCRIBE_WORKER: z.enum(['on', 'off']).default('on'),
+
+  /**
    * Resend API key, which is what makes email verification possible at all.
    *
    * Optional, and its absence is a supported configuration rather than a broken
@@ -148,6 +158,8 @@ export type Config = {
    * off rather than leaving it on with no way to deliver a code.
    */
   email: { apiKey: string; from: string } | null;
+  /** Whether this process runs the transcription worker alongside the API. */
+  runWorker: boolean;
 };
 
 /**
@@ -257,5 +269,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     email: value.RESEND_API_KEY
       ? { apiKey: value.RESEND_API_KEY, from: value.EMAIL_FROM }
       : null,
+    // Read by the entry points, not by `buildServer` — see run-worker.ts for
+    // why a test that builds a server must not thereby start a worker.
+    runWorker: value.TRANSCRIBE_WORKER === 'on',
   };
 }

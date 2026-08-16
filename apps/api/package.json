@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=../../.env src/index.ts",
     "start": "node --env-file-if-exists=../../.env dist/index.js",
+    "worker": "node --env-file-if-exists=../../.env dist/worker.js",
+    "worker:dev": "tsx watch --env-file-if-exists=../../.env src/worker-main.ts",
     "build": "node build.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

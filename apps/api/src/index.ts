@@ -3,11 +3,15 @@
  */
 
 import { loadConfig } from './config.ts';
+import { attachWorker } from './run-worker.ts';
 import { buildServer } from './server.ts';
 
 async function main(): Promise<void> {
   const config = loadConfig();
   const app = await buildServer(config);
+
+  // Runs alongside the API unless the deployment gives it its own process.
+  attachWorker(app);
 
   // Drain in-flight requests before exiting. Without this, a deploy cuts
   // whatever was mid-response — which on a podcast app means a client that

@@ -59,22 +59,30 @@ export function aiRoutes(app: FastifyInstance): void {
       .where(eq(transcripts.episodeId, id))
       .limit(1);
 
-    const [bundle, quota] = await Promise.all([cached(app, id, language), quotaFor(app, user.id)]);
+    const [bundle, quota, active, progress] = await Promise.all([
+      cached(app, id, language),
+      quotaFor(app, user.id),
+      isTranscribing(app, id),
+      transcribeProgress(app, id),
+    ]);
 
     return ok({
       ...bundle,
       transcript: {
         present: Boolean(row && row.status === 'ready' && row.segments.length > 0),
         source: row?.source ?? null,
-        // `processing` is reported from the in-process set as well as the row,
-        // so a job that started a moment ago is visible before its write lands.
-        status: isTranscribing(id) ? 'processing' : (row?.status ?? null),
+        // Queued counts as processing: the work is recorded and a worker will
+        // reach it, which is what the reader is waiting to hear.
+        status: active ? 'processing' : (row?.status ?? null),
         timed: Boolean(row?.segments.some((segment) => segment.endMs > 0)),
-        // Null unless a job is running in *this* process. Clients treat its
-        // absence as "working, no detail" rather than as "not working", because
-        // behind more than one instance the poll can land on a server that is
-        // not the one doing the work.
-        progress: transcribeProgress(id),
+        /**
+         * Read from the job row, so any instance can answer it. This used to
+         * come from a map in the process that happened to start the work, which
+         * meant that behind more than one server the poll usually landed
+         * somewhere else and reported nothing — indistinguishable, to the
+         * client, from a job that had died.
+         */
+        progress,
       },
       quota,
     });

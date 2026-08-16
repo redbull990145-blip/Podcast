@@ -33,8 +33,14 @@ export type { PlaybackProgressRow, QueueItemRow } from './playback.ts';
 export { playlistItems, playlists } from './playlist.ts';
 export type { PlaylistItemRow, PlaylistRow } from './playlist.ts';
 
-export { transcripts } from './transcript.ts';
-export type { NewTranscriptRow, StoredSegment, TranscriptRow } from './transcript.ts';
+export { transcriptionJobs, transcripts } from './transcript.ts';
+export type {
+  NewTranscriptionJobRow,
+  NewTranscriptRow,
+  StoredSegment,
+  TranscriptionJobRow,
+  TranscriptRow,
+} from './transcript.ts';
 
 export { aiUsage, episodeAi, userApiKeys } from './ai.ts';
 export type {

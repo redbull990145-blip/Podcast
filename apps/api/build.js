@@ -15,8 +15,11 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
 const external = Object.keys(pkg.dependencies ?? {}).filter((name) => !name.startsWith('@cue/'));
 
 await build({
-  entryPoints: ['src/index.ts'],
-  outfile: 'dist/index.js',
+  // Two entrypoints, one bundle config. The worker can run inside the API or as
+  // its own process; building both every time means the choice is a deployment
+  // setting rather than a rebuild.
+  entryPoints: { index: 'src/index.ts', worker: 'src/worker-main.ts' },
+  outdir: 'dist',
   bundle: true,
   platform: 'node',
   format: 'esm',

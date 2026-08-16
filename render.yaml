@@ -66,3 +66,41 @@ services:
         sync: false
       - key: EMAIL_FROM
         sync: false
+
+# ---------------------------------------------------------------------------
+# Running transcription on its own instance.
+#
+# Not required. The worker runs inside the API by default, and the jobs are
+# durable either way — a restart costs a retry rather than the job.
+#
+# It becomes worth separating when transcription starts hurting the API, which
+# it does by holding an entire episode in memory to walk its frame boundaries.
+# On a small instance that is enough to get the process killed, and killing the
+# API kills every request in flight with it. A second service gives that work
+# its own memory, so the worst case is a transcript that retries rather than an
+# outage.
+#
+# To do it: uncomment below, and set TRANSCRIBE_WORKER=off on the web service
+# above so the work happens in exactly one place. Both need the same database
+# and the same Groq key — the queue is the only thing they share. Note that
+# Render's background workers are not on the free plan.
+# ---------------------------------------------------------------------------
+#  - type: worker
+#    name: cue-transcriber
+#    runtime: node
+#    rootDir: .
+#    buildCommand: npm ci && npm run build --workspace @cue/api
+#    startCommand: npm run worker --workspace @cue/api
+#    envVars:
+#      - key: NODE_ENV
+#        value: production
+#      - key: TRANSCRIBE_WORKER
+#        value: 'on'
+#      - key: DATABASE_URL
+#        sync: false
+#      - key: GROQ_API_KEY
+#        sync: false
+#      - key: API_KEY_ENCRYPTION_SECRET
+#        sync: false
+#      - key: BETTER_AUTH_SECRET
+#        sync: false
