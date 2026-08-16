@@ -104,19 +104,23 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
     try {
       if (mode === 'signup') {
-        await api.signUp(signUpInput.parse({ email, password, name }));
+        const created = await api.signUp(signUpInput.parse({ email, password, name }));
 
         /**
-         * When verification is on, signing up does not sign you in — the code
-         * has just been emailed and the account is unusable until it is
-         * entered. `getMe` is what distinguishes that from a deployment with no
-         * mail provider, where sign-up *does* sign you in and sending anyone to
-         * a code screen would strand them waiting for an email that is never
-         * coming. Asking the server beats inferring it from configuration the
-         * client cannot see.
+         * No token means the account exists but has no session, which is
+         * exactly what "we have emailed you a code" looks like on the wire.
+         * Read off this response rather than confirmed with a follow-up
+         * request: a second call is a second thing that can fail, and when it
+         * did — a stale service worker answering `/me` from its own cache — a
+         * sign-up that had genuinely succeeded, and had already sent the email,
+         * was reported to the user as an error.
+         *
+         * It also distinguishes this from a deployment with no mail provider,
+         * where sign-up returns a token and signs you straight in. Sending
+         * those users to a code screen would strand them waiting for an email
+         * that is never coming.
          */
-        const { user } = await api.getMe();
-        if (!user) {
+        if (!created.token) {
           setPendingEmail(email);
           setBusy(false);
           return;

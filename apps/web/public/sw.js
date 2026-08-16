@@ -16,7 +16,27 @@
  * lives on a different host in every deployment.
  */
 
-const VERSION = 'v1';
+/**
+ * Bump this to force every installed worker to be replaced.
+ *
+ * It names the caches below, so raising it drops the old ones on activate. But
+ * the more important effect is the byte change itself: a browser decides
+ * whether to install a new worker by comparing this script to the installed
+ * copy, and an identical script is not an update no matter what else changed
+ * around it.
+ *
+ * That matters because a worker's Content-Security-Policy is fixed at install
+ * time, from the headers that delivered *this file*. Changing the CSP in
+ * next.config.ts therefore does nothing on its own — the header on disk is
+ * right, every already-installed worker keeps enforcing the old one, and the
+ * two disagree indefinitely. v1 shipped without `connect-src`, so its fetches
+ * to the API were refused by its own policy and every API read returned the
+ * synthetic 503 below, which the app renders as "Offline" while the network is
+ * perfectly fine.
+ *
+ * So: any change to the worker's CSP needs this bumped in the same commit.
+ */
+const VERSION = 'v2';
 
 const SHELL = `cue-shell-${VERSION}`;
 const STATIC = `cue-static-${VERSION}`;
@@ -127,6 +147,21 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(cacheFirst(request, STATIC));
     return;
   }
+
+  /**
+   * Never answer for the session endpoint.
+   *
+   * `/me` is "who am I", and every other answer to that is worse than waiting
+   * for the real one: a cached copy signs a signed-out person back in, and the
+   * synthetic 503 below reports a working network as offline. Both are states
+   * the app acts on rather than displays, so getting them wrong does not look
+   * like a caching bug — it looks like sign-in being broken, which is exactly
+   * how the v1 CSP problem presented.
+   *
+   * Passing it through costs nothing offline: the request simply fails, which
+   * is what "we do not know who you are" already means to every caller.
+   */
+  if (API_ORIGIN && url.origin === API_ORIGIN && url.pathname === '/me') return;
 
   if (API_ORIGIN && url.origin === API_ORIGIN) {
     event.respondWith(staleWhileRevalidate(request, DATA));

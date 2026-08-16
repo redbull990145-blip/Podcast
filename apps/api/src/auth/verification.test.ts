@@ -74,6 +74,26 @@ describe('with a mail provider configured', () => {
     await app.close();
   });
 
+  /**
+   * The signal the sign-up screen switches on.
+   *
+   * With verification required, Better Auth creates the account but mints no
+   * session — so the absence of a token *is* "we emailed a code". The client
+   * reads it straight off this response rather than making a second request to
+   * find out, which matters because that second request is one more thing that
+   * can fail and turn a successful sign-up into a visible error.
+   */
+  it('creates the account without a session token', async () => {
+    const response = await signUp(app, 'tokenless@example.com');
+
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json() as { token: unknown; user?: { id: string } };
+    expect(body.token).toBeFalsy();
+    // The account itself must still exist, or there would be nothing to verify.
+    expect(body.user?.id).toBeTruthy();
+  });
+
   it('refuses to sign in until the address is confirmed', async () => {
     await signUp(app, 'pending@example.com');
 
