@@ -58,3 +58,11 @@ services:
         sync: false
       - key: API_KEY_ENCRYPTION_SECRET
         sync: false
+
+      # Email verification. Without RESEND_API_KEY the API still boots and
+      # signs people up — it just never asks them to confirm an address, and
+      # says so in the log at startup.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false

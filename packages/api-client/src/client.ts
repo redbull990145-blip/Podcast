@@ -42,14 +42,27 @@ export class ApiClientError extends Error {
   readonly fields: Record<string, string> | undefined;
   readonly retryAfterSec: number | undefined;
   readonly status: number;
+  /**
+   * Better Auth's own error code, on the auth endpoints only.
+   *
+   * Kept separate from `code` because it comes from a different vocabulary —
+   * this API's codes are a closed union, Better Auth's are its own strings.
+   * Carrying it matters for the ones that are a *state* rather than a mistake:
+   * `EMAIL_NOT_VERIFIED` means the password was right and the address is not
+   * confirmed yet, which the UI answers by asking for a code rather than by
+   * reporting a failure. Matching that on the human-readable message instead
+   * would break the first time the wording changed.
+   */
+  readonly authCode: string | undefined;
 
-  constructor(error: ApiError, status: number) {
+  constructor(error: ApiError & { authCode?: string }, status: number) {
     super(error.message);
     this.name = 'ApiClientError';
     this.code = error.code;
     this.fields = error.fields;
     this.retryAfterSec = error.retryAfterSec;
     this.status = status;
+    this.authCode = error.authCode;
   }
 
   /**
@@ -193,6 +206,7 @@ export function createClient(options: ClientOptions) {
         {
           code: response.status === 401 ? 'unauthorized' : 'bad_request',
           message: payload?.message ?? 'Could not sign you in',
+          ...(payload?.code ? { authCode: payload.code } : {}),
         },
         response.status,
       );
@@ -224,6 +238,34 @@ export function createClient(options: ClientOptions) {
 
     signOut() {
       return authRequest<Record<string, never>>('/sign-out', {});
+    },
+
+    /**
+     * Confirm an address with the code that was emailed to it.
+     *
+     * Signs the account in on success, so a new user goes from the code straight
+     * into the app rather than being returned to a sign-in form to type the
+     * password they entered ninety seconds ago.
+     */
+    verifyEmail(input: { email: string; otp: string }) {
+      return authRequest<{ token: string; user: { id: string } }>(
+        '/email-otp/verify-email',
+        input,
+      );
+    },
+
+    /**
+     * Send a fresh verification code.
+     *
+     * Needed for more than a lost email: with verification required, an account
+     * created before this shipped — or one whose first code expired — has no
+     * other way back in.
+     */
+    sendVerificationOtp(input: { email: string }) {
+      return authRequest<{ success: boolean }>('/email-otp/send-verification-otp', {
+        ...input,
+        type: 'email-verification',
+      });
     },
 
     /** The signed-in user, or null. Never throws for an anonymous caller. */

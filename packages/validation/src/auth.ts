@@ -39,3 +39,21 @@ export type SignInInput = z.infer<typeof signInInput>;
 
 export const signUpInput = z.object({ email, password, name: displayName });
 export type SignUpInput = z.infer<typeof signUpInput>;
+
+/** Mirrors `otpLength` on the emailOTP plugin in `apps/api/src/auth/auth.ts`. */
+export const OTP_LENGTH = 6;
+
+/**
+ * A verification code.
+ *
+ * Digits only and exactly six, so a paste that picked up a stray space or the
+ * surrounding word fails here — next to the field — rather than being spent as
+ * one of the three attempts the server allows per code.
+ */
+export const otp = z
+  .string()
+  .trim()
+  .regex(new RegExp(`^\\d{${OTP_LENGTH}}$`), `Enter the ${OTP_LENGTH}-digit code`);
+
+export const verifyEmailInput = z.object({ email, otp });
+export type VerifyEmailInput = z.infer<typeof verifyEmailInput>;

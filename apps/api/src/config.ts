@@ -98,6 +98,29 @@ const envSchema = z.object({
 
   /** Operator-key requests per user per UTC day. */
   AI_DAILY_QUOTA: z.coerce.number().int().min(0).default(20),
+
+  /**
+   * Resend API key, which is what makes email verification possible at all.
+   *
+   * Optional, and its absence is a supported configuration rather than a broken
+   * one: without it the API cannot send a code, so it does not pretend to —
+   * verification is left off and accounts work immediately. Requiring
+   * verification with no way to deliver it would lock every new account out of
+   * the app it just created, which is the one failure mode a person cannot
+   * work around themselves.
+   */
+  RESEND_API_KEY: blankAsUnset(z.string().min(1).optional()),
+
+  /**
+   * The From address on verification mail.
+   *
+   * Defaults to Resend's shared sandbox sender, which needs no DNS and works
+   * the moment a key exists — but only delivers to the address that owns the
+   * Resend account. Real signups need a verified domain here, and the default
+   * being visibly a test address is what makes that obvious before launch
+   * rather than after the first person never receives their code.
+   */
+  EMAIL_FROM: blankAsUnset(z.string().min(3).default('Cue <onboarding@resend.dev>')),
 });
 
 export type Config = {
@@ -120,6 +143,11 @@ export type Config = {
     encryptionSecret: string | null;
     dailyQuota: number;
   };
+  /**
+   * Null when no mail provider is configured, which turns email verification
+   * off rather than leaving it on with no way to deliver a code.
+   */
+  email: { apiKey: string; from: string } | null;
 };
 
 /**
@@ -224,5 +252,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       encryptionSecret: value.API_KEY_ENCRYPTION_SECRET ?? null,
       dailyQuota: value.AI_DAILY_QUOTA,
     },
+    // The key is what decides this, not the From address: a From with no key
+    // cannot send, and a key with the default From can.
+    email: value.RESEND_API_KEY
+      ? { apiKey: value.RESEND_API_KEY, from: value.EMAIL_FROM }
+      : null,
   };
 }

@@ -1,11 +1,19 @@
 'use client';
 
-import { useId, type InputHTMLAttributes, type ReactNode } from 'react';
+import { useId, type InputHTMLAttributes, type ReactNode, type Ref } from 'react';
 
 type FieldProps = {
   label: string;
   error?: string | undefined;
   hint?: ReactNode;
+  /**
+   * Forwarded to the input, so a caller can focus or select it — which the
+   * verification screen needs in order to put the caret on the code box and to
+   * re-select a rejected code. Declared explicitly because `ref` is not part of
+   * `InputHTMLAttributes`; React 19 then passes it through the spread below
+   * like any other prop, with no `forwardRef` wrapper.
+   */
+  ref?: Ref<HTMLInputElement>;
 } & Omit<InputHTMLAttributes<HTMLInputElement>, 'id' | 'className'>;
 
 /**

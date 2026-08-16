@@ -34,13 +34,27 @@ declare module 'fastify' {
 /**
  * The Better Auth endpoints that check or mint a credential.
  *
- * These are the guessing surface (`sign-in`), and the account-spam and
- * enumeration surface (`sign-up`, `forget-password`, `reset-password`). The
+ * These are the guessing surface (`sign-in`, `email-otp`), and the account-spam
+ * and enumeration surface (`sign-up`, `forget-password`, `reset-password`). The
  * read-only `get-session` that fires on every page load is deliberately not
  * here — throttling it would rate-limit ordinary browsing. Matched by substring
  * so `/auth/sign-in/email` and `/auth/sign-in/social` are both covered.
+ *
+ * `email-otp` belongs here for both halves of what it does. Verifying is a
+ * guess against a six-digit code — the smallest secret this API accepts — and
+ * while the plugin caps attempts per code, that cap is only as good as the
+ * limit on requesting fresh ones. Sending is a request for us to email an
+ * arbitrary address, which unthrottled is a spam relay pointed at our sending
+ * reputation. Better Auth's own limiter covers neither durably: it is in-memory,
+ * so per-instance and cleared by every deploy.
  */
-const SENSITIVE_AUTH_PATHS = ['/sign-in', '/sign-up', '/forget-password', '/reset-password'];
+const SENSITIVE_AUTH_PATHS = [
+  '/sign-in',
+  '/sign-up',
+  '/forget-password',
+  '/reset-password',
+  '/email-otp',
+];
 
 export function isSensitiveAuthPath(url: string): boolean {
   const path = url.split('?')[0] ?? url;

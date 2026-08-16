@@ -10,8 +10,18 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { api } from '@/lib/api';
+import { VerifyForm } from './verify-form';
 
 type Mode = 'signin' | 'signup';
+
+/**
+ * Better Auth's code for "the password was right, the address is not confirmed".
+ *
+ * A state, not a failure, and the only correct answer to it is to ask for the
+ * code rather than to report an error. Matched on the code and not the message,
+ * which is prose and free to change.
+ */
+const EMAIL_NOT_VERIFIED = 'EMAIL_NOT_VERIFIED';
 
 const COPY = {
   signin: {
@@ -56,6 +66,14 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const formRef = useRef<HTMLFormElement>(null);
 
+  /**
+   * Set once the account exists but the address is not confirmed, which swaps
+   * this form for the code entry. Reached two ways: straight after signing up,
+   * and after signing in to an account that was never verified — the second
+   * being the path back for anyone who closed the tab on the first.
+   */
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
@@ -87,6 +105,22 @@ export function AuthForm({ mode }: { mode: Mode }) {
     try {
       if (mode === 'signup') {
         await api.signUp(signUpInput.parse({ email, password, name }));
+
+        /**
+         * When verification is on, signing up does not sign you in — the code
+         * has just been emailed and the account is unusable until it is
+         * entered. `getMe` is what distinguishes that from a deployment with no
+         * mail provider, where sign-up *does* sign you in and sending anyone to
+         * a code screen would strand them waiting for an email that is never
+         * coming. Asking the server beats inferring it from configuration the
+         * client cannot see.
+         */
+        const { user } = await api.getMe();
+        if (!user) {
+          setPendingEmail(email);
+          setBusy(false);
+          return;
+        }
       } else {
         await api.signIn(signInInput.parse({ email, password }));
       }
@@ -97,6 +131,17 @@ export function AuthForm({ mode }: { mode: Mode }) {
       router.push('/library');
       router.refresh();
     } catch (caught) {
+      /**
+       * Signing in to an unverified account. Better Auth has already sent a
+       * fresh code by this point, so this goes straight to the entry screen
+       * rather than reporting a failure the person cannot act on.
+       */
+      if (caught instanceof ApiClientError && caught.authCode === EMAIL_NOT_VERIFIED) {
+        setPendingEmail(email);
+        setBusy(false);
+        return;
+      }
+
       if (caught instanceof ApiClientError) {
         // The envelope carries field-level detail for exactly this. Without
         // reading it, a rejection lands as a general message at the foot of
@@ -127,6 +172,10 @@ export function AuthForm({ mode }: { mode: Mode }) {
     formRef.current
       ?.querySelector<HTMLInputElement>(`[name="${first}"]`)
       ?.focus();
+  }
+
+  if (pendingEmail) {
+    return <VerifyForm email={pendingEmail} onDone={() => setPendingEmail(null)} />;
   }
 
   return (

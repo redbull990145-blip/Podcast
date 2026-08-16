@@ -1,14 +1,17 @@
 export {
   displayName,
   email,
+  otp,
+  OTP_LENGTH,
   password,
   PASSWORD_MAX,
   PASSWORD_MIN,
   signInInput,
   signUpInput,
+  verifyEmailInput,
 } from './auth.ts';
 
-export type { SignInInput, SignUpInput } from './auth.ts';
+export type { SignInInput, SignUpInput, VerifyEmailInput } from './auth.ts';
 
 export {
   feedUrl,

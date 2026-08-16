@@ -146,6 +146,27 @@ happily without them, but rate limiting is disabled entirely when they are
 absent — including the throttle that stands between the sign-in endpoint and an
 online password-guessing attack.
 
+### Email verification
+
+Sign-up emails a six-digit code, and an account cannot be used until it is
+entered. A code rather than a clickable link because this API serves a web app
+*and* an Android app: a link has to land somewhere, and getting a tapped one
+back into the native app means deep links, an intent filter and a browser
+fallback — platform-specific work that can break on one client while the other
+looks fine. A code is typed into whichever app is already open.
+
+`RESEND_API_KEY` is the switch for the whole feature. With it, verification is
+required; without it, there is no way to deliver a code, so verification is off
+and accounts work immediately — and the API says so at boot. It is deliberately
+not left on with no way to send, because that locks every new account out of
+the app it just created, with no recourse: "resend" would fail the same way.
+
+`EMAIL_FROM` defaults to Resend's shared sandbox sender, which needs no DNS and
+works the moment a key exists — **but only delivers to the address that owns
+the Resend account.** Every other recipient is silently refused, which looks
+exactly like the code never being sent. Verify a domain in Resend and set this
+before real signups.
+
 ## Scripts
 
 Everything runs through Turborepo from the repo root.

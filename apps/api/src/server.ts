@@ -109,7 +109,14 @@ export async function buildServer(config: Config): Promise<FastifyInstance> {
 
   registerErrorHandler(app);
 
-  await registerAuth(app, createAuth(db, config));
+  if (!config.email) {
+    // Verification is off, which is a supported configuration but not an
+    // obvious one — a deployment that silently never asks anyone to confirm
+    // their address should say so rather than be discovered.
+    app.log.warn('RESEND_API_KEY not set — email verification is disabled');
+  }
+
+  await registerAuth(app, createAuth(db, config, app.log));
 
   healthRoutes(app);
   podcastRoutes(app);
