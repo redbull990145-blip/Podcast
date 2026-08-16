@@ -36,7 +36,7 @@
  *
  * So: any change to the worker's CSP needs this bumped in the same commit.
  */
-const VERSION = 'v2';
+const VERSION = 'v3';
 
 const SHELL = `cue-shell-${VERSION}`;
 const STATIC = `cue-static-${VERSION}`;
@@ -138,8 +138,25 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  /**
+   * Only our own images, which in practice is all of them.
+   *
+   * Artwork comes from whatever CDN each publisher uses, so the host list is
+   * unbounded by nature — there is no `connect-src` that could name them, and
+   * the only policy that would permit them is one broad enough (`https:`) to
+   * stop being a policy. Next already solves this: `remotePatterns` in
+   * next.config.ts lets it fetch each cover server-side and serve the optimised
+   * copy from `/_next/image`, which is same-origin and cacheable here.
+   *
+   * A cross-origin cover therefore passes straight through to the browser,
+   * which fetches it in the page's context and is not bound by the worker's
+   * policy. Intercepting it only ever produced a refused fetch inside the
+   * worker and a broken image on the page — strictly worse than not caching it.
+   */
   if (request.destination === 'image') {
-    event.respondWith(cacheFirst(request, MEDIA, MEDIA_LIMIT));
+    if (url.origin === self.location.origin) {
+      event.respondWith(cacheFirst(request, MEDIA, MEDIA_LIMIT));
+    }
     return;
   }
 
