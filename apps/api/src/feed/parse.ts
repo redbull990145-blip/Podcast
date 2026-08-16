@@ -42,8 +42,15 @@ export type ParsedEpisode = {
   transcriptType: string | null;
 };
 
+/** `reason?: undefined` on the success branch: see the note on `UrlCheck` in url-guard.ts. */
 export type ParseResult =
-  | { ok: true; podcast: ParsedPodcast; episodes: ParsedEpisode[]; skipped: number }
+  | {
+      ok: true;
+      podcast: ParsedPodcast;
+      episodes: ParsedEpisode[];
+      skipped: number;
+      reason?: undefined;
+    }
   | { ok: false; reason: string };
 
 const parser = new XMLParser({

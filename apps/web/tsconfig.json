@@ -6,6 +6,13 @@
   // defaults — see apps/api/tsconfig.json for the incident this fixed.
   "extends": "../../packages/config/tsconfig/next.json",
   "compilerOptions": {
+    // Restated rather than only inherited. An extends that fails to resolve
+    // falls back to bare defaults *silently*, and bare defaults mean
+    // `strict: false` — which disables narrowing of discriminated unions and
+    // produces type errors in correct code. See apps/api/tsconfig.json for the
+    // two build environments this actually happened in.
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
     "paths": { "@/*": ["./*"] }
   },
   "include": ["**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

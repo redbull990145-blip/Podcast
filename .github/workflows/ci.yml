@@ -23,6 +23,20 @@ jobs:
 
       - run: npm ci
 
+      # A tsconfig `extends` that fails to resolve does not error — TypeScript
+      # falls back to bare compiler defaults in silence, and bare defaults mean
+      # `strict: false`, which switches off narrowing of discriminated unions.
+      # That shipped ten TS2339s in correct code to a deploy while every check
+      # below stayed green, because they run from the repo root where the
+      # extends always resolves. Asserting the *effective* config is the only
+      # thing here that would have caught it.
+      - name: Assert strict mode survives config resolution
+        run: |
+          for app in api web mobile; do
+            npx tsc --showConfig -p "apps/$app" | grep -q '"strict": true' \
+              || { echo "::error::strict mode lost in apps/$app — check the tsconfig extends chain"; exit 1; }
+          done
+
       # Turbo runs these across the workspace graph and caches by input hash,
       # so an unchanged package is not rechecked.
       - run: npm run typecheck

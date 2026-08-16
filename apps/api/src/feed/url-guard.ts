@@ -32,8 +32,26 @@ export type UrlRejection =
   | 'private-address'
   | 'dns-failure';
 
+/**
+ * `detail?: undefined` on the success branch is deliberate, and is not the
+ * union carrying a field it has no use for.
+ *
+ * Callers read `check.detail` inside `if (!check.allowed)`, which is only legal
+ * because narrowing picks the failure branch. Narrowing is a function of the
+ * *compiler settings*, not of this file: under `strict: false` TypeScript stops
+ * narrowing discriminated unions entirely, and every one of those reads becomes
+ * a TS2339 in code that is otherwise correct. That is not hypothetical — it is
+ * how this repo's deploys failed, twice, when a tsconfig `extends` silently
+ * fell back to bare defaults (see apps/api/tsconfig.json).
+ *
+ * Declaring the property as optional-and-always-undefined on the other branch
+ * makes the read well-typed without narrowing, while keeping `allowed` a real
+ * discriminant: under `strict` this still narrows to `string`, so nothing is
+ * lost where the config is intact. `reason` gets the same treatment for the
+ * same reason — the tests read it under exactly this pattern.
+ */
 export type UrlCheck =
-  | { allowed: true; url: URL; addresses: string[] }
+  | { allowed: true; url: URL; addresses: string[]; detail?: undefined; reason?: undefined }
   | { allowed: false; reason: UrlRejection; detail: string };
 
 /**

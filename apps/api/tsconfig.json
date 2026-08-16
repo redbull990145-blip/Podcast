@@ -11,6 +11,26 @@
   // missing-config error. A relative path resolves by plain filesystem lookup
   // and needs no package resolution at all, so it can't be affected by
   // dependency pruning in any build environment.
+  //
+  // The relative form then hit the *opposite* failure. A filesystem lookup
+  // needs the file to actually be on disk, and a build whose context is this
+  // directory alone has no `../../packages/` to find — workspace *imports*
+  // still resolved, because the root install symlinks them into node_modules,
+  // but `extends` is not an import. TypeScript again fell back to bare
+  // defaults in silence, and bare defaults mean `strict: false`, which turns
+  // off narrowing of discriminated unions: ten TS2339s appeared in code that
+  // was correct, on a union whose `if (!x.allowed)` branch no longer narrowed.
+  //
+  // So neither form is dependable on its own. The strictness this repo relies
+  // on is therefore restated below rather than only inherited. It is a floor,
+  // not a replacement for the shared config: when the extends resolves these
+  // are redundant, and when it does not they are the only thing standing
+  // between a silent downgrade and a build that type-checks what it claims to.
+  // `.github/workflows/ci.yml` asserts the effective config still has them.
   "extends": "../../packages/config/tsconfig/node.json",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true
+  },
   "include": ["src/**/*.ts", "build.js"]
 }

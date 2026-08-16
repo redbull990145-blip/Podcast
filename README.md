@@ -102,6 +102,50 @@ Search and trending additionally need `PODCASTINDEX_KEY` and
 search returns a clear "not configured" error rather than failing obscurely.
 See `.env.example` for where each value comes from.
 
+## Deploying
+
+The two halves deploy to two places, because they are two different shapes of
+program: the web app is a build artefact served from a CDN, and the API is a
+long-lived process that holds connections. Vercel hosts the first well and
+cannot host the second at all — a Fastify `app.listen()` is not a serverless
+function.
+
+| | Where | Config |
+| --- | --- | --- |
+| `apps/web` | Vercel | Root Directory **`apps/web`** |
+| `apps/api` | Render | `render.yaml` (Blueprint) |
+
+**Vercel** needs two settings, and the second is not optional: **Root Directory**
+`apps/web`, and **"Include source files outside of the Root Directory"** turned
+**on**. The app imports `@cue/api-client`, `@cue/design`, `@cue/motion` and
+`@cue/types`, and extends a tsconfig from `packages/config` — none of which
+exist inside `apps/web` alone. Leaving Root Directory at the repo root instead
+makes Vercel build `@cue/api`, which is how this repo spent a day failing to
+deploy on a TypeScript error in code that was correct.
+
+**Render** builds from the repo root (`rootDir: .`), so the whole workspace is
+present and nothing special is needed. Fill in the values `render.yaml` declares
+with `sync: false`.
+
+The two must agree on each other's addresses, and getting this wrong fails
+*silently* — as a CORS error in the browser console, not as a failed deploy:
+
+- `NEXT_PUBLIC_API_URL` (Vercel) → the Render URL. Baked in at build time, so
+  set it **before** the build and redeploy after changing it.
+- `CORS_ORIGINS` (Render) → the Vercel production domain. Preview deployments
+  get a fresh hostname each time and are not on this list, so they cannot reach
+  the API unless you add them.
+- `BETTER_AUTH_URL` (Render) → the API's own public URL.
+
+Because the two are different registrable domains, the session cookie is
+necessarily `SameSite=None; Secure`, which the API already sets when
+`NODE_ENV=production`.
+
+**Set `REDIS_URL` and `REDIS_TOKEN`.** They read as optional and the API boots
+happily without them, but rate limiting is disabled entirely when they are
+absent — including the throttle that stands between the sign-in endpoint and an
+online password-guessing attack.
+
 ## Scripts
 
 Everything runs through Turborepo from the repo root.

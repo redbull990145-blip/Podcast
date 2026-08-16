@@ -19,7 +19,11 @@ describe('withRetry', () => {
 
   /** Run `promise` to settlement while letting every pending timer fire. */
   async function settle<T>(promise: Promise<T>): Promise<T> {
-    const result = promise.then(
+    // `error?: undefined` on the success arm so the read below does not depend
+    // on narrowing, which `strict: false` disables — see url-guard.ts.
+    const result: Promise<
+      { ok: true; value: T; error?: undefined } | { ok: false; error: unknown }
+    > = promise.then(
       (value) => ({ ok: true as const, value }),
       (error: unknown) => ({ ok: false as const, error }),
     );
