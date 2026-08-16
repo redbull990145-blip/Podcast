@@ -1,6 +1,27 @@
 import { join } from 'node:path';
 import type { NextConfig } from 'next';
 
+/**
+ * The API's origin, for the service worker's CSP.
+ *
+ * Parsed rather than interpolated: a malformed value would otherwise be spliced
+ * straight into a security header, and a CSP the browser cannot parse is one it
+ * ignores. Returning null on anything unparseable keeps the policy strict —
+ * `connect-src 'self'` — instead of accidentally permissive. Mirrors
+ * `safeOrigin()` in components/pwa/service-worker.tsx, which resolves the same
+ * value for the same worker from the other side.
+ */
+function apiOrigin(): string | null {
+  const value = process.env['NEXT_PUBLIC_API_URL'];
+  if (!value) return null;
+
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
 const config: NextConfig = {
   // Workspace packages ship TypeScript source rather than a build step, so
   // Next compiles them alongside the app. That keeps edits to a shared token
@@ -69,6 +90,8 @@ const config: NextConfig = {
   },
 
   async headers() {
+    const api = apiOrigin();
+
     return [
       {
         /**
@@ -84,9 +107,33 @@ const config: NextConfig = {
         headers: [
           { key: 'Content-Type', value: 'application/javascript; charset=utf-8' },
           { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
-          // A worker has the run of the origin, so it is worth being explicit
-          // that this one loads nothing from anywhere else.
-          { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self'" },
+          /**
+           * A worker has the run of the origin, so it stays as closed as it can
+           * be: it loads no code from anywhere, and `script-src 'self'` says so.
+           *
+           * `connect-src` has to be stated separately, and this is the part that
+           * is easy to get wrong. There is no `connect-src` here by default, so
+           * fetches fall back to `default-src 'self'` — which reads as
+           * reasonable and quietly forbids the one thing this worker exists to
+           * do. Caching the library, the queue and search results means fetching
+           * the API, and in this deployment the API is a different origin
+           * (Vercel and Render are different registrable domains). So every one
+           * of those fetches was refused before it left the browser and offline
+           * support cached nothing, with the only symptom a CSP line in a
+           * console nobody had open.
+           *
+           * Naming the API origin rather than relaxing the policy: this permits
+           * exactly one host, and only for connections — not for scripts, which
+           * stay `'self'` and are what a CSP is really guarding here.
+           */
+          {
+            key: 'Content-Security-Policy',
+            value: [
+              "default-src 'self'",
+              "script-src 'self'",
+              `connect-src 'self'${api ? ` ${api}` : ''}`,
+            ].join('; '),
+          },
         ],
       },
       {
