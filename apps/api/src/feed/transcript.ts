@@ -16,8 +16,19 @@
 
 import type { TranscriptSegment } from '@cue/types';
 
-/** `00:01:02.345`, `01:02.345`, `00:01:02,345` — hours optional, comma or dot. */
-const TIMESTAMP = /(?:(\d+):)?(\d{1,2}):(\d{2})[.,](\d{1,3})/;
+/**
+ * `00:01:02.345`, `01:02.345`, `00:01:02,345`, `00:01:02` — hours and fraction
+ * both optional, comma or dot.
+ *
+ * Both optionals are there because the strict form silently discarded whole
+ * files. A fractionless `00:00:01 --> 00:00:04` is legal SRT and common in
+ * hand-written files; and pinning the fraction to three digits made
+ * `00:00:01.500000` — what ffmpeg and several Whisper wrappers emit — fail to
+ * match *at all* rather than round, because `\d{1,3}` consumed `500` and then
+ * `\s*-->` met the leftover `000`. Either way the cue was dropped, and a file
+ * of dropped cues is cached as a failure for a day.
+ */
+const TIMESTAMP = /(?:(\d+):)?(\d{1,2}):(\d{2})(?:[.,](\d+))?/;
 
 const CUE_RANGE = new RegExp(`^\\s*${TIMESTAMP.source}\\s*-->\\s*${TIMESTAMP.source}`);
 
@@ -31,10 +42,17 @@ const SPEAKER_PREFIX = /^([A-Z][\w.'-]*(?: [A-Z][\w.'-]*){0,2}):\s+/;
 /** Any remaining markup. VTT allows `<i>`, `<b>`, `<c.classname>` and friends. */
 const TAGS = /<\/?[^>]+>/g;
 
-function toMs(hours: string | undefined, minutes: string, seconds: string, fraction: string): number {
+function toMs(
+  hours: string | undefined,
+  minutes: string,
+  seconds: string,
+  fraction: string | undefined,
+): number {
   // A 2-digit fraction means centiseconds, a 1-digit means tenths. Treating
-  // them all as milliseconds would put a cue 900ms early.
-  const millis = Number(fraction.padEnd(3, '0'));
+  // them all as milliseconds would put a cue 900ms early. Longer than three is
+  // sub-millisecond precision we have no use for, so it is truncated rather
+  // than rejected — and an absent fraction is simply zero.
+  const millis = fraction ? Number(fraction.slice(0, 3).padEnd(3, '0')) : 0;
   return (
     Number(hours ?? 0) * 3_600_000 + Number(minutes) * 60_000 + Number(seconds) * 1000 + millis
   );
@@ -55,6 +73,51 @@ function blocksOf(text: string): string[] {
     .split(/\n\s*\n/)
     .map((block) => block.trim())
     .filter(Boolean);
+}
+
+/**
+ * The offset declared by a WebVTT `X-TIMESTAMP-MAP` header, in ms.
+ *
+ * Files carved out of an HLS stream — which is most machine-generated VTT —
+ * time their cues against the *media segment* they came from, not against the
+ * start of the programme, and reconcile the two with a header:
+ *
+ *     X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000
+ *
+ * `MPEGTS` is a 90 kHz presentation timestamp and `LOCAL` is the cue time it
+ * corresponds to, so every cue is out by `MPEGTS/90000 − LOCAL` until this is
+ * added back. Ignoring it does not corrupt anything or fail loudly; it just
+ * puts the whole transcript uniformly early, which is precisely the "it doesn't
+ * sync" report with no drift and no obvious cause.
+ *
+ * Returns 0 when the header is absent or unparseable, which is the correct
+ * reading — no map means cue times are already programme times.
+ */
+export function timestampMapOffset(source: string): number {
+  const header = /X-TIMESTAMP-MAP\s*=\s*([^\n\r]+)/i.exec(source);
+  if (!header?.[1]) return 0;
+
+  const mpegts = /MPEGTS\s*:\s*(\d+)/i.exec(header[1]);
+  if (!mpegts?.[1]) return 0;
+
+  // 90 kHz is fixed by the MPEG-TS specification, not a property of the file.
+  const mpegtsMs = (Number(mpegts[1]) / 90_000) * 1000;
+
+  // Up to the next comma or space. A character class including `,` would
+  // swallow the separator before `MPEGTS`, and the trailing comma then stops
+  // the value matching a timestamp at all — silently reading LOCAL as zero.
+  const local = /LOCAL\s*:\s*([^,\s]+)/i.exec(header[1]);
+  const localMatch = local?.[1] ? new RegExp(`^${TIMESTAMP.source}$`).exec(local[1].trim()) : null;
+  const localMs = localMatch
+    ? toMs(localMatch[1], localMatch[2]!, localMatch[3]!, localMatch[4])
+    : 0;
+
+  const offset = Math.round(mpegtsMs - localMs);
+
+  // A negative map would move cues before the start of the episode. Real files
+  // do not do this; a file that does is mis-encoded, and trusting it would be
+  // worse than ignoring the header.
+  return offset > 0 ? offset : 0;
 }
 
 function cleanText(lines: string[]): { text: string; speaker: string | null } {
@@ -94,29 +157,88 @@ function cleanText(lines: string[]): { text: string; speaker: string | null } {
  */
 export function parseTranscript(source: string): TranscriptSegment[] {
   const segments: TranscriptSegment[] = [];
+  const offsetMs = timestampMapOffset(source);
+  const blocks = blocksOf(source);
 
-  for (const block of blocksOf(source)) {
+  /**
+   * Whether this file numbers its cues — i.e. whether it is SRT.
+   *
+   * Read from the first block, which in SRT is `1` followed by the timing line.
+   * WebVTT opens with its `WEBVTT` magic instead, and permits arbitrary cue
+   * identifiers that are rarely numeric.
+   */
+  const counted = /^\d+\s*$/m.test(blocks[0]?.split('\n')[0] ?? '');
+
+  for (const block of blocks) {
     const lines = block.split('\n');
 
-    // Find the timing line. SRT puts a counter above it, VTT may put a cue
-    // identifier there, and the WEBVTT header block has none at all.
-    const timingAt = lines.findIndex((line) => CUE_RANGE.test(line));
-    if (timingAt === -1) continue;
+    /**
+     * Every timing line in the block, not just the first.
+     *
+     * A well-formed file puts one cue per blank-line-separated block, and for
+     * those this finds exactly one and behaves as before. The reason it looks
+     * for all of them is that a single missing blank line used to swallow the
+     * entire rest of the file: `findIndex` took the first timing line, and
+     * everything after it — including dozens of later timestamps — became the
+     * *text* of that one cue. The transcript collapsed to a single line pinned
+     * to the first two seconds, with raw timestamps rendered as caption text.
+     */
+    const timingLines: number[] = [];
+    for (let i = 0; i < lines.length; i += 1) {
+      if (CUE_RANGE.test(lines[i]!)) timingLines.push(i);
+    }
+    if (timingLines.length === 0) continue;
 
-    const match = CUE_RANGE.exec(lines[timingAt]!);
-    if (!match) continue;
+    for (let cue = 0; cue < timingLines.length; cue += 1) {
+      const at = timingLines[cue]!;
+      const match = CUE_RANGE.exec(lines[at]!);
+      if (!match) continue;
 
-    const startMs = toMs(match[1], match[2]!, match[3]!, match[4]!);
-    const endMs = toMs(match[5], match[6]!, match[7]!, match[8]!);
+      const startMs = toMs(match[1], match[2]!, match[3]!, match[4]) + offsetMs;
+      const endMs = toMs(match[5], match[6]!, match[7]!, match[8]) + offsetMs;
 
-    // A cue that ends before it starts is corrupt. Keeping it would break the
-    // binary search that finds the active line.
-    if (endMs < startMs) continue;
+      // A cue that ends before it starts is corrupt. Keeping it would break the
+      // binary search that finds the active line.
+      if (endMs < startMs) continue;
 
-    const { text, speaker } = cleanText(lines.slice(timingAt + 1));
-    if (!text) continue;
+      // Up to the next timing line, or the end of the block for the last cue.
+      const until = timingLines[cue + 1] ?? lines.length;
+      const body = lines.slice(at + 1, until);
 
-    segments.push({ index: segments.length, startMs, endMs, text, ...(speaker ? { speaker } : { speaker: null }) });
+      /**
+       * Drop the next cue's counter, but only where counters actually exist.
+       *
+       * In SRT every cue is introduced by a bare number, so when cues have run
+       * together the numeric line before the next timing is a label rather than
+       * dialogue. In WebVTT there is no such convention, and a caption really
+       * can be nothing but a number — a countdown, a score, a year. Trimming it
+       * there deletes speech, and when the number was the cue's only line it
+       * deletes the whole cue.
+       *
+       * `counted` decides once for the file, from whether its very first block
+       * opens with a bare number. That is what distinguishes SRT from VTT here,
+       * and it is a property of the format rather than of the line in hand.
+       */
+      if (
+        counted &&
+        cue + 1 < timingLines.length &&
+        body.length > 1 &&
+        /^\d+$/.test(body.at(-1)!.trim())
+      ) {
+        body.pop();
+      }
+
+      const { text, speaker } = cleanText(body);
+      if (!text) continue;
+
+      segments.push({
+        index: segments.length,
+        startMs,
+        endMs,
+        text,
+        ...(speaker ? { speaker } : { speaker: null }),
+      });
+    }
   }
 
   // Sort defensively rather than trusting file order: a concatenated or
@@ -127,9 +249,29 @@ export function parseTranscript(source: string): TranscriptSegment[] {
   return segments.map((segment, index) => ({ ...segment, index }));
 }
 
-/** Whether a body looks like captions at all, before we spend a parse on it. */
+/**
+ * Whether a body looks like captions at all, before we spend a parse on it.
+ *
+ * Tested per *line*, and that is the fix rather than a refinement. `CUE_RANGE`
+ * is anchored with `^` and carries no `m` flag, so it only ever matched a file
+ * whose very first line was a cue — which no WebVTT file is, since they all
+ * begin `WEBVTT`. The check therefore rested entirely on its fallback, a bare
+ * search for `-->`.
+ *
+ * `-->` also closes an HTML comment. Publisher transcripts are overwhelmingly
+ * `text/html`, and essentially every real publisher page carries an analytics
+ * or conditional comment somewhere — so those pages were being routed to the
+ * caption parser, which found no cues, returned nothing, and had the empty
+ * result cached as a failure for twenty-four hours. The transcript was fine;
+ * we simply never looked at it with the HTML parser.
+ *
+ * A multiline cue range asks the question that was meant all along: does any
+ * line of this file begin with a timestamp range?
+ */
+const CUE_LINE = new RegExp(CUE_RANGE.source, 'm');
+
 export function looksLikeTranscript(source: string): boolean {
-  return CUE_RANGE.test(source) || /-->/.test(source);
+  return CUE_LINE.test(source);
 }
 
 // ------------------------------------------------------------------ html --
@@ -228,7 +370,31 @@ export function parseHtmlTranscript(source: string): TranscriptSegment[] {
   return segments;
 }
 
-/** HTML transcripts carry no timings, so nothing can follow the audio. */
+/**
+ * Whether these timings can actually follow the audio.
+ *
+ * HTML transcripts carry none at all, which is the obvious case. The subtler
+ * one is a file that *has* numbers which do not describe a timeline: broken
+ * exporters write every cue as `00:00:00.000 --> 00:00:0N.000`, giving real
+ * ends and identical starts. The old test — "does any cue end after zero" —
+ * called that timed, and since `activeSegmentIndex` returns the rightmost cue
+ * whose start is at or before the playhead, every position in the episode
+ * resolved to the *last* line. The transcript sat frozen on its final sentence
+ * from the first second onward, which reads as badly broken rather than as
+ * untimed.
+ *
+ * So the question asked is whether the starts actually advance. Two distinct
+ * ones is the minimum that can express an ordering; below that there is no
+ * timeline to follow, and the honest answer is to present the text as prose.
+ * A single-cue transcript is untimed by this measure, which is correct — there
+ * is nothing to follow along with.
+ */
 export function isTimed(segments: TranscriptSegment[]): boolean {
-  return segments.some((segment) => segment.endMs > 0);
+  if (segments.length < 2) return false;
+
+  const first = segments[0]!.startMs;
+  return (
+    segments.some((segment) => segment.endMs > 0) &&
+    segments.some((segment) => segment.startMs !== first)
+  );
 }

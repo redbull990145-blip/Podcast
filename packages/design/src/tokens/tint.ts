@@ -1,7 +1,7 @@
 /**
  * Artwork-derived colour.
  *
- * The design's colour strategy: the chrome stays near-neutral graphite and the
+ * The design's colour strategy: the chrome stays near-neutral warm paper and the
  * *artwork* supplies the colour. This is how Apple Music and Spotify feel
  * colourful without being loud — the palette changes per show, so the product
  * reads as full of colour while never inventing a colour of its own.
@@ -134,6 +134,67 @@ export function deriveTint(hex: string, theme: 'dark' | 'light'): TintSet | null
     // Dark enough to clear 4.5:1 on white.
     text: rgbToHex(oklabToRgb(refit(lab, 0.45, 0.11))),
   };
+}
+
+
+/**
+ * A gradient for a surface that has no artwork of its own.
+ *
+ * Category tiles, mainly: a category is a set of shows, and the only honest
+ * colour it can have is one borrowed from something inside it. Two stops of
+ * the same hue at different lightness, which is what makes a flat rectangle
+ * read as a surface rather than a swatch.
+ *
+ * **Both stops are dark enough for a white label, by construction.** That is
+ * the whole reason this is a function and not two `refit` calls at the call
+ * site. A fixed lightness cannot promise it: OKLab's L is perceptual, and at
+ * one L a yellow is far more *luminous* than a blue — so a pair that clears AA
+ * for a navy category fails for a mustard one, silently, on whichever tile
+ * happens to exist in the catalogue that week. Darkening until it measures
+ * clear costs a handful of iterations once per tile and cannot be wrong.
+ */
+export function deriveCover(hex: string): { from: string; to: string } | null {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return null;
+
+  const lab = rgbToOklab(rgb);
+  const from = darkenUntilLegible(lab, 0.52);
+
+  return {
+    from,
+    // The far stop is a fixed step below the near one rather than an absolute
+    // lightness, so the gradient keeps the same depth whether the hue needed
+    // darkening or not. A tile whose two ends drift together is a flat fill
+    // that took a gradient's worth of work.
+    to: rgbToHex(oklabToRgb(refit(lab, labLightness(from) - 0.18, COVER_CHROMA))),
+  };
+}
+
+/** Muted: a wall of tiles at full chroma is a paint chart, not a catalogue. */
+const COVER_CHROMA = 0.085;
+
+/** White on the tile, as the label is drawn. */
+const LABEL = '#FFFFFF';
+
+function labLightness(hex: string): number {
+  const rgb = hexToRgb(hex);
+  return rgb ? rgbToOklab(rgb).L : 0.5;
+}
+
+function darkenUntilLegible(lab: Oklab, startL: number): string {
+  let L = startL;
+
+  // Bounded rather than `while (true)`: at L = 0.2 every hue in the sRGB gamut
+  // clears 4.5:1 against white, so the loop is guaranteed to exit long before
+  // this — the cap is here so that a future change to the constants cannot
+  // turn a colour helper into a hang.
+  for (let step = 0; step < 12; step += 1) {
+    const candidate = rgbToHex(oklabToRgb(refit(lab, L, COVER_CHROMA)));
+    if (contrastRatio(LABEL, candidate) >= 4.5) return candidate;
+    L -= 0.03;
+  }
+
+  return rgbToHex(oklabToRgb(refit(lab, 0.2, COVER_CHROMA)));
 }
 
 /**

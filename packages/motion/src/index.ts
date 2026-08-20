@@ -15,6 +15,8 @@
 export { spring, springRest } from './springs.ts';
 export type { Spring, SpringToken } from './springs.ts';
 
+export { springEasing } from './spring-easing.ts';
+
 export { cssEasing, duration, easing } from './timing.ts';
 export type { DurationToken, Easing, EasingToken } from './timing.ts';
 

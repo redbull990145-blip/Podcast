@@ -35,11 +35,11 @@ export const TAB_BAR_HEIGHT = 56;
  * Height of the mini player, including its progress hairline.
  *
  * Stated for the same reason as the tab bar: something has to stack on top of
- * it. The bar itself is sized by its contents — 40px of artwork inside `space[2]`
+ * it. The bar itself is sized by its contents — 44px of artwork inside `space[2]`
  * of padding, plus a 2px track — and this is that sum, written down so the
  * offline strip can sit above it without either component guessing.
  */
-export const MINI_PLAYER_HEIGHT = 58;
+export const MINI_PLAYER_HEIGHT = 62;
 
 /**
  * Dark-first, matching the web app: artwork sits better on a dark ground, and

@@ -260,15 +260,41 @@ export async function* chatStream(options: ChatOptions): AsyncGenerator<string> 
 
 // --------------------------------------------------------- transcription --
 
-export type TranscribedSegment = { startMs: number; endMs: number; text: string };
+/** One word, timed. Whisper measures these; we no longer have to guess them. */
+export type TranscribedWord = { startMs: number; endMs: number; text: string };
+
+export type TranscribedSegment = {
+  startMs: number;
+  endMs: number;
+  text: string;
+  /**
+   * The segment's words, when the model returned them.
+   *
+   * Null rather than empty for "not available", so a caller can tell a chunk
+   * that came back without word timings from a cue that genuinely holds no
+   * words. The first must fall back to estimating; the second must not.
+   */
+  words: TranscribedWord[] | null;
+};
 
 /**
  * Transcribe one piece of audio.
  *
- * `verbose_json` with segment granularity, because timings are the entire
- * reason to generate a transcript here rather than read the publisher's — a
- * flat wall of text is what they already ship, and it cannot drive follow-along
- * or chapters.
+ * `verbose_json`, because timings are the entire reason to generate a
+ * transcript here rather than read the publisher's — a flat wall of text is
+ * what they already ship, and it cannot drive follow-along or chapters.
+ *
+ * **Both granularities are requested.** Segments carry the paragraphing that
+ * makes a transcript readable and are what the chapter and Q&A prompts consume;
+ * words carry the timing that makes the highlight land on the syllable being
+ * spoken. Asking for words alone would return, in Groq's own words, "only word,
+ * start, and end timestamps" — losing the structure — so we ask for both and
+ * keep each for what it is good at.
+ *
+ * Groq documents that word timestamps cost extra latency where segment
+ * timestamps cost none. That is a one-time generation cost against a job
+ * already measured in minutes, paid once per episode, to remove an estimation
+ * layer whose error ran to hundreds of milliseconds inside a cue.
  */
 export async function transcribe(options: {
   key: string;
@@ -299,7 +325,10 @@ export async function transcribe(options: {
     form.append('file', blob, options.filename);
     form.append('model', TRANSCRIBE_MODEL);
     form.append('response_format', 'verbose_json');
+    // Repeated, not comma-joined: this is multipart form data, and the bracket
+    // suffix is part of the literal field name Groq documents.
     form.append('timestamp_granularities[]', 'segment');
+    form.append('timestamp_granularities[]', 'word');
     if (options.language) form.append('language', options.language);
 
     return fetch(`${BASE_URL}/audio/transcriptions`, {
@@ -314,16 +343,38 @@ export async function transcribe(options: {
 
   const body = (await response.json()) as {
     segments?: { start?: number; end?: number; text?: string }[];
+    words?: { start?: number; end?: number; word?: string }[];
     text?: string;
   };
 
   if (Array.isArray(body.segments) && body.segments.length > 0) {
+    /**
+     * Words arrive as one flat list for the whole upload, not nested inside the
+     * segments, so they have to be dealt back out by time.
+     */
+    const words = Array.isArray(body.words)
+      ? body.words
+          .map((word) => ({
+            startMs: Math.round((word.start ?? 0) * 1000),
+            endMs: Math.round((word.end ?? 0) * 1000),
+            text: (word.word ?? '').trim(),
+          }))
+          .filter((word) => word.text !== '')
+      : [];
+
+    const texts = body.segments.map((segment) => ({ text: (segment.text ?? '').trim() }));
+    const perSegment =
+      words.length > 0 ? partitionWords(texts, words) : texts.map(() => null);
+
     return body.segments
-      .map((segment) => ({
+      .map((segment, index) => ({
         startMs: Math.round((segment.start ?? 0) * 1000),
         endMs: Math.round((segment.end ?? 0) * 1000),
-        text: (segment.text ?? '').trim(),
+        text: texts[index]!.text,
+        words: perSegment[index] ?? null,
       }))
+      // Filtered *after* partitioning, so dropping an empty cue cannot shift
+      // every later segment onto the wrong run of words.
       .filter((segment) => segment.text !== '');
   }
 
@@ -331,5 +382,104 @@ export async function transcribe(options: {
   // that produced no segment boundaries. Keeping it untimed is better than
   // discarding speech, and the merge step tolerates a zero-length span.
   const text = body.text?.trim();
-  return text ? [{ startMs: 0, endMs: 0, text }] : [];
+  return text ? [{ startMs: 0, endMs: 0, text, words: null }] : [];
+}
+
+/** Whitespace removed, for comparing a word run against the text it should be. */
+const strip = (value: string): string => value.replace(/\s+/gu, '');
+
+/**
+ * Deal the flat word list out to the segments, **by text rather than by time**.
+ *
+ * Whisper returns two views of the same speech: segments with text, and a flat
+ * list of words. The words are in order and their concatenation *is* the
+ * transcript, so the correct partition is the one that reconstructs each
+ * segment's text exactly — consume words until they spell the segment, then
+ * move on.
+ *
+ * Partitioning by timestamp instead is the obvious approach and it is wrong.
+ * The two views are derived separately, so their boundaries disagree by tens of
+ * milliseconds, and a word straddling a boundary lands on whichever side the
+ * arithmetic favours rather than the side its sentence is on. Measured on a
+ * real 40-minute episode, assigning by the midpoint of each word misplaced a
+ * word in **146 of 593 segments** — one line ending "…get this thing off" while
+ * the next began "the ground", when the transcript reads "…get this thing" /
+ * "off the ground".
+ *
+ * That is not a timing inaccuracy, it is a *text* inaccuracy, and it is visible:
+ * the player renders the active line from these words and every other line from
+ * `segment.text`, so a misplaced word makes the line silently gain or lose a
+ * word at the moment the highlight arrives on it.
+ *
+ * A segment whose words do not reconstruct it exactly gets null — better to
+ * estimate that one line than to render text the transcript does not contain.
+ */
+/**
+ * How far ahead to hunt for a segment's opening word after a failed match.
+ *
+ * Generously more than the longest cue Whisper emits, because the words that
+ * have to be stepped over are those of the segment that just failed. Bounded
+ * all the same: without a limit, a genuinely unmatchable segment would rescan
+ * the remainder of the chunk for every segment left in it.
+ */
+const RESYNC_WORDS = 80;
+
+/** The run of words starting at `start` that spells `target` exactly, if any. */
+function matchFrom(
+  words: TranscribedWord[],
+  start: number,
+  target: string,
+): { taken: TranscribedWord[]; next: number } | null {
+  const taken: TranscribedWord[] = [];
+  let built = '';
+  let i = start;
+
+  while (i < words.length && built.length < target.length) {
+    taken.push(words[i]!);
+    built += strip(words[i]!.text);
+    i += 1;
+  }
+
+  return built === target && taken.length > 0 ? { taken, next: i } : null;
+}
+
+export function partitionWords(
+  segments: { text: string }[],
+  words: TranscribedWord[],
+): (TranscribedWord[] | null)[] {
+  let cursor = 0;
+
+  return segments.map((segment) => {
+    const target = strip(segment.text);
+    if (target === '') return null;
+
+    // The common case: this segment begins exactly where the last one ended.
+    let found = matchFrom(words, cursor, target);
+
+    /**
+     * Recovering from a segment that could not be spelled.
+     *
+     * Whisper's two views agree almost always and not quite always — a hyphen
+     * the word stream splits and the segment text does not is enough to make
+     * one line unmatchable. Without a way back, that single character cost the
+     * entire remainder of a twenty-minute chunk: the failed segment left the
+     * cursor stranded, every later segment started mid-stream and failed too,
+     * and the sweep silently reverted to estimated timings for twenty minutes.
+     *
+     * So a failure advances nothing, and the *next* segment searches forward
+     * for its own opening word. One bad line costs one bad line.
+     */
+    if (!found) {
+      const limit = Math.min(words.length, cursor + RESYNC_WORDS);
+      for (let start = cursor + 1; start < limit; start += 1) {
+        found = matchFrom(words, start, target);
+        if (found) break;
+      }
+    }
+
+    if (!found) return null;
+
+    cursor = found.next;
+    return found.taken;
+  });
 }

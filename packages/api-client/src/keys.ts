@@ -21,6 +21,7 @@ export const queryKeys = {
      * everything else that belonged to the person who left.
      */
     continue: () => ['library', 'continue'] as const,
+    recommendations: () => ['library', 'recommendations'] as const,
   },
 
   /**
@@ -78,6 +79,8 @@ export const queryKeys = {
     search: (query: string, language?: string) =>
       ['discover', 'search', query.trim().toLowerCase(), language ?? 'any'] as const,
     trending: (language?: string) => ['discover', 'trending', language ?? 'any'] as const,
+    categories: () => ['discover', 'categories'] as const,
+    inCategory: (slug: string) => ['discover', 'category', slug] as const,
   },
 } as const;
 
@@ -97,4 +100,15 @@ export const staleTime = {
   /** Search: the same term gives the same answer for a long while. */
   search: 30 * 60 * 1000,
   trending: 15 * 60 * 1000,
+  /** Categories move when a show is ingested, which is rarely and never urgently. */
+  categories: 30 * 60 * 1000,
+  /**
+   * Recommendations: a rail, not a readout.
+   *
+   * The server already caches the computed answer for ten minutes, so a
+   * shorter client stale time would only buy round trips that return the same
+   * list. Matching it means Home re-uses what it has for as long as the answer
+   * could not have changed anyway.
+   */
+  recommendations: 10 * 60 * 1000,
 } as const;

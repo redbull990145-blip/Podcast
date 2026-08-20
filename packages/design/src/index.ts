@@ -1,8 +1,9 @@
-export { amber, colorSchemes, dark, graphite, light } from './tokens/color.ts';
+export { colorSchemes, dark, ember, light, paper } from './tokens/color.ts';
 export type { ColorScheme, ThemeName } from './tokens/color.ts';
 
 export {
   contrastRatio,
+  deriveCover,
   deriveTint,
   hexToRgb,
   oklabToRgb,

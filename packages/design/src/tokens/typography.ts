@@ -1,21 +1,26 @@
 /**
  * Typography.
  *
- * **One family.** Inter, at every size on both platforms. Variable, superb
- * hinting at small sizes, and the widest script coverage of any free sans —
- * which matters because this app has to render Hindi, Arabic, Japanese and
- * Korean without falling apart.
+ * **Geist for the interface, the platform behind it.** Geist is the face this
+ * design is drawn in: a grotesque with flat terminals and very even colour,
+ * which is what lets the same family carry a 34px page title and an 11px
+ * eyebrow without the small sizes going muddy. Its numerals are why it survives
+ * a media app — durations and timestamps sit in columns everywhere here.
  *
- * This used to pair Inter with Instrument Serif on page titles, for an
- * editorial voice. In practice the serif appeared exactly once per screen, on
- * an `<h1>` sitting directly above sans-serif everything, and it did not read
- * as a considered pairing — it read as two fonts. A second family earns its
- * place by doing a job the first cannot, and setting seven page titles is not
- * that job. Dropping it also drops a whole webfont from every page load.
+ * Geist ships Latin, Latin-Extended, Cyrillic and Vietnamese, and stops. This
+ * app has to render Hindi, Arabic, Japanese and Korean, and **those fall
+ * through to the platform's own UI face**, one codepoint at a time, exactly as
+ * they did before — the previous face was Inter loaded with the `latin` and
+ * `latin-ext` subsets, which does not carry them either. The i18n commitment is
+ * about what actually renders on the reader's screen, and for those scripts
+ * that has always been the system font. Naming it explicitly in the stack is
+ * the change; pretending a webfont was covering it would be the regression.
  *
- * The display size keeps its scale and gains weight, because what the serif
- * was really contributing at 40px was presence, and in a sans that comes from
- * weight rather than from the letterforms.
+ * `mono` is Geist Mono, and it is a genuine second job rather than decoration:
+ * elapsed and remaining times, chapter marks and scrubber labels are read as
+ * *positions*, and a proportional face makes 1:04:22 a different width from
+ * 1:14:22 while the same audio plays. Everything that is not a timecode stays
+ * in the sans.
  *
  * Sizes are in px; both platforms consume the same numbers. Line heights are
  * absolute rather than unitless so that a paragraph and a heading of the same
@@ -24,9 +29,9 @@
 
 export const fontFamily = {
   /** UI text, display text, all of it. */
-  sans: 'Inter',
-  /** Tabular numerals for timestamps and durations. */
-  mono: 'ui-monospace',
+  sans: 'Geist',
+  /** Timecodes, durations, chapter marks. */
+  mono: 'Geist Mono',
 } as const;
 
 export const fontWeight = {
@@ -49,81 +54,98 @@ export type TextStyle = {
  * Optical sizing done by hand: the larger the type, the tighter the tracking.
  * This is the single biggest difference between typography that looks designed
  * and typography that looks defaulted.
+ *
+ * The scale came down at the top end. `display` was 40/bold and is now 34/
+ * semibold, because 40px bold at the head of every screen was announcing the
+ * tab you had just pressed — the size was doing the work a *sentence* should
+ * do. At 34 it is still unmistakably the page title and it stops shouting the
+ * word "Library" at someone who chose Library.
  */
 export const text = {
   /** Page title. Used at most once per screen. */
   display: {
-    fontSize: 40,
-    lineHeight: 44,
-    // Tighter than title1 because tracking should close as size grows, and
-    // bold rather than regular: at this size a regular sans reads as a
-    // paragraph that got bigger rather than as a title.
-    letterSpacing: -0.024,
-    fontWeight: fontWeight.bold,
+    fontSize: 34,
+    lineHeight: 38,
+    letterSpacing: -0.032,
+    fontWeight: fontWeight.semibold,
     family: 'sans',
   },
-  /** Screen title. */
+  /** A title inside a page — an episode, a show. */
   title1: {
-    fontSize: 27,
-    lineHeight: 32,
-    letterSpacing: -0.018,
+    fontSize: 28,
+    lineHeight: 33,
+    letterSpacing: -0.026,
     fontWeight: fontWeight.semibold,
     family: 'sans',
   },
   /** Section header. */
   title2: {
-    fontSize: 21,
-    lineHeight: 27,
-    letterSpacing: -0.014,
+    fontSize: 20,
+    lineHeight: 26,
+    letterSpacing: -0.02,
     fontWeight: fontWeight.semibold,
     family: 'sans',
   },
   /** Card/row title. */
   title3: {
-    fontSize: 17,
-    lineHeight: 23,
-    letterSpacing: -0.009,
+    fontSize: 16,
+    lineHeight: 21,
+    letterSpacing: -0.015,
     fontWeight: fontWeight.semibold,
     family: 'sans',
   },
   /** Emphasised body — episode titles in a list. */
   bodyStrong: {
     fontSize: 15,
-    lineHeight: 21,
-    letterSpacing: -0.005,
+    lineHeight: 20,
+    letterSpacing: -0.01,
     fontWeight: fontWeight.medium,
     family: 'sans',
   },
   /** Default reading size. Show notes, transcripts. */
   body: {
     fontSize: 15,
-    lineHeight: 23,
+    lineHeight: 24,
     letterSpacing: -0.005,
     fontWeight: fontWeight.regular,
     family: 'sans',
   },
   /** Secondary metadata under a title. */
   callout: {
-    fontSize: 13.5,
+    fontSize: 13,
     lineHeight: 19,
     letterSpacing: -0.002,
     fontWeight: fontWeight.regular,
     family: 'sans',
   },
-  /** Timestamps, durations, counts. */
+  /** Counts, labels, anything that has to stay quiet and stay legible. */
   caption: {
-    fontSize: 12.5,
+    fontSize: 12,
     lineHeight: 16,
     letterSpacing: 0,
     fontWeight: fontWeight.medium,
     family: 'sans',
   },
+  /**
+   * Timestamps and durations.
+   *
+   * The one token set in the mono face. Same size as `caption` so a duration
+   * and the label beside it sit on the same line without one of them looking
+   * like a different thought.
+   */
+  timecode: {
+    fontSize: 12,
+    lineHeight: 16,
+    letterSpacing: 0,
+    fontWeight: fontWeight.medium,
+    family: 'mono',
+  },
   /** Uppercase eyebrow labels. Tracking opens up as size drops. */
   overline: {
     fontSize: 11,
     lineHeight: 14,
-    letterSpacing: 0.055,
-    fontWeight: fontWeight.semibold,
+    letterSpacing: 0.08,
+    fontWeight: fontWeight.medium,
     family: 'sans',
   },
 } as const satisfies Record<string, TextStyle>;

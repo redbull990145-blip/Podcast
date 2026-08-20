@@ -9,7 +9,7 @@ import { OfflineBanner } from '@/components/offline-banner';
 import { hydrateQueue, setSyncState, usePlayerState } from '@/lib/player/store';
 import { useSession } from '@/lib/session';
 import { flushProgress } from '@/lib/sync/outbox';
-import { MINI_PLAYER_HEIGHT, TAB_BAR_HEIGHT, type, useTheme } from '@/theme';
+import { MINI_PLAYER_HEIGHT, TAB_BAR_HEIGHT, space, type, useTheme } from '@/theme';
 
 /**
  * The tab shell.
@@ -75,7 +75,10 @@ export default function TabsLayout() {
           tabBarActiveTintColor: theme.accentText,
           tabBarInactiveTintColor: theme.textTertiary,
           tabBarStyle: {
-            backgroundColor: theme.surface,
+            // The overlay surface rather than the resting one: the bar floats
+            // over a scrolling list, and it should read as the layer above the
+            // page rather than as the page's own floor.
+            backgroundColor: theme.surfaceOverlay,
             borderTopColor: theme.border,
             borderTopWidth: StyleSheet.hairlineWidth,
             // In dark mode depth comes from surface lightness, not shadow —
@@ -83,12 +86,17 @@ export default function TabsLayout() {
             elevation: 0,
             height: TAB_BAR_HEIGHT + insets.bottom,
             paddingBottom: insets.bottom,
+            paddingTop: space[2],
           },
           tabBarLabelStyle: {
-            fontSize: type('overline').fontSize,
-            letterSpacing: type('overline').letterSpacing,
+            // 10px, not the overline's 11: a tab label sits directly under a
+            // 22px glyph that already says which tab it is, and the tracking
+            // an overline carries is for uppercase words standing alone.
+            fontSize: 10,
+            letterSpacing: 0.1,
             fontWeight: type('caption').fontWeight,
           },
+          tabBarIconStyle: { marginBottom: -2 },
           sceneStyle: { backgroundColor: theme.bg },
         }}
       >

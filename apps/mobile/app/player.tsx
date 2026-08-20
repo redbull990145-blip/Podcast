@@ -70,6 +70,25 @@ export default function PlayerScreen() {
           <Icon path={icon.chevronDown} size={26} color={theme.textSecondary} />
         </Pressable>
 
+        {/* What is playing, and from where.
+
+            The episode title is below the cover where it belongs, but a
+            full-screen player with nothing in the middle of its header reads
+            as an unfinished dialog — and "playing from" is the one fact the
+            screen otherwise leaves you to infer from a line of small text
+            three hundred points further down. */}
+        <View style={styles.playingFrom}>
+          <Text style={[type('overline'), { color: theme.textTertiary }]}>
+            PLAYING FROM
+          </Text>
+          <Text
+            numberOfLines={1}
+            style={[type('caption'), { color: theme.textPrimary, marginTop: 2 }]}
+          >
+            {episode.podcastTitle}
+          </Text>
+        </View>
+
         <Pressable
           onPress={() => router.push('/queue')}
           accessibilityRole="button"
@@ -94,9 +113,12 @@ export default function PlayerScreen() {
         <Artwork url={episode.artworkUrl} size={artworkSize} label={episode.podcastTitle} />
       </View>
 
+      {/* Start-aligned, not centred. Centred metadata under a cover
+          re-centres on every episode as the title length changes, which is
+          visible as drift each time the track advances. */}
       <View style={styles.meta}>
-        <Text style={[type('title3'), { color: theme.textPrimary }]}>{episode.title}</Text>
-        <Text style={[type('callout'), { color: theme.textSecondary, marginTop: space[1] }]}>
+        <Text style={[type('title2'), { color: theme.textPrimary }]}>{episode.title}</Text>
+        <Text style={[type('callout'), { color: theme.textTertiary, marginTop: space[1] }]}>
           {episode.podcastTitle}
         </Text>
       </View>
@@ -212,12 +234,12 @@ function PlayPauseButton({ isPlaying, isLoading }: { isPlaying: boolean; isLoadi
       accessibilityRole="button"
       accessibilityLabel={isPlaying ? 'Pause' : 'Play'}
       accessibilityState={{ busy: isLoading }}
-      style={[styles.playButton, { backgroundColor: theme.accent }, animated]}
+      style={[styles.playButton, { backgroundColor: theme.ink }, animated]}
     >
       <Icon
         path={isPlaying ? icon.pause : icon.play}
-        size={30}
-        color={theme.textOnAccent}
+        size={32}
+        color={theme.textOnInk}
         filled
       />
     </AnimatedPressable>
@@ -291,9 +313,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   dismiss: { padding: space[2] },
+  playingFrom: { flex: 1, alignItems: 'center' },
   queueButton: { flexDirection: 'row', alignItems: 'center', gap: space[2], padding: space[2] },
-  artwork: { marginTop: space[4] },
-  meta: { marginTop: space[6], alignItems: 'center' },
+  artwork: { marginTop: space[6] },
+  meta: { marginTop: space[6], alignSelf: 'stretch' },
   transport: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -302,8 +325,8 @@ const styles = StyleSheet.create({
   },
   transportButton: { padding: space[2] },
   playButton: {
-    width: 68,
-    height: 68,
+    width: 76,
+    height: 76,
     borderRadius: radius.full,
     alignItems: 'center',
     justifyContent: 'center',

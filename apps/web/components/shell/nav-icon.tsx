@@ -5,11 +5,24 @@
  * mean no extra request, no font-loading flash, and no icon set whose visual
  * language quietly overrides the product's own.
  */
-export function NavIcon({ path, filled }: { path: string; filled: boolean }) {
+export function NavIcon({
+  path,
+  filled,
+  size = 22,
+}: {
+  path: string;
+  filled: boolean;
+  /**
+   * 22 in the tab bar, where the icon carries the row; 16 in the rail, where
+   * it sits beside a label and only has to be recognisable. An icon drawn at
+   * the same size in both reads as oversized in one of them.
+   */
+  size?: number;
+}) {
   return (
     <svg
-      width="22"
-      height="22"
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       fill={filled ? 'currentColor' : 'none'}
       stroke="currentColor"

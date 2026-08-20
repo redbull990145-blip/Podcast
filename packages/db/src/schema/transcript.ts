@@ -30,6 +30,19 @@ export type StoredSegment = {
   endMs: number;
   text: string;
   speaker: string | null;
+  /**
+   * Per-word timings, where the transcriber measured them.
+   *
+   * Null for every publisher transcript — caption files are cue-level and carry
+   * nothing finer — and for anything generated before word granularity was
+   * requested. The client estimates word timings from the cue when this is
+   * absent, so null means "estimate", not "no words".
+   *
+   * Stored inside the segment rather than as a parallel array because they are
+   * only ever read alongside the cue they belong to, and because a flat list
+   * would have to be re-partitioned on every read.
+   */
+  words?: { startMs: number; endMs: number; text: string }[] | null;
 };
 
 export const transcripts = pgTable(
@@ -54,6 +67,46 @@ export const transcripts = pgTable(
 
     segments: jsonb('segments').$type<StoredSegment[]>().notNull().default(sql`'[]'::jsonb`),
 
+    /**
+     * Measured length of the audio these timings describe, in ms.
+     *
+     * The one fact that makes a transcript's timings falsifiable, and the reason
+     * it is worth a column of its own: **the audio we transcribed is frequently
+     * not the audio the listener hears.**
+     *
+     * Podcast enclosures are stitched per request. The URL for a Planet Money
+     * episode redirects through four ad services before reaching a file, and
+     * each hop picks creatives from the requesting IP, geography and
+     * User-Agent — so our server-side fetch, from a datacentre, announcing
+     * itself as `Cue/…`, is targeted differently from a listener's browser by
+     * construction rather than by chance. Measured on that episode: the feed
+     * declares 2416s, the browser was served 2596s, and the copy we transcribed
+     * ran 2622s. Every cue after the first ad break was therefore ~26s out, and
+     * by a different amount for each listener.
+     *
+     * Nothing can be corrected without first being *detected*, and this is what
+     * detection needs. It is deliberately not `episodes.durationSec`: that is
+     * the publisher's `<itunes:duration>` claim, usually the ad-free length, and
+     * it is overwritten from the feed on every refresh. It is deliberately not
+     * derived from the last cue either, which undershoots by however much
+     * trailing music the episode ends on.
+     *
+     * Null for transcripts written before this existed, and for publisher-supplied
+     * ones — we never fetch their audio, so we have measured nothing and must
+     * not imply otherwise.
+     */
+    audioDurationMs: integer('audio_duration_ms'),
+
+    /**
+     * Byte length of that same audio.
+     *
+     * Duration alone can collide: two stitchings that happen to run the same
+     * length are not the same audio. Bytes are the cheaper and stricter check,
+     * and together the pair is a serviceable fingerprint for "is this the file
+     * we transcribed" without storing the file — which this project does not do.
+     */
+    audioBytes: integer('audio_bytes'),
+
     fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -61,7 +114,7 @@ export const transcripts = pgTable(
     // query that does not go through the primary key.
     index('transcripts_status_idx').on(table.status, table.fetchedAt),
   ],
-);
+).enableRLS();
 
 export type TranscriptRow = typeof transcripts.$inferSelect;
 export type NewTranscriptRow = typeof transcripts.$inferInsert;
@@ -150,7 +203,7 @@ export const transcriptionJobs = pgTable(
     // same two columns.
     index('transcription_jobs_queue_idx').on(table.status, table.createdAt),
   ],
-);
+).enableRLS();
 
 export type TranscriptionJobRow = typeof transcriptionJobs.$inferSelect;
 export type NewTranscriptionJobRow = typeof transcriptionJobs.$inferInsert;

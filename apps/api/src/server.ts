@@ -26,6 +26,7 @@ import { playbackRoutes } from './routes/playback.ts';
 import { playlistRoutes } from './routes/playlists.ts';
 import { podcastRoutes } from './routes/podcasts.ts';
 import { profileRoutes } from './routes/profile.ts';
+import { recommendationRoutes } from './routes/recommendations.ts';
 import { transcriptRoutes } from './routes/transcripts.ts';
 
 declare module 'fastify' {
@@ -122,6 +123,7 @@ export async function buildServer(config: Config): Promise<FastifyInstance> {
   podcastRoutes(app);
   libraryRoutes(app);
   playbackRoutes(app);
+  recommendationRoutes(app);
   playlistRoutes(app);
   transcriptRoutes(app);
   aiRoutes(app);

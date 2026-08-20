@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react';
 import { ApiKeyField } from '@/components/ai/api-key-field';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { LanguagePicker } from '@/components/i18n/language-picker';
+import { ThemeToggle } from '@/components/shell/theme-toggle';
 import { readPreferences, updatePreferences } from '@/lib/player/store';
 import { useSession, useSignOut } from '@/lib/session';
 
@@ -59,6 +60,22 @@ export function SettingsClient() {
       <header className="mb-10">
         <h1 className="type-display m-0 text-[var(--color-text-primary)]">{t.t('settings.title')}</h1>
       </header>
+
+      {/* First on the screen, and above Language for the same reason Language
+          sits above Account: it changes how everything under it looks, so it
+          belongs before the things it changes rather than after them.
+
+          It exists here as well as in the sidebar because the sidebar is not
+          on a phone. Settings is the only route to account control at that
+          width, and it is now the only route to this. */}
+      <Section
+        title={t.t('theme.appearance')}
+        caption={t.t('theme.appearanceCaption')}
+      >
+        <Field label={t.t('theme.label')} hint={t.t('theme.hint')}>
+          <ThemeToggle />
+        </Field>
+      </Section>
 
       <Section
         title={t.t('settings.playback')}

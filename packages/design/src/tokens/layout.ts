@@ -24,12 +24,24 @@ export const space = {
   24: 96,
 } as const;
 
+/**
+ * Radii came down across the board — `md` 10 → 8, `lg` 14 → 12, `xl` 20 → 16.
+ *
+ * A pill is now a pill (`full`, and every button in this design is one) and
+ * everything else is a *panel*, which is a much squarer thing than the old
+ * scale allowed. The failure mode the previous note warned about turned out to
+ * be reachable from the other direction: with `lg` at 14 and `xl` at 20 in
+ * play, a card and a sheet and a cover all had noticeably round corners and
+ * the difference between them stopped being legible. Softening the top of the
+ * scale is what lets the pills read as the only genuinely round thing on
+ * screen.
+ */
 export const radius = {
   xs: 4,
   sm: 6,
-  md: 10,
-  lg: 14,
-  xl: 20,
+  md: 8,
+  lg: 12,
+  xl: 16,
   full: 9999,
 } as const;
 
@@ -39,13 +51,13 @@ export const radius = {
  */
 export const artworkRadius = {
   /** ≤56px — list thumbnails, mini player. */
-  sm: 6,
+  sm: 5,
   /** 57–160px — grid tiles, queue rows. */
-  md: 10,
+  md: 8,
   /** 161–280px — podcast header. */
-  lg: 14,
+  lg: 10,
   /** >280px — expanded player cover. */
-  xl: 18,
+  xl: 12,
 } as const;
 
 /**
@@ -57,13 +69,15 @@ export const artworkRadius = {
 export const elevation = {
   none: 'none',
   /** Resting card lift. */
-  sm: '0 1px 2px rgba(0, 0, 0, 0.24)',
+  sm: '0 1px 2px rgba(10, 9, 7, 0.14), 0 8px 24px -16px rgba(10, 9, 7, 0.34)',
   /** Mini player, sticky headers. */
-  md: '0 4px 12px rgba(0, 0, 0, 0.28)',
+  md: '0 12px 24px -12px rgba(10, 9, 7, 0.4)',
   /** Menus, popovers. */
-  lg: '0 12px 32px rgba(0, 0, 0, 0.36)',
+  lg: '0 24px 48px -24px rgba(10, 9, 7, 0.46)',
   /** Expanded player, modal sheets. */
-  xl: '0 24px 64px rgba(0, 0, 0, 0.44)',
+  xl: '0 40px 80px -40px rgba(10, 9, 7, 0.55), 0 12px 24px -12px rgba(10, 9, 7, 0.4)',
+  /** Artwork, which floats on its own colour rather than on a surface. */
+  artwork: '0 20px 40px -20px rgba(10, 9, 7, 0.45)',
 } as const;
 
 /**
@@ -76,6 +90,7 @@ export const nativeElevation = {
   md: { elevation: 4, shadowOpacity: 0.28, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
   lg: { elevation: 10, shadowOpacity: 0.36, shadowRadius: 32, shadowOffset: { width: 0, height: 12 } },
   xl: { elevation: 20, shadowOpacity: 0.44, shadowRadius: 64, shadowOffset: { width: 0, height: 24 } },
+  artwork: { elevation: 12, shadowOpacity: 0.45, shadowRadius: 40, shadowOffset: { width: 0, height: 20 } },
 } as const;
 
 /** Minimum hit target. Below this, a control is a bug on a touch device. */
@@ -101,6 +116,17 @@ export const hitSlop = { minTarget: 44 } as const;
  * why the app looked inconsistent from screen to screen.
  */
 export const measure = {
+  /**
+   * The desktop navigation rail.
+   *
+   * A number three components have to agree on — the rail itself, the content
+   * gutter that clears it, and the player bar, which starts where the rail ends
+   * so the mini artwork lines up with the page's first column rather than
+   * floating in the gutter. It was 240 and written out by hand in each of them;
+   * widening it to 260 for the "Your shows" list is exactly the kind of change
+   * that would otherwise have been applied in two places out of three.
+   */
+  sidebar: 260,
   /** Transcripts and show notes: ~76 characters at body size. */
   prose: 720,
   /** Main app column. */

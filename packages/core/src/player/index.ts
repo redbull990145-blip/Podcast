@@ -16,6 +16,8 @@ export type {
   PlaybackStatus,
 } from './engine.ts';
 
+export { CAPTION_LEAD_MS, PlaybackClock } from './clock.ts';
+
 export { PlayerMachine } from './machine.ts';
 export type { MachineOptions, PlayableEpisode, PlayerListener, PlayerState } from './machine.ts';
 

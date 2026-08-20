@@ -59,6 +59,15 @@ describe.each(Object.entries(colorSchemes))('%s scheme', (_name, scheme: ColorSc
     );
   });
 
+  it('keeps a label on the ink fill readable', () => {
+    // The other primary control. `ink` carries Resume, Follow and every filled
+    // pill, and it is the one pair in the palette that inverts between themes —
+    // exactly the shape of thing that gets edited on one side only.
+    expect(contrastRatio(scheme.textOnInk, scheme.ink)).toBeGreaterThanOrEqual(
+      AA_NORMAL_TEXT,
+    );
+  });
+
   it('keeps the accent itself distinguishable as a control', () => {
     // Non-text: the accent marks the playing state and the focus ring, so it
     // has to be visible against the ground even when it carries no label.

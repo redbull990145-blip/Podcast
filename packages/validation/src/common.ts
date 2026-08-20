@@ -21,6 +21,24 @@ export const paginationQuery = z.object({
 });
 export type PaginationQuery = z.infer<typeof paginationQuery>;
 
+/**
+ * The catalogue listing, optionally narrowed to one category.
+ *
+ * A slug rather than an id: the id is a database detail that would put a
+ * `smallint` in a URL people share, and the slug is already unique by
+ * constraint. Bounded in length so a query string cannot be used to push an
+ * arbitrary amount of text into a `WHERE` clause.
+ */
+export const catalogueQuery = paginationQuery.extend({
+  category: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-z0-9-]+$/, 'A category slug is lowercase letters, digits and hyphens.')
+    .optional(),
+});
+export type CatalogueQuery = z.infer<typeof catalogueQuery>;
+
 export const uuidParam = z.object({ id: z.uuid() });
 export type UuidParam = z.infer<typeof uuidParam>;
 

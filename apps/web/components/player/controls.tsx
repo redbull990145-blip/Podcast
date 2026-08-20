@@ -41,10 +41,16 @@ export function PlayPauseButton({
    * `bare` is the glyph alone, for the full player, where it sits in open space
    * on a backdrop taken from the artwork. A coloured disc there competes with
    * the cover it was sampled from; the glyph does not.
+   * `ink` is the same disc in the maximum-contrast fill rather than the accent,
+   * for the desktop player bar. The accent means *this is what is playing*, and
+   * in a bar whose entire subject is the thing that is playing it says nothing
+   * — while an orange disc next to an orange progress fill puts two saturated
+   * shapes on one 84px strip competing to be looked at.
    */
-  variant?: 'filled' | 'bare';
+  variant?: 'filled' | 'bare' | 'ink';
 }) {
   const bare = variant === 'bare';
+  const ink = variant === 'ink';
   // A bare glyph has no edge to squash, so it needs to travel further before
   // the press reads at all. A disc reads at 0.92 because its outline moves.
   const press = usePressScale(bare ? 0.86 : 0.92);
@@ -64,12 +70,17 @@ export function PlayPauseButton({
         'flex shrink-0 cursor-pointer items-center justify-center rounded-full border-0',
         bare
           ? 'bg-transparent text-[var(--color-text-primary)]'
-          : 'text-[var(--color-text-on-accent)]',
+          : ink
+            ? 'bg-[var(--color-ink)] text-[var(--color-text-on-ink)]'
+            : 'text-[var(--color-text-on-accent)]',
       ].join(' ')}
       style={{
         width: size,
         height: size,
-        ...(bare ? {} : { backgroundColor: tint ?? 'var(--color-accent)' }),
+        // `tint` still wins over the ink fill: an episode with a colour of its
+        // own is the one case where the disc is carrying information rather
+        // than just being the loudest thing available.
+        ...(bare ? {} : ink && !tint ? {} : { backgroundColor: tint ?? 'var(--color-accent)' }),
       }}
     >
       {loading ? (

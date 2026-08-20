@@ -56,7 +56,7 @@ export const playbackProgress = pgTable(
      */
     index('playback_progress_continue_idx').on(t.userId, t.updatedAt.desc()),
   ],
-);
+).enableRLS();
 
 export const queueItems = pgTable(
   'queue_items',
@@ -84,7 +84,7 @@ export const queueItems = pgTable(
     /** Reading the queue in order is the only way it is ever read. */
     index('queue_items_order_idx').on(t.userId, t.sortKey),
   ],
-);
+).enableRLS();
 
 export type PlaybackProgressRow = typeof playbackProgress.$inferSelect;
 export type QueueItemRow = typeof queueItems.$inferSelect;

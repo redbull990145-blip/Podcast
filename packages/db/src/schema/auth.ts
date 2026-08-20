@@ -24,7 +24,7 @@ export const users = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex('users_email_key').on(t.email)],
-);
+).enableRLS();
 
 export const sessions = pgTable(
   'sessions',
@@ -47,7 +47,7 @@ export const sessions = pgTable(
     uniqueIndex('sessions_token_key').on(t.token),
     index('sessions_user_idx').on(t.userId),
   ],
-);
+).enableRLS();
 
 export const accounts = pgTable(
   'accounts',
@@ -78,7 +78,7 @@ export const accounts = pgTable(
     /** One account per provider per user. */
     uniqueIndex('accounts_provider_account_key').on(t.providerId, t.accountId),
   ],
-);
+).enableRLS();
 
 export const verifications = pgTable(
   'verifications',
@@ -92,7 +92,7 @@ export const verifications = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('verifications_identifier_idx').on(t.identifier)],
-);
+).enableRLS();
 
 export type UserRow = typeof users.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;

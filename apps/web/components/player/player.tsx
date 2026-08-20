@@ -2,7 +2,7 @@
 
 import { queryKeys } from '@cue/api-client';
 import { SKIP_BACK_SEC, SKIP_FORWARD_SEC } from '@cue/core';
-import { deriveTint, icon } from '@cue/design';
+import { deriveTint, icon, measure } from '@cue/design';
 import { duration } from '@cue/motion';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, useMotionValue, useTransform } from 'motion/react';
@@ -41,11 +41,27 @@ import { useTranslator } from '@/components/i18n/locale-provider';
  * re-renders nothing; only the open/closed *intent* is state, and it changes
  * once per gesture.
  */
-/** Height of the collapsed player, in px. */
+/**
+ * Height of the collapsed player, in px.
+ *
+ * Two numbers, because the collapsed player is two different controls. On a
+ * phone it is a strip: cover, title, one button, and a hairline of progress.
+ * On a desktop it is the whole transport — five controls, a scrubber with
+ * timecodes, speed, queue and volume — which is the shape every desktop media
+ * player has, and it does not fit in 72px.
+ */
 const MINI_HEIGHT = 72;
+const MINI_HEIGHT_WIDE = 84;
 
-/** The shell's sidebar, which the mini bar sits beside and the full player covers. */
-const SIDEBAR = 240;
+/**
+ * The shell's sidebar, which the mini bar sits beside and the full player
+ * covers. Read from the token rather than written down again, because the bar
+ * starting anywhere other than exactly where the rail ends leaves the mini
+ * artwork out of line with the page's first column — a four-pixel drift that
+ * looks like nothing and reads as sloppiness.
+ */
+const SIDEBAR = measure.sidebar;
+/** Tailwind's `md`, which is where the shell swaps the tab bar for the rail. */
 const SIDEBAR_AT = 768;
 
 /**
@@ -112,8 +128,10 @@ const COLUMN_BELOW_ART = 300;
  * element positioned by script rather than by layout would otherwise be the one
  * thing left on the wrong side.
  */
-function miniArt(sidebar: number) {
-  return { size: 48, radius: 6, start: sidebar + 16, top: 12 };
+function miniArt(sidebar: number, wide: boolean) {
+  return wide
+    ? { size: 56, radius: 6, start: sidebar + 24, top: (MINI_HEIGHT_WIDE - 56) / 2 }
+    : { size: 48, radius: 5, start: sidebar + 16, top: (MINI_HEIGHT - 48) / 2 };
 }
 
 function fullArt(
@@ -273,7 +291,15 @@ export function Player() {
     return () => window.removeEventListener('resize', measure);
   }, []);
 
-  const restY = Math.max(0, viewportHeight - MINI_HEIGHT);
+  /**
+   * `viewportWidth` is 0 until the first measurement lands, which is narrower
+   * than any breakpoint — so the first paint is the phone layout and it
+   * corrects on the same frame the effect runs. The alternative, reading
+   * `window` during render, is a hydration mismatch.
+   */
+  const barWide = viewportWidth >= SIDEBAR_AT;
+  const miniHeight = barWide ? MINI_HEIGHT_WIDE : MINI_HEIGHT;
+  const restY = Math.max(0, viewportHeight - miniHeight);
 
   /**
    * The sidebar the *mini* bar has to clear.
@@ -282,7 +308,7 @@ export function Player() {
    * see the sheet's geometry below — so this never enters the full layout's
    * measurements.
    */
-  const sidebar = viewportWidth >= SIDEBAR_AT ? SIDEBAR : 0;
+  const sidebar = barWide ? SIDEBAR : 0;
 
   /**
    * Two columns, or one at a time.
@@ -327,7 +353,7 @@ export function Player() {
     ? (viewportWidth - SHEET_PAD * 2 - COLUMN_GAP) / 2
     : viewportWidth;
   const artFull = fullArt(twoColumn, columnWidth, viewportWidth, viewportHeight);
-  const artMini = miniArt(sidebar);
+  const artMini = miniArt(sidebar, barWide);
 
   /**
    * The measured height of everything under the cover.
@@ -502,50 +528,142 @@ export function Player() {
         </m.div>
 
         {/* ------------------------------------------------------- mini -- */}
+        {/*
+          Two players in one bar.
+
+          On a phone it is a strip you press to open the real thing. On a
+          desktop it *is* the real thing — the transport, the scrubber, speed,
+          queue and volume, laid out in the three columns every desktop media
+          player has used for twenty years, because that is where people's eyes
+          already go. Expanding is still there for the cover and the transcript;
+          it is no longer the only way to skip back fifteen seconds.
+
+          One element rather than two, so the artwork can keep travelling
+          continuously out of it and the drag gesture keeps working at both
+          widths.
+        */}
         <m.div
           {...drag}
           style={{
             opacity: miniOpacity,
             pointerEvents: expanded ? 'none' : 'auto',
             insetInlineStart: sidebar,
+            height: miniHeight,
           }}
           className={[
-            'absolute top-0 h-[72px] end-0 touch-none',
-            'border-t border-[var(--color-border)] bg-[var(--color-surface-overlay)]',
+            'absolute top-0 end-0 touch-none',
+            'border-t border-[var(--color-border)] bg-[var(--color-surface-overlay)]/92 backdrop-blur-xl',
           ].join(' ')}
         >
-          <div className="flex h-full items-center gap-3 px-4">
+          <div className="flex h-full items-center gap-3 px-4 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)] md:gap-8 md:px-6">
             <button
               type="button"
               onClick={() => setExpanded(true)}
               aria-label={t.t('player.open')}
               aria-expanded={expanded}
-              className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 border-0 bg-transparent p-0 text-start"
+              className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 border-0 bg-transparent p-0 text-start md:flex-none"
             >
               {/* Spacer: the artwork itself is rendered once, below, so it can
                   travel continuously between the two layouts. */}
-              <span aria-hidden="true" className="h-12 w-12 shrink-0" />
+              <span
+                aria-hidden="true"
+                className="shrink-0"
+                style={{ width: artMini.size, height: artMini.size }}
+              />
               <span className="min-w-0 flex-1">
                 <span className="type-body-strong clamp-1 block text-[var(--color-text-primary)]">
                   {episode.title}
                 </span>
-                <span className="type-caption clamp-1 block text-[var(--color-text-secondary)]">
+                <span className="type-caption clamp-1 block text-[var(--color-text-tertiary)]">
                   {episode.podcastTitle}
                 </span>
               </span>
             </button>
 
-            <SkipButton direction="back" seconds={SKIP_BACK_SEC} onClick={actions.skipBack} />
-            <PlayPauseButton
-              playing={playing}
-              loading={loading}
-              onToggle={actions.toggle}
-              size={40}
-              tint={accent?.fill}
-            />
+            {/* --------------------------------------------- wide transport -- */}
+            <div className="hidden min-w-0 flex-col items-center gap-1 md:flex">
+              <div className="flex items-center gap-3">
+                <SkipButton
+                  direction="back"
+                  seconds={SKIP_BACK_SEC}
+                  onClick={actions.skipBack}
+                  size={36}
+                />
+                <PlayPauseButton
+                  playing={playing}
+                  loading={loading}
+                  onToggle={actions.toggle}
+                  size={40}
+                  variant="ink"
+                  tint={accent?.fill}
+                />
+                <SkipButton
+                  direction="forward"
+                  seconds={SKIP_FORWARD_SEC}
+                  onClick={actions.skipForward}
+                  size={36}
+                />
+              </div>
+
+              {/* Capped rather than filled: a scrubber stretched across a
+                  1600px window makes one pixel worth four seconds, which is
+                  precision nobody asked for and a very long way for the hand to
+                  travel. */}
+              <div className="w-full max-w-[540px]">
+                <ProgressBar
+                  durationSec={state.durationSec}
+                  isPlaying={playing}
+                  inline
+                />
+              </div>
+            </div>
+
+            {/* --------------------------------------------- wide utilities -- */}
+            <div className="hidden items-center justify-end gap-3 md:flex">
+              <SpeedButton rate={state.rate} onChange={actions.setRate} />
+
+              <Link
+                href={'/queue' as Route}
+                className="flex h-9 shrink-0 items-center gap-2 rounded-full bg-[var(--color-surface-hover)] px-3.5 type-caption text-[var(--color-text-secondary)] no-underline transition-colors hover:text-[var(--color-text-primary)]"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <path d={icon.queue} />
+                </svg>
+                {t.t('nav.queue')}
+              </Link>
+
+              {/* Widest at the end of the row, where a pointer overshooting it
+                  hits the window edge rather than another control. */}
+              <div className="w-[132px] shrink-0">
+                <VolumeSlider volume={state.volume} onChange={actions.setVolume} />
+              </div>
+            </div>
+
+            {/* ------------------------------------------- narrow transport -- */}
+            <div className="flex items-center gap-1 md:hidden">
+              <SkipButton direction="back" seconds={SKIP_BACK_SEC} onClick={actions.skipBack} />
+              <PlayPauseButton
+                playing={playing}
+                loading={loading}
+                onToggle={actions.toggle}
+                size={40}
+                tint={accent?.fill}
+              />
+            </div>
           </div>
 
-          <div className="absolute inset-x-0 bottom-0 px-4">
+          {/* The hairline of progress along the floor, for the width that has
+              no room for a real scrubber. Above `md` the bar has one. */}
+          <div className="absolute inset-x-0 bottom-0 px-4 md:hidden">
             <ProgressBar durationSec={state.durationSec} isPlaying={playing} compact />
           </div>
         </m.div>

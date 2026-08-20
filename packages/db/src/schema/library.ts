@@ -34,7 +34,7 @@ export const profiles = pgTable('profiles', {
   avatarUrl: text('avatar_url'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+}).enableRLS();
 
 export const subscriptions = pgTable(
   'subscriptions',
@@ -68,7 +68,7 @@ export const subscriptions = pgTable(
     /** The reverse direction, for "how many people follow this show". */
     index('subscriptions_podcast_idx').on(t.podcastId),
   ],
-);
+).enableRLS();
 
 export type ProfileRow = typeof profiles.$inferSelect;
 export type SubscriptionRow = typeof subscriptions.$inferSelect;

@@ -53,7 +53,7 @@ export const playlists = pgTable(
      */
     index('playlists_user_idx').on(t.userId, t.updatedAt.desc()),
   ],
-);
+).enableRLS();
 
 export const playlistItems = pgTable(
   'playlist_items',
@@ -85,7 +85,7 @@ export const playlistItems = pgTable(
     /** The reverse direction: which playlists hold this episode. */
     index('playlist_items_episode_idx').on(t.episodeId),
   ],
-);
+).enableRLS();
 
 export type PlaylistRow = typeof playlists.$inferSelect;
 export type PlaylistItemRow = typeof playlistItems.$inferSelect;

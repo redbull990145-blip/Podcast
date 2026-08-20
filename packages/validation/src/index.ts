@@ -14,6 +14,7 @@ export {
 export type { SignInInput, SignUpInput, VerifyEmailInput } from './auth.ts';
 
 export {
+  catalogueQuery,
   feedUrl,
   feedUrlInput,
   languageTag,
@@ -23,6 +24,7 @@ export {
 } from './common.ts';
 
 export type {
+  CatalogueQuery,
   FeedUrlInput,
   PaginationQuery,
   SearchQuery,

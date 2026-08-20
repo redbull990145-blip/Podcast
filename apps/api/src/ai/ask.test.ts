@@ -2,7 +2,8 @@ import type { StoredSegment } from '@cue/db';
 import { describe, expect, it } from 'vitest';
 import { buildAskMessages, citationsFrom } from './ask.ts';
 import { normaliseChapters } from './generate.ts';
-import { shift } from './transcribe.ts';
+import type { TranscribedSegment, TranscribedWord } from './groq.ts';
+import { placeChunk } from './transcribe.ts';
 
 const segments: StoredSegment[] = [
   { index: 0, startMs: 0, endMs: 4000, text: 'Welcome to the show.', speaker: null },
@@ -166,25 +167,154 @@ describe('normaliseChapters', () => {
   });
 });
 
-describe('shift', () => {
+describe('placeChunk', () => {
+  /** A chunk running 10:00 → 20:00 of the episode. */
+  const chunk = { startMs: 600_000, durationMs: 600_000 };
+
+  /** A cue as the transcriber hands it over: chunk-local, usually wordless. */
+  const cue = (
+    startMs: number,
+    endMs: number,
+    text: string,
+    words: TranscribedWord[] | null = null,
+  ): TranscribedSegment => ({ startMs, endMs, text, words });
+
   it('moves a chunk’s cues into episode time', () => {
     // Whisper times every upload from zero. Without this, every chunk after the
     // first claims to start at the beginning of the episode.
-    expect(shift([{ startMs: 0, endMs: 3000, text: 'hello' }], 600_000)).toEqual([
-      { startMs: 600_000, endMs: 603_000, text: 'hello' },
+    expect(placeChunk([cue(0, 3000, 'hello')], chunk)).toEqual([
+      cue(600_000, 603_000, 'hello'),
     ]);
   });
 
-  it('leaves the first chunk alone', () => {
-    const segments = [{ startMs: 10, endMs: 20, text: 'x' }];
-    expect(shift(segments, 0)).toBe(segments);
+  it('leaves the first chunk’s times alone', () => {
+    expect(placeChunk([cue(10, 20, 'x')], { startMs: 0, durationMs: 600_000 })).toEqual([
+      cue(10, 20, 'x'),
+    ]);
   });
 
-  it('does not invent a span for an untimed fallback segment', () => {
-    // A zero end means the chunk came back with no segment boundaries at all;
-    // shifting it would fabricate a measurement that was never made.
-    expect(shift([{ startMs: 0, endMs: 0, text: 'x' }], 5000)).toEqual([
-      { startMs: 5000, endMs: 0, text: 'x' },
+  /**
+   * The regression that mattered. This used to shift the start and leave the
+   * end at zero, producing a cue that ended ten minutes before it began.
+   */
+  it('gives an untimed fallback segment the chunk it was found in', () => {
+    expect(placeChunk([cue(0, 0, 'x')], chunk)).toEqual([cue(600_000, 1_200_000, 'x')]);
+  });
+
+  it('never returns a cue that ends before it starts', () => {
+    const placed = placeChunk(
+      [cue(0, 0, 'no end'), cue(5000, 0, 'end omitted'), cue(1000, 2000, 'fine')],
+      chunk,
+    );
+    for (const placedCue of placed) {
+      expect(placedCue.endMs).toBeGreaterThanOrEqual(placedCue.startMs);
+    }
+  });
+
+  /**
+   * Whisper's documented behaviour on trailing silence is to run the final cue
+   * of a chunk past the end of that chunk. Unclamped, it starts after the next
+   * chunk's first cue and the concatenated array stops being sorted — which
+   * breaks the binary search that picks the highlighted line.
+   */
+  it('clamps a cue that overruns the end of its chunk', () => {
+    expect(placeChunk([cue(599_000, 640_000, 'tail')], chunk)).toEqual([
+      cue(1_199_000, 1_200_000, 'tail'),
     ]);
+  });
+
+  it('drops a hallucinated cue that starts past the end of its chunk', () => {
+    expect(placeChunk([cue(700_000, 701_000, 'ghost')], chunk)).toEqual([]);
+  });
+
+  it('clamps nothing when the chunk length was never measured', () => {
+    // `durationMs: 0` is the single-piece fallback for audio that is not MP3
+    // and so never went through frame-walking. Zero means "unknown", and
+    // treating it as a real length would clamp every cue to the start.
+    expect(placeChunk([cue(0, 9000, 'x')], { startMs: 0, durationMs: 0 })).toEqual([
+      cue(0, 9000, 'x'),
+    ]);
+  });
+
+  it('carries word timings into episode time with their cue', () => {
+    const placed = placeChunk(
+      [
+        cue(1000, 3000, 'two words', [
+          { startMs: 1000, endMs: 1800, text: 'two' },
+          { startMs: 1800, endMs: 3000, text: 'words' },
+        ]),
+      ],
+      chunk,
+    );
+
+    expect(placed[0]!.words).toEqual([
+      { startMs: 601_000, endMs: 601_800, text: 'two' },
+      { startMs: 601_800, endMs: 603_000, text: 'words' },
+    ]);
+  });
+
+  /**
+   * Words survive their cue being clamped, and that is deliberate.
+   *
+   * Trimming a word into the shortened cue collapsed both its ends onto the
+   * same millisecond, and the span filter that followed then deleted it — so
+   * the clamp fired exactly when it was needed and destroyed the last word of
+   * the final cue in each chunk. Because the player renders the active line
+   * from these words and every other line from `text`, the line visibly lost a
+   * word the moment the highlight arrived on it.
+   */
+  it('keeps every word when the cue around it is clamped', () => {
+    const placed = placeChunk(
+      [
+        cue(599_000, 640_000, 'tail end', [
+          { startMs: 599_000, endMs: 599_500, text: 'tail' },
+          { startMs: 620_000, endMs: 640_000, text: 'end' },
+        ]),
+      ],
+      chunk,
+    );
+
+    // The cue is trimmed to the chunk...
+    expect(placed[0]!.endMs).toBe(1_200_000);
+    // ...but the words still spell it.
+    expect(placed[0]!.words?.map((w) => w.text)).toEqual(['tail', 'end']);
+  });
+
+  it('shifts words without reordering or dropping any of them', () => {
+    const placed = placeChunk(
+      [
+        cue(0, 3000, 'a b c', [
+          { startMs: 0, endMs: 0, text: 'a' },
+          { startMs: 0, endMs: 900, text: 'b' },
+          { startMs: 900, endMs: 3000, text: 'c' },
+        ]),
+      ],
+      chunk,
+    );
+
+    // Including the zero-span one: Whisper rounds to a 20ms grid, so a quick
+    // word can legitimately start and end on the same millisecond.
+    expect(placed[0]!.words).toEqual([
+      { startMs: 600_000, endMs: 600_000, text: 'a' },
+      { startMs: 600_000, endMs: 600_900, text: 'b' },
+      { startMs: 600_900, endMs: 603_000, text: 'c' },
+    ]);
+  });
+
+  it('reports no words rather than an empty list when the cue had none', () => {
+    // Null means "estimate these"; an empty array would mean "this cue has no
+    // words", and the player would sweep nothing at all.
+    expect(placeChunk([cue(0, 1000, 'x', [])], chunk)[0]!.words).toBeNull();
+  });
+
+  it('keeps a cue whose end was omitted on the unmeasured path', () => {
+    // `durationMs: 0` is the fallback for audio that is not MP3. There is no
+    // "rest of the chunk" to award, and falling back to the chunk start put the
+    // end before the start — which dropped the cue and holed the transcript.
+    const placed = placeChunk(
+      [cue(0, 1000, 'first'), cue(2000, 0, 'end omitted'), cue(3000, 4000, 'third')],
+      { startMs: 0, durationMs: 0 },
+    );
+    expect(placed.map((p) => p.text)).toEqual(['first', 'end omitted', 'third']);
   });
 });

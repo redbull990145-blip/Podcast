@@ -26,7 +26,10 @@ export function PodcastTile({ podcast, priority = false }: { podcast: Podcast; p
           alt={podcast.title}
           size={200}
           priority={priority}
-          className="w-full"
+          responsive
+          // The grid this sits in runs 2 / 3 / 4 / 5 columns. Widest cell at
+          // each step, so the browser never picks a candidate too small.
+          sizes="(min-width: 1280px) 260px, (min-width: 1024px) 300px, (min-width: 640px) 33vw, 45vw"
         />
       </div>
 

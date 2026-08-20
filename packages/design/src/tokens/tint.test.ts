@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { dark, light } from './color.ts';
 import {
   contrastRatio,
+  deriveCover,
   deriveTint,
   hexToRgb,
   oklabToRgb,
@@ -126,5 +127,41 @@ describe('contrastRatio', () => {
     expect(contrastRatio(dark.textSecondary, dark.bg)).toBeGreaterThanOrEqual(4.5);
     expect(contrastRatio(light.textPrimary, light.bg)).toBeGreaterThanOrEqual(4.5);
     expect(contrastRatio(light.textSecondary, light.bg)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+/**
+ * Category tiles carry a white label, and their colour comes from whichever
+ * show the catalogue happened to file under that category — a range we do not
+ * control any more than we control cover art. So the guarantee has to hold for
+ * every hue, not for the four in the mock.
+ */
+describe('deriveCover', () => {
+  const HUES = Array.from({ length: 24 }, (_, i) => {
+    const hue = (i * 15 * Math.PI) / 180;
+    // Full-chroma sRGB samples around the wheel, which is the worst case: a
+    // saturated yellow is the colour most likely to be too luminous for white.
+    const rgb = oklabToRgb({ L: 0.75, a: 0.16 * Math.cos(hue), b: 0.16 * Math.sin(hue) });
+    return rgbToHex(rgb);
+  });
+
+  it.each(HUES)('keeps a white label readable on %s', (hex) => {
+    const cover = deriveCover(hex);
+    expect(cover).not.toBeNull();
+    expect(contrastRatio('#FFFFFF', cover!.from)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio('#FFFFFF', cover!.to)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('keeps the two stops far enough apart to read as a gradient', () => {
+    for (const hex of HUES) {
+      const cover = deriveCover(hex)!;
+      // Not a threshold plucked from the air: below about 1.25:1 between the
+      // ends, the tile is a flat fill that cost a gradient's worth of paint.
+      expect(contrastRatio(cover.from, cover.to)).toBeGreaterThanOrEqual(1.25);
+    }
+  });
+
+  it('returns nothing for a colour it cannot read', () => {
+    expect(deriveCover('not a colour')).toBeNull();
   });
 });

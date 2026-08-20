@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { feedUrl, languageTag, paginationQuery, searchQuery } from './common.ts';
+import {
+  catalogueQuery,
+  feedUrl,
+  languageTag,
+  paginationQuery,
+  searchQuery,
+} from './common.ts';
 import { formatFieldErrors } from './errors.ts';
 
 describe('feedUrl', () => {
@@ -90,5 +96,40 @@ describe('formatFieldErrors', () => {
 
     expect(result.error!.issues.length).toBeGreaterThan(1);
     expect(Object.values(formatFieldErrors(result.error!))).toHaveLength(1);
+  });
+});
+
+/**
+ * The catalogue's category filter.
+ *
+ * A slug reaches a `WHERE` clause, so what it is allowed to be is worth
+ * pinning down rather than leaving to the query builder's escaping. The regex
+ * is the actual guarantee; these are the cases that would otherwise be
+ * discovered by someone editing a URL.
+ */
+describe('catalogueQuery', () => {
+  it('keeps the pagination fields it extends', () => {
+    const parsed = catalogueQuery.parse({ limit: '30', category: 'true-crime' });
+    expect(parsed.limit).toBe(30);
+    expect(parsed.category).toBe('true-crime');
+  });
+
+  it('is optional — the unfiltered catalogue is the common case', () => {
+    expect(catalogueQuery.parse({}).category).toBeUndefined();
+  });
+
+  it.each([
+    ['uppercase', 'True-Crime'],
+    ['a space', 'true crime'],
+    ['an underscore', 'true_crime'],
+    ['a quote', "true'crime"],
+    ['a wildcard', 'true%'],
+    ['empty', ''],
+  ])('rejects %s', (_label, slug) => {
+    expect(catalogueQuery.safeParse({ category: slug }).success).toBe(false);
+  });
+
+  it('rejects a slug long enough to be a payload rather than a name', () => {
+    expect(catalogueQuery.safeParse({ category: 'a'.repeat(65) }).success).toBe(false);
   });
 });

@@ -24,10 +24,24 @@ export function ProgressBar({
   durationSec,
   isPlaying,
   compact = false,
+  inline = false,
 }: {
   durationSec: number | null;
   isPlaying: boolean;
   compact?: boolean;
+  /**
+   * Timecodes either side of the track rather than under it.
+   *
+   * For the desktop player bar, which is 84px tall and has to fit a transport
+   * row above this. Stacked, the labels alone are a third of the bar's height;
+   * beside the track they cost nothing, because the track was never going to
+   * use the full width anyway.
+   *
+   * Same component rather than a second scrubber: the rAF loop, the pointer
+   * capture and the keyboard seeking are the substance here, and the only thing
+   * that actually differs between the two players is where two spans sit.
+   */
+  inline?: boolean;
 }) {
   const { seek } = usePlayerActions();
   const trackRef = useRef<HTMLDivElement>(null);
@@ -86,8 +100,20 @@ export function ProgressBar({
 
   const seekable = durationSec !== null && durationSec > 0;
 
+  const elapsedLabel = formatTimestamp(scrubbing ?? elapsed);
+  const remainingLabel =
+    durationSec !== null
+      ? `−${formatTimestamp(Math.max(0, durationSec - (scrubbing ?? elapsed)))}`
+      : '—';
+
   return (
-    <div className={compact ? '' : 'w-full'}>
+    <div className={compact ? '' : inline ? 'flex w-full items-center gap-3' : 'w-full'}>
+      {inline ? (
+        <span className="type-timecode w-11 shrink-0 text-end text-[var(--color-text-tertiary)]">
+          {elapsedLabel}
+        </span>
+      ) : null}
+
       <div
         ref={trackRef}
         role="slider"
@@ -123,11 +149,11 @@ export function ProgressBar({
           }
         }}
         className={[
-          'group relative w-full cursor-pointer touch-none',
+          'group relative w-full min-w-0 cursor-pointer touch-none',
           // A thin bar with a tall hit area: thin enough to be chrome, tall
           // enough to grab. Making the visible bar itself 16px would be a
           // ribbon across the player.
-          compact ? 'py-1' : 'py-2.5',
+          compact ? 'py-1' : inline ? 'py-2' : 'py-2.5',
           seekable ? '' : 'cursor-default opacity-60',
         ].join(' ')}
       >
@@ -141,7 +167,7 @@ export function ProgressBar({
         <div
           className={[
             'w-full origin-center overflow-hidden rounded-full bg-[var(--color-border-strong)]',
-            compact ? 'h-[3px]' : 'h-1.5',
+            compact ? 'h-[3px]' : inline ? 'h-1' : 'h-1.5',
             'transition-transform duration-[var(--duration-fast)] ease-standard',
             compact
               ? ''
@@ -168,14 +194,16 @@ export function ProgressBar({
         </div>
       </div>
 
-      {!compact ? (
-        <div className="mt-1 flex justify-between type-caption text-[var(--color-text-tertiary)]">
-          <span>{formatTimestamp(scrubbing ?? elapsed)}</span>
-          <span>
-            {durationSec !== null
-              ? `−${formatTimestamp(Math.max(0, durationSec - (scrubbing ?? elapsed)))}`
-              : '—'}
-          </span>
+      {inline ? (
+        <span className="type-timecode w-11 shrink-0 text-[var(--color-text-tertiary)]">
+          {remainingLabel}
+        </span>
+      ) : null}
+
+      {!compact && !inline ? (
+        <div className="mt-1 flex justify-between type-timecode text-[var(--color-text-tertiary)]">
+          <span>{elapsedLabel}</span>
+          <span>{remainingLabel}</span>
         </div>
       ) : null}
     </div>

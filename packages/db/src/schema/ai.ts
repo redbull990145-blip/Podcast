@@ -55,7 +55,7 @@ export const episodeAi = pgTable(
     /** One artefact per episode per kind per language; generation upserts onto this. */
     uniqueIndex('episode_ai_episode_kind_language_key').on(t.episodeId, t.kind, t.language),
   ],
-);
+).enableRLS();
 
 /**
  * Daily spend against the **operator's** key.
@@ -86,7 +86,7 @@ export const aiUsage = pgTable(
     count: integer('count').notNull().default(0),
   },
   (t) => [uniqueIndex('ai_usage_user_day_key').on(t.userId, t.day)],
-);
+).enableRLS();
 
 /**
  * A user's own provider key, encrypted at rest.
@@ -126,7 +126,7 @@ export const userApiKeys = pgTable(
   // lookups by `user_id` alone, since it leads with that column. A second index
   // on the prefix would be maintained on every write and never chosen.
   (t) => [uniqueIndex('user_api_keys_user_provider_key').on(t.userId, t.provider)],
-);
+).enableRLS();
 
 export type EpisodeAiRow = typeof episodeAi.$inferSelect;
 export type NewEpisodeAiRow = typeof episodeAi.$inferInsert;

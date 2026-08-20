@@ -95,13 +95,13 @@ export default async function PodcastPage({ params }: Params) {
 
       <div className="relative mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
       <header className="mb-10 flex flex-col gap-6 sm:flex-row sm:items-end">
-        <Artwork src={podcast.artworkUrl} alt={podcast.title} size={192} priority />
+        <Artwork src={podcast.artworkUrl} alt={podcast.title} size={220} priority />
 
         <div className="min-w-0">
           {/* The heading comes first and carries its own weight. Metadata sits
               below it, where it belongs — a label above a title is a caption
               pretending to be a hierarchy. */}
-          <h1 className="type-title1 mt-0 mb-0 text-[var(--color-text-primary)]">
+          <h1 className="type-display mt-0 mb-0 text-[var(--color-text-primary)]">
             {podcast.title}
           </h1>
 
@@ -144,7 +144,7 @@ export default async function PodcastPage({ params }: Params) {
       ) : null}
 
       <section aria-label={t.t('podcast.episodes')}>
-        <h2 className="type-title3 mb-2 text-[var(--color-text-primary)]">{t.t('podcast.episodes')}</h2>
+        <h2 className="type-title2 mb-3 text-[var(--color-text-primary)]">{t.t('podcast.episodes')}</h2>
 
         {episodes.items.length === 0 ? (
           <p className="type-callout text-[var(--color-text-secondary)]">

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildMotionCssVariables } from './css.ts';
 import { reducedTween } from './reduced.ts';
+import { spring } from './springs.ts';
 import { duration, easing } from './timing.ts';
 
 describe('buildMotionCssVariables', () => {
@@ -28,6 +29,14 @@ describe('buildMotionCssVariables', () => {
   it('converts camelCase token names to kebab-case custom properties', () => {
     expect(css).toContain('--ease-in-out:');
     expect(css).not.toContain('--ease-inOut');
+  });
+
+  it('emits every spring as a linear() curve with its own duration', () => {
+    for (const key of Object.keys(spring)) {
+      const name = key.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+      expect(css).toMatch(new RegExp(`--spring-${name}: linear\\(0, `));
+      expect(css).toMatch(new RegExp(`--spring-${name}-duration: \\d+ms;`));
+    }
   });
 
   it('scopes the variables to :root so both themes share them', () => {

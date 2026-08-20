@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { isTimed, looksLikeTranscript, parseHtmlTranscript, parseTranscript } from './transcript.ts';
+import {
+  isTimed,
+  looksLikeTranscript,
+  parseHtmlTranscript,
+  parseTranscript,
+  timestampMapOffset,
+} from './transcript.ts';
 
 const VTT = `WEBVTT
 
@@ -258,5 +264,147 @@ describe('looksLikeTranscript', () => {
   it('rejects an error page served with a 200', () => {
     // Publishers' CDNs do this constantly, and the content type lies too.
     expect(looksLikeTranscript('<!doctype html><title>404</title>')).toBe(false);
+  });
+});
+
+/**
+ * The defects that made publisher transcripts drift.
+ *
+ * Each of these produced a transcript that loaded, looked plausible, and was
+ * wrong — which is the failure mode that reaches users as "it doesn't sync"
+ * rather than as an error.
+ */
+describe('timestampMapOffset', () => {
+  it('reads the offset an HLS-derived file declares', () => {
+    // MPEGTS 900000 / 90kHz = 10s. Every cue is 10s early without this.
+    expect(
+      timestampMapOffset('WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000\n'),
+    ).toBe(10_000);
+  });
+
+  it('subtracts the LOCAL anchor the map is relative to', () => {
+    expect(
+      timestampMapOffset('WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:04.000,MPEGTS:900000\n'),
+    ).toBe(6000);
+  });
+
+  it('is zero when there is no map, which is the common case', () => {
+    expect(timestampMapOffset('WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nhi\n')).toBe(0);
+  });
+
+  it('ignores a map that would move cues before the episode started', () => {
+    expect(
+      timestampMapOffset('WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:30.000,MPEGTS:900000\n'),
+    ).toBe(0);
+  });
+
+  it('applies the offset to every parsed cue', () => {
+    const segments = parseTranscript(
+      'WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000\n\n' +
+        '00:00:30.000 --> 00:00:33.000\nthirty seconds in\n',
+    );
+    expect(segments[0]).toMatchObject({ startMs: 40_000, endMs: 43_000 });
+  });
+});
+
+describe('parseTranscript resilience', () => {
+  it('recovers every cue when a blank line is missing', () => {
+    // One absent blank line used to collapse the whole rest of the file into
+    // cue #1, with the later timestamps rendered as its caption text.
+    const segments = parseTranscript(
+      'WEBVTT\n\n' +
+        '00:00:01.000 --> 00:00:02.000\nfirst\n' +
+        '00:00:03.000 --> 00:00:04.000\nsecond\n' +
+        '00:00:05.000 --> 00:00:06.000\nthird\n',
+    );
+
+    expect(segments.map((s) => s.text)).toEqual(['first', 'second', 'third']);
+    expect(segments.map((s) => s.startMs)).toEqual([1000, 3000, 5000]);
+  });
+
+  it('does not leave a timestamp inside the caption text', () => {
+    const segments = parseTranscript(
+      'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nfirst\n00:00:03.000 --> 00:00:04.000\nsecond\n',
+    );
+    for (const segment of segments) expect(segment.text).not.toMatch(/-->/);
+  });
+
+  it('strips an SRT counter that follows a run-together cue', () => {
+    const segments = parseTranscript(
+      '1\n00:00:01,000 --> 00:00:02,000\nfirst\n2\n00:00:03,000 --> 00:00:04,000\nsecond\n',
+    );
+    expect(segments.map((s) => s.text)).toEqual(['first', 'second']);
+  });
+
+  it('accepts a timestamp with no fractional part', () => {
+    const segments = parseTranscript('WEBVTT\n\n00:00:01 --> 00:00:04\nno fraction\n');
+    expect(segments[0]).toMatchObject({ startMs: 1000, endMs: 4000, text: 'no fraction' });
+  });
+
+  it('accepts microsecond precision rather than dropping the cue', () => {
+    // ffmpeg and several Whisper wrappers emit six digits. The strict form did
+    // not round these — it failed to match at all and lost the line.
+    const segments = parseTranscript(
+      'WEBVTT\n\n00:00:01.500000 --> 00:00:02.000000\nsix digits\n',
+    );
+    expect(segments[0]).toMatchObject({ startMs: 1500, endMs: 2000 });
+  });
+});
+
+describe('isTimed', () => {
+  const cue = (startMs: number, endMs: number, index: number) => ({
+    index,
+    startMs,
+    endMs,
+    text: 'x',
+    speaker: null,
+  });
+
+  it('accepts timings that advance', () => {
+    expect(isTimed([cue(0, 2000, 0), cue(2000, 4000, 1)])).toBe(true);
+  });
+
+  it('rejects a file where every cue starts at zero', () => {
+    // A broken exporter writing real ends against identical starts. The
+    // rightmost-match search would pin the highlight to the final line for the
+    // entire episode, which looks broken rather than untimed.
+    expect(isTimed([cue(0, 2000, 0), cue(0, 5000, 1), cue(0, 9000, 2)])).toBe(false);
+  });
+
+  it('rejects prose with no timings at all', () => {
+    expect(isTimed([cue(0, 0, 0), cue(0, 0, 1)])).toBe(false);
+  });
+
+  it('rejects a single cue, which has no timeline to follow', () => {
+    expect(isTimed([cue(0, 9000, 0)])).toBe(false);
+  });
+});
+
+describe('looksLikeTranscript', () => {
+  it('recognises a WebVTT file, whose first line is never a cue', () => {
+    expect(looksLikeTranscript('WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nhi\n')).toBe(true);
+  });
+
+  it('recognises SRT', () => {
+    expect(looksLikeTranscript('1\n00:00:01,000 --> 00:00:02,000\nhi\n')).toBe(true);
+  });
+
+  /**
+   * The regression this exists for. `-->` also closes an HTML comment, and
+   * publisher transcripts are overwhelmingly HTML pages carrying analytics
+   * comments — so they were routed to the caption parser, yielded nothing, and
+   * were cached as failures for a day.
+   */
+  it('is not fooled by an HTML comment', () => {
+    const page =
+      '<html><head><!-- Google Tag Manager --></head><body>' +
+      '<cite>Jerod Santo:</cite><p>What up, nerds?</p></body></html>';
+    expect(looksLikeTranscript(page)).toBe(false);
+    // ...and the HTML parser makes sense of it, which is the whole point.
+    expect(parseHtmlTranscript(page).length).toBeGreaterThan(0);
+  });
+
+  it('ignores prose that merely contains an arrow', () => {
+    expect(looksLikeTranscript('<p>Revenue --> profit, eventually.</p>')).toBe(false);
   });
 });

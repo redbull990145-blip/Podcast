@@ -1,7 +1,8 @@
 # Cue
 
-A podcast platform for **web and Android**, built as a monorepo around one
-shared core.
+A podcast platform for **web and mobile**, built as a monorepo around one
+shared core. Android is the proven mobile target; iOS is configured but has not
+been tested on a device — see PRODUCT.md.
 
 It's an **aggregator**, not a host: you subscribe to shows by RSS and audio
 streams straight from each publisher. We never store or proxy audio, which is
@@ -13,7 +14,7 @@ one.
 ```
 apps/
   web        Next.js (App Router) · Tailwind · motion/react
-  mobile     Expo · Expo Router · Reanimated · expo-audio    (Android)
+  mobile     Expo · Expo Router · Reanimated · expo-audio    (Android, iOS)
   api        Fastify · Drizzle · Redis
 packages/
   core       Domain logic — no platform imports. Player machine, queue, sync.

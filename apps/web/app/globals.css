@@ -20,10 +20,31 @@
   --color-accent: var(--color-accent);
   --color-accent-text: var(--color-accent-text);
   --color-accent-muted: var(--color-accent-muted);
+  --color-ink: var(--color-ink);
+  --color-on-ink: var(--color-text-on-ink);
   --color-danger: var(--color-danger);
   --color-skeleton: var(--color-skeleton);
 
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  /* Geist, then the platform.
+
+     Geist ships Latin, Latin-Extended, Cyrillic and Vietnamese — not
+     Devanagari, not Arabic, not CJK. A browser resolves a font stack per
+     *codepoint*, so a Hindi show title inside an otherwise-Geist page simply
+     falls through to whatever comes next, with no branching anywhere in the
+     app. What comes next is the platform's own UI face, which is the one thing
+     on the machine guaranteed to have those scripts and to have them hinted for
+     that screen.
+
+     This is what the previous stack did too. Inter was the UI face and was
+     loaded with the `latin` and `latin-ext` subsets — the only ones the app
+     needs and, as it happens, the only ones that would have helped, since
+     Google serves no Devanagari or Arabic cut of Inter either. Keeping it here
+     as a second webfont would have added a family to every page load to cover
+     Greek, which this app does not ship. */
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, -apple-system,
+    'Segoe UI', Roboto, 'Noto Sans', sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
 
   --radius-xs: var(--radius-xs);
   --radius-sm: var(--radius-sm);
@@ -69,7 +90,7 @@ body {
   margin: 0;
   background: var(--color-bg);
   color: var(--color-text-primary);
-  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-sans);
   font-size: var(--text-body-size);
   line-height: var(--text-body-line);
   letter-spacing: var(--text-body-tracking);
@@ -87,12 +108,38 @@ body {
 /* ------------------------------------------------------------ typography -- */
 
 .type-display {
-  /* One family throughout — see the note in @cue/design's typography tokens. */
-  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   font-size: var(--text-display-size);
   line-height: var(--text-display-line);
   letter-spacing: var(--text-display-tracking);
   font-weight: var(--text-display-weight);
+}
+
+/**
+ * The resume hero's title: a row title on a phone, a page title on a desktop.
+ *
+ * Two tokens rather than one, because the hero is a stacked column on a 390px
+ * screen and a 220px cover beside 600px of text on a desktop — 34px would be
+ * the entire phone screen and 16px would be lost on the desktop.
+ *
+ * A media query rather than `class="type-title3 md:type-display"`, which looks
+ * like it would work and cannot: both rules set `font-size` at the same
+ * specificity, so which one wins is decided by their order in the stylesheet,
+ * not by the order they were written in the markup.
+ */
+.type-hero {
+  font-size: var(--text-title3-size);
+  line-height: var(--text-title3-line);
+  letter-spacing: var(--text-title3-tracking);
+  font-weight: var(--text-title3-weight);
+}
+
+@media (min-width: 48rem) {
+  .type-hero {
+    font-size: var(--text-display-size);
+    line-height: var(--text-display-line);
+    letter-spacing: var(--text-display-tracking);
+    font-weight: var(--text-display-weight);
+  }
 }
 
 .type-title1 {
@@ -135,6 +182,18 @@ body {
   line-height: var(--text-caption-line);
   letter-spacing: var(--text-caption-tracking);
   font-weight: var(--text-caption-weight);
+}
+
+/* Elapsed, remaining, chapter marks — the only text set in the mono face.
+   `caption` and `timecode` are the same size on purpose, so a duration and the
+   label beside it sit on one line without either looking like an aside. */
+.type-timecode {
+  font-family: var(--font-mono);
+  font-size: var(--text-timecode-size);
+  line-height: var(--text-timecode-line);
+  letter-spacing: var(--text-timecode-tracking);
+  font-weight: var(--text-timecode-weight);
+  font-variant-numeric: tabular-nums;
 }
 
 .type-overline {
@@ -235,6 +294,236 @@ body {
 .show-notes pre code {
   padding: 0;
   background: none;
+}
+
+/* --------------------------------------------------------- captions ------ */
+
+/**
+ * The two numbers the caption sweep is driven by.
+ *
+ * Registered rather than left as plain custom properties for one reason that
+ * matters and one that is merely nice. The one that matters: an unregistered
+ * custom property is an untyped token, so `calc(var(--caption-p) * 100%)`
+ * inside a `background-image` is re-parsed as a string on every write. Declared
+ * as `<number>`, the value is stored parsed and the browser knows the gradient
+ * is the only thing that has to be recomputed. The nice one: an initial value
+ * means a word that has never been written to still renders correctly, so the
+ * first frame after a line change is not a flash of unstyled text.
+ *
+ * `inherits: false` deliberately. These are per-word, and inheriting them down
+ * from the list would mean writing one word's progress set every word's.
+ */
+@property --caption-p {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+
+@property --caption-lit-amount {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+
+/**
+ * A word of the line being spoken.
+ *
+ * Three states, and the split between them is a performance decision as much
+ * as a visual one. A word that has not been reached and a word that is finished
+ * are flat colour — no gradient, no clip, no promoted layer — which is every
+ * word on screen but one. Only the single word the voice is inside pays for
+ * gradient text, and it pays for it for the fraction of a second it takes to
+ * say. Painting all of them as gradients instead would be forty clipped text
+ * rasters a frame to move one edge.
+ *
+ * `inline-block` because the bloom is a transform, and transforms do not apply
+ * to inline boxes. The spaces between words are real text nodes, so the line
+ * still wraps exactly where the plain text would have.
+ */
+.caption-word {
+  display: inline-block;
+  color: var(--caption-dim);
+
+  /**
+   * How far the lit/unlit boundary is smeared. Used by the gradient below, and
+   * named because the geometry has to agree with it in three places.
+   */
+  --caption-feather: 0.34em;
+
+  /**
+   * Nothing here transitions, and that is a fix rather than an omission.
+   *
+   * This rule used to ease `color`, which caused a visible blink on every
+   * single word. The in-flight state paints the text with a gradient and sets
+   * `color: transparent` to let it through — so when a word finished and handed
+   * back to a flat colour, the eased property was animating *from transparent*.
+   * Every word faded in from nothing over 220ms, right after it had been swept.
+   *
+   * It does not need easing anyway. With the geometry below, the gradient at
+   * p = 0 is exactly `--caption-dim` across the whole word and at p = 1 exactly
+   * `--caption-lit`, which is precisely what the two flat states paint. The
+   * boundaries are already continuous, so snapping between them is invisible —
+   * and a transition could only take something that already matched and make it
+   * disagree for a fifth of a second.
+   */
+  transition: none;
+}
+
+.caption-word[data-sung='yes'] {
+  color: var(--caption-lit);
+}
+
+.caption-word[data-sung='now'] {
+  color: transparent;
+  /**
+   * The leading edge is soft, and that is the whole trick.
+   *
+   * A hard boundary between lit and unlit reads as a wipe — a rectangle moving
+   * over text. Feathering it across two thirds of an em makes it read as the
+   * word *arriving*, because that is closer to how speech actually lands: the
+   * onset of a syllable is not an instant. The feather is in `em` so it scales
+   * with the caption size, which follows the window.
+   *
+   * **The travel is widened by the feather at both ends**, which is the detail
+   * that stops the word flickering at its boundaries. Sweeping the midpoint
+   * from 0% to 100% sounds right and is wrong: at p = 0 the feather's leading
+   * half already hangs over the first third of an em, so the word starts
+   * fractionally lit and pops when it takes over from the flat unsung colour —
+   * and at p = 1 the trailing half is still unlit, so it pops again on the way
+   * out. Running the midpoint from `-feather` to `100% + feather` instead means
+   * the gradient is *entirely* dim at 0 and *entirely* lit at 1, matching the
+   * two flat states exactly. Nothing pops, because nothing changes.
+   */
+  background-image: linear-gradient(
+    to right,
+    var(--caption-lit)
+      calc(var(--caption-p) * (100% + 2 * var(--caption-feather)) - 2 * var(--caption-feather)),
+    var(--caption-dim) calc(var(--caption-p) * (100% + 2 * var(--caption-feather)))
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+/**
+ * What is deliberately *not* here: a glow, and a swell.
+ *
+ * Both were built, and both were removed after profiling the sweep against a
+ * real episode. The numbers, measured over ~1.8s of playback each:
+ *
+ *   as built (glow + swell)   53 fps   p95 40.1ms   25 dropped frames
+ *   without the glow          61 fps   p95 26.8ms   10 dropped
+ *   without either            72 fps   p95 13.5ms    6 dropped
+ *
+ * A `text-shadow` whose blur radius changes every frame re-blurs a glyph
+ * raster every frame, and blur is the most expensive thing a compositor does.
+ * A `scale` on text is nearly as bad for a subtler reason: transforms are free
+ * only when they move an existing raster, and scaling text re-rasterises the
+ * glyphs at the new size to keep them sharp.
+ *
+ * Together they cost two thirds of the frame budget to add a swell most people
+ * would not name if asked. The sweep itself — one word's gradient, repainted —
+ * comes in at 13.5ms p95, which is a single frame at 72Hz. So the sweep stays
+ * and the garnish goes. The soft leading edge above is what makes a word read
+ * as *arriving*, and it costs nothing extra.
+ *
+ * `will-change` is absent for the same reason. It was on this rule, and since
+ * exactly one word holds this state at a time it meant creating and destroying
+ * a compositor layer several times a second — churn, in the name of an
+ * optimisation for a property that is not composited anyway.
+ */
+
+/* The sweep runs the way the script does. Under Arabic the words fill from the
+   right, because that is the direction the voice is moving across the line. */
+[dir='rtl'] .caption-word[data-sung='now'] {
+  background-image: linear-gradient(
+    to left,
+    var(--caption-lit)
+      calc(var(--caption-p) * (100% + 2 * var(--caption-feather)) - 2 * var(--caption-feather)),
+    var(--caption-dim) calc(var(--caption-p) * (100% + 2 * var(--caption-feather)))
+  );
+}
+
+/**
+ * Pressing a line to jump to it.
+ *
+ * Every caption is a seek control, and until now the only thing that said so
+ * was the cursor. A line that moves under the finger is the difference between
+ * text that happens to be clickable and a control — and it is the one press in
+ * this column, so it should feel like the transport buttons beside it.
+ *
+ * CSS rather than a `whileTap`: the lines are memoised precisely so that four
+ * position reports a second do not hand every one of them a new prop, and
+ * giving each a Motion component with its own gesture state would undo that for
+ * a 100ms squash. `:active` costs nothing and never re-renders.
+ *
+ * Sprung on the way back, snapped on the way down. A press should register the
+ * instant the finger lands — easing *into* a press is the single most common
+ * way a control comes to feel laggy — and the rebound is where the life is.
+ */
+.caption-line {
+  display: block;
+  transition:
+    transform var(--spring-responsive-duration) var(--spring-responsive);
+  transform-origin: left center;
+}
+
+.caption-line:active {
+  transform: scale(0.975);
+  transition-duration: var(--duration-instant);
+  transition-timing-function: var(--ease-standard);
+}
+
+/**
+ * Press feedback survives reduced motion, deliberately.
+ *
+ * The policy this app follows is reduce, don't remove: travel goes, feedback
+ * stays. A control that gives no answer at all when pressed is not calmer, it
+ * is broken — so the squash is shallowed rather than dropped, and the spring
+ * rebound becomes a plain short tween.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .caption-line:active {
+    transform: scale(0.99);
+  }
+}
+
+/**
+ * The silence indicator.
+ *
+ * Three dots that fill in turn across a gap in the speech, so a listener can
+ * see that the captions are keeping time through a music break rather than
+ * having stopped. Without it the screen simply freezes, which is the shape of
+ * a bug.
+ */
+.caption-dot {
+  transform: scale(calc(0.5 + var(--caption-lit-amount) * 0.5));
+  opacity: calc(0.22 + var(--caption-lit-amount) * 0.78);
+  transition:
+    transform var(--spring-standard-duration) var(--spring-standard),
+    opacity var(--duration-base) var(--ease-standard);
+}
+
+/**
+ * Reduced motion: the sweep goes, the sync stays.
+ *
+ * The fill is a moving edge, so it is exactly the kind of thing the preference
+ * is about — but the *information* it carries is which words have been said,
+ * and removing that would make the feature pointless rather than calmer. So the
+ * line still shows how far the voice has got; it just stops being soft about it.
+ *
+ * Done by zeroing the feather rather than by restating the gradients. With no
+ * feather the two stops in the rules above land on the same position, which is
+ * a hard boundary — the identical result, without a second copy of the geometry
+ * (and a third, for Arabic) left to drift out of step with the first.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .caption-word {
+    --caption-feather: 0px;
+  }
+
+  .caption-dot {
+    transform: none;
+  }
 }
 
 /* ------------------------------------------------------------- a11y ------ */

@@ -6,10 +6,17 @@
 
 adaptive
 
-Web (Next.js) and Android (Expo/React Native) from one monorepo. iOS is
-explicitly out of scope — not built, not configured, not claimed. The two
+Web (Next.js) and mobile (Expo/React Native) from one monorepo. The two
 platforms share tokens, types, validation and domain logic, but not components:
 each uses its own idioms so interaction feels native rather than ported.
+
+**Android is the proven mobile target; iOS is configured but unproven.** The
+Expo app declares both, and the shared core is platform-free by construction, so
+nothing about the domain logic is Android-specific. What has not happened is
+iOS *testing* — every native surface the app touches (background audio, the
+lock-screen session, the keystore, notification permissions) behaves differently
+on the two systems, and only one of them has been exercised. Treat an iOS build
+as expected-to-work rather than known-to-work until someone has run it.
 
 ## Users
 

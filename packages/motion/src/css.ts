@@ -11,6 +11,8 @@
  */
 
 import { reducedTween } from './reduced.ts';
+import { springEasing } from './spring-easing.ts';
+import { spring, type SpringToken } from './springs.ts';
 import { cssEasing, duration, easing, type EasingToken } from './timing.ts';
 
 function kebab(value: string): string {
@@ -31,6 +33,21 @@ export function buildMotionCssVariables(): string {
 
   for (const key of Object.keys(easing) as EasingToken[]) {
     lines.push(`  --ease-${kebab(key)}: ${cssEasing(key)};`);
+  }
+
+  /**
+   * The springs, for the transitions CSS owns.
+   *
+   * Emitted as a pair per token, and they have to be used as a pair: a
+   * `linear()` curve is a normalised shape, so running one over a duration
+   * other than its own settle produces a spring with different physics than the
+   * one named. Writing `--spring-standard` with a hand-picked duration is the
+   * mistake this comment exists to prevent.
+   */
+  for (const key of Object.keys(spring) as SpringToken[]) {
+    const { easing: curve, durationMs } = springEasing(key);
+    lines.push(`  --spring-${kebab(key)}: ${curve};`);
+    lines.push(`  --spring-${kebab(key)}-duration: ${durationMs}ms;`);
   }
 
   lines.push('}');

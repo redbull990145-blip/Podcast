@@ -44,6 +44,17 @@ export async function runMigrations(db: Database): Promise<string[]> {
     )
   `);
 
+  // Every other table gets row-level security from a migration, because every
+  // other table is declared in the Drizzle schema. This one is created here,
+  // so it has to be locked down here. Supabase exposes the whole `public`
+  // schema over PostgREST, and a table with RLS off is world-readable to
+  // anyone holding the anon key — which is a public value by design.
+  //
+  // No policies accompany this: RLS with an empty policy set denies everyone.
+  // The owner role the API connects as bypasses RLS, so this costs us nothing
+  // and is a no-op when re-run against a database that already has it.
+  await db.execute(sql`ALTER TABLE "__migrations" ENABLE ROW LEVEL SECURITY`);
+
   const applied = await db.execute(sql`SELECT name FROM "__migrations"`);
   const done = new Set(rowsOf<{ name: string }>(applied).map((row) => row.name));
 

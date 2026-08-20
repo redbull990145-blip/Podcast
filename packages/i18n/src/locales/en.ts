@@ -22,6 +22,19 @@ export const en = {
   'nav.player': 'Player',
   'nav.downloads': 'Downloads',
   'nav.playlists': 'Playlists',
+  /* The subscription list in the sidebar rail. Not a destination — it is the
+     shows themselves, listed. */
+  'nav.yourShows': 'Your shows',
+
+  // ---------------------------------------------------------------- theme --
+  'theme.toDark': 'Switch to the dark theme',
+  'theme.appearance': 'Appearance',
+  'theme.appearanceCaption': 'Cue is dark by default. Choose otherwise and it remembers.',
+  'theme.label': 'Theme',
+  'theme.hint': 'Until you choose, this follows your system setting.',
+  'theme.dark': 'Dark',
+  'theme.light': 'Light',
+  'theme.toLight': 'Switch to the light theme',
 
   // --------------------------------------------------------------- common --
   'common.loading': 'Loading…',
@@ -37,10 +50,41 @@ export const en = {
 
   // ----------------------------------------------------------------- home --
   'home.title': 'Listen',
+  'home.lede':
+    'Every show streams straight from the people who make it. Nothing to install, and no account needed to press play.',
+  'home.searchCta': 'Search shows, topics, people',
   'home.empty': 'Nothing here yet',
-  'home.emptyBody': 'Seed the local database with: npm run seed -w @cue/api',
+  'home.emptyBody':
+    'The catalogue is shared, and nobody has added a show yet. Search the directory to find the first one.',
+  'home.failedBody': 'The catalogue didn’t load. Search still works while it recovers.',
   'home.continue': 'Continue listening',
+  'home.pickUp': 'Pick up where you left off',
+  'home.morning': 'Good morning, {name}.',
+  'home.afternoon': 'Good afternoon, {name}.',
+  'home.evening': 'Good evening, {name}.',
+  'search.browse': 'Browse by category',
+  'search.categoryCount': '{count, plural, one {# category} other {# categories}}',
+  'search.inCatalogue': '{count, plural, one {# show on Cue} other {# shows on Cue}}',
+  'search.allCategories': 'All categories',
+  'search.alsoRising': 'Also rising',
+  'home.alsoInProgress': 'Also in progress',
+  'home.startOver': 'Start over',
   'home.latest': 'Latest episodes',
+  // Says what the list actually is. It takes the newest episode from each of
+  // the most active shows rather than the newest six overall, so one prolific
+  // publisher cannot take the whole section — and a heading that did not say
+  // so would be quietly lying about the ordering.
+  'home.latestNote': 'The newest from each show',
+  'home.catalogue': 'Everything on Cue',
+  'home.catalogueNote': 'Most recently published first',
+  /* The same grid as the catalogue, ordered by what someone actually listens
+     to. The note matters more than usual here: a personalised order that does
+     not say it is personalised reads as an arbitrary one. */
+  'home.recommended': 'Recommended for you',
+  'home.recommendedNote': 'Shaped by what you’ve been listening to',
+  'home.moreTitle': 'Looking for something else?',
+  'home.moreBody':
+    'Cue can play any public podcast feed. Search the directory and add whatever you find.',
 
   // -------------------------------------------------------------- library --
   'library.title': 'Library',
@@ -64,11 +108,16 @@ export const en = {
   'search.prompt': 'Find a show',
   'search.promptBody': 'Search the directory by name, topic, or the person who makes it.',
   'search.searching': 'Searching…',
+  /* Two characters is not a search, it is the start of one — and querying on
+     it returns the directory's idea of everything. Saying so beats showing a
+     screen of shows nobody asked for. */
+  'search.tooShort': 'Keep typing',
+  'search.tooShortBody': 'Three letters is enough to start.',
   'search.noResults': 'No shows matched',
   'search.noResultsBody': 'Try a different spelling, or the host’s name.',
   'search.filterLanguage': 'Filter by language',
   'search.anyLanguage': 'Any language',
-  'search.trending': 'Trending now',
+  'search.trending': 'Trending this week',
   'search.add': 'Add',
   'search.adding': 'Adding…',
   'search.added': 'Added',
@@ -224,6 +273,7 @@ export const en = {
   'captions.signInToGenerate': 'Sign in to generate captions — the daily allowance is per account.',
   'captions.failed': 'Couldn’t start writing captions.',
   'captions.untimed': 'This transcript has no timings, so it can’t follow along.',
+  'captions.silence': 'Pause in the conversation',
 
   // ----------------------------------------------------------- transcript --
   'transcript.title': 'Transcript',

@@ -44,7 +44,7 @@ describe('buildCssVariables', () => {
 
   it('gives spacing and radii px units', () => {
     expect(css).toContain('--space-4: 16px;');
-    expect(css).toContain('--radius-md: 10px;');
+    expect(css).toContain('--radius-md: 8px;');
   });
 });
 

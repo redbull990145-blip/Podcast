@@ -67,7 +67,20 @@ export function startWorker(app: FastifyInstance): Worker {
     app.log.info('transcription worker started');
 
     while (running) {
-      let claimed: Awaited<ReturnType<typeof claimNext>> = null;
+      /**
+       * Declared without an initial value, deliberately.
+       *
+       * `null` is a meaningful answer here — it is what `claimNext` returns for
+       * an empty queue, and it means "sleep briefly and ask again". Failing to
+       * *reach* the queue means something else entirely: back off for much
+       * longer. Seeding this with `null` would make those two states share a
+       * value, so if the `continue` below were ever dropped, a database outage
+       * would quietly read as an idle queue and poll it every five seconds.
+       *
+       * Left unassigned, that edit cannot compile: the read below would be a
+       * use-before-assignment. The narrower declaration is the check.
+       */
+      let claimed: Awaited<ReturnType<typeof claimNext>>;
 
       try {
         claimed = await claimNext(app.db);

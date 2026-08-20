@@ -1,6 +1,7 @@
 'use client';
 
 import { queryKeys } from '@cue/api-client';
+import { formatTimestamp } from '@cue/core';
 import { playableFromQueueEntry } from '@cue/core';
 import type { Translator } from '@cue/i18n';
 import { useTranslator } from '@/components/i18n/locale-provider';
@@ -21,19 +22,21 @@ import { useSession } from '@/lib/session';
  * catalogue grid answers "what exists"; almost nobody arrives asking that.
  * They arrive half way through something.
  *
- * Deliberately **not** a carousel. The first entry gets a card and the rest get
- * rows, because these are not peers — the one you touched most recently is
- * overwhelmingly the one you want, and giving four episodes identical framing
- * makes the reader do the ranking the data already did.
+ * Deliberately **not** a carousel of peers. The episode you touched most
+ * recently gets a hero — a 220px cover, the title at page-title size, and the
+ * two controls that actually apply to a half-finished episode — and the rest
+ * get cards a third of the size. The hierarchy *is* the recommendation: giving
+ * four episodes identical framing makes the reader redo the ranking the data
+ * already did.
  *
  * Absent entirely when there is nothing in progress. A section header above an
  * empty rail is chrome advertising a feature you have not reached.
  */
 export function ContinueListening() {
   const t = useTranslator();
-  const { isSignedIn } = useSession();
+  const { isSignedIn, isLoading: sessionLoading } = useSession();
 
-  const { data } = useQuery({
+  const { data, isPending } = useQuery({
     queryKey: queryKeys.library.continue(),
     queryFn: () => api.getContinue(4),
     enabled: isSignedIn,
@@ -45,28 +48,94 @@ export function ContinueListening() {
   const items = data?.items ?? [];
   const [lead, ...rest] = items;
 
+  /*
+    Reserve the space before knowing whether anything goes in it.
+
+    This section is client-rendered above a server-rendered page, so for a
+    signed-in listener it used to arrive a beat after everything else and shove
+    the whole catalogue down the screen — reliably, on every single visit, and
+    at exactly the moment someone had picked a cover to click. The most
+    expensive layout shift in the app was on its most visited route.
+
+    Only for people who might actually have an entry. An anonymous visitor can
+    never have one, so holding a hero's worth of empty space above their
+    catalogue would be a permanent hole in the page in exchange for nothing.
+    While the session is still resolving the answer is not yet known, so the
+    placeholder stands: guessing "signed out" there is how the shift comes back
+    for exactly the people it was hurting.
+  */
+  if (sessionLoading || (isSignedIn && isPending)) {
+    return <ContinueSkeleton />;
+  }
+
   if (!lead) return null;
 
   return (
-    <section aria-labelledby="continue-heading" className="mb-14">
-      <h2
-        id="continue-heading"
-        className="type-overline mb-4 text-[var(--color-text-tertiary)]"
-      >
-        {t.t('home.continue')}
-      </h2>
-
-      <LeadCard entry={lead} />
+    <>
+      <section aria-labelledby="continue-heading" className="mb-12">
+        <h2 id="continue-heading" className="sr-only">
+          {t.t('home.continue')}
+        </h2>
+        <ResumeHero entry={lead} />
+      </section>
 
       {rest.length > 0 ? (
-        <ul className="mt-2 list-none p-0">
-          {rest.map((entry) => (
-            <li key={entry.episode.id}>
-              <CompactRow entry={entry} />
-            </li>
-          ))}
-        </ul>
+        <section aria-labelledby="also-heading" className="mb-14">
+          <h2
+            id="also-heading"
+            className="type-title2 mt-0 mb-4 text-[var(--color-text-primary)]"
+          >
+            {t.t('home.alsoInProgress')}
+          </h2>
+
+          {/*
+            A scroller on a phone and a grid on a desktop, from one list.
+
+            Three cards do not fit across 390px and never will, so the phone
+            gets the one shape that keeps them at a readable size — snap points,
+            so a swipe lands on a card rather than between two. Above `md` the
+            room exists and a scroller would be hiding content behind a gesture
+            nobody has a reason to make.
+          */}
+          <ul className="-mx-5 flex snap-x snap-mandatory list-none gap-3 overflow-x-auto px-5 pb-2 md:mx-0 md:grid md:grid-cols-3 md:gap-4 md:overflow-visible md:px-0 md:pb-0">
+            {rest.map((entry) => (
+              <li
+                key={entry.episode.id}
+                className="w-[248px] shrink-0 snap-start md:w-auto"
+              >
+                <ProgressCard entry={entry} />
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
+    </>
+  );
+}
+
+/**
+ * The hero's footprint, and nothing else.
+ *
+ * Just the hero: the cards below it are optional even for someone with history,
+ * so reserving three cards' worth would trade one shift for another in the
+ * opposite direction. The hero is the part that is there whenever the section
+ * is there at all.
+ */
+function ContinueSkeleton() {
+  return (
+    <section aria-hidden="true" className="mb-12">
+      <div className="-mx-5 bg-[var(--color-surface)] px-5 py-7 md:mx-0 md:rounded-[var(--radius-lg)] md:px-8">
+        <div className="flex flex-col gap-6 md:flex-row md:items-center md:gap-8">
+          <div className="h-[92px] w-[92px] shrink-0 rounded-[var(--radius-md)] bg-[var(--color-skeleton)] md:h-[220px] md:w-[220px]" />
+          <div className="min-w-0 flex-1">
+            <span className="block h-[11px] w-40 rounded-[var(--radius-xs)] bg-[var(--color-skeleton)]" />
+            <span className="mt-4 block h-7 w-3/4 rounded-[var(--radius-xs)] bg-[var(--color-skeleton)]" />
+            <span className="mt-2 block h-4 w-32 rounded-[var(--radius-xs)] bg-[var(--color-skeleton)]" />
+            <span className="mt-6 block h-[5px] w-full max-w-[480px] rounded-full bg-[var(--color-skeleton)]" />
+            <span className="mt-6 block h-11 w-44 rounded-full bg-[var(--color-skeleton)]" />
+          </div>
+        </div>
+      </div>
     </section>
   );
 }
@@ -92,143 +161,235 @@ function remainingOf(
   };
 }
 
-function LeadCard({ entry }: { entry: ContinueEntry }) {
+/**
+ * The one episode you are most likely to want.
+ *
+ * A band rather than a card on a phone — full width, hairlines top and bottom,
+ * no corners — because a rounded card inset from both edges of a 390px screen
+ * spends thirty pixels of the narrowest layout in the app on decoration. On a
+ * desktop the room exists and the panel earns its corners.
+ */
+function ResumeHero({ entry }: { entry: ContinueEntry }) {
   const t = useTranslator();
-  const { play } = usePlayerActions();
+  const { play, playAt } = usePlayerActions();
   const { left, fraction } = remainingOf(entry, t);
   const tint = entry.accentColor ? deriveTint(entry.accentColor, 'dark') : null;
 
+  const playable = playableFromQueueEntry(entry);
+
   return (
     <article
-      className="relative overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)]"
+      className="relative -mx-5 overflow-hidden border-y border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-7 md:mx-0 md:rounded-[var(--radius-lg)] md:border-0 md:px-8 md:py-8"
       // The show's own colour, at wash strength — felt as warmth behind the
-      // card rather than seen as a coloured panel.
+      // panel rather than seen as a coloured box.
       style={tint ? { backgroundColor: tint.wash } : undefined}
     >
-      <div className="flex flex-col gap-5 p-5 sm:flex-row sm:items-center">
-        <Artwork
-          src={entry.episode.artworkUrl ?? entry.podcastArtworkUrl}
-          alt={entry.podcastTitle}
-          size={112}
-          priority
-        />
+      <div className="flex flex-col gap-6 md:flex-row md:items-center md:gap-8">
+        {/* One cover, two sizes. Sized by its wrapper rather than by the
+            component's own `size` prop, so a phone and a desktop share one
+            element and one download — rendering a 92px copy and a 220px copy
+            and hiding one would fetch both. */}
+        <div className="hidden w-[220px] shrink-0 md:block">
+          <Artwork
+            src={entry.episode.artworkUrl ?? entry.podcastArtworkUrl}
+            alt=""
+            size={220}
+            priority
+            responsive
+            sizes="220px"
+          />
+        </div>
 
         <div className="min-w-0 flex-1">
-          <p className="type-caption clamp-1 m-0 text-[var(--color-text-secondary)]">
-            {entry.podcastTitle}
-          </p>
+          <Eyebrow>{t.t('home.pickUp')}</Eyebrow>
 
-          <h3 className="type-title3 m-0 mt-1">
-            <Link
-              href={`/episode/${entry.episode.id}` as Route}
-              className="clamp-2 text-[var(--color-text-primary)] no-underline hover:underline"
-            >
-              {entry.episode.title}
-            </Link>
-          </h3>
+          <div className="mt-4 flex items-start gap-4 md:block">
+            {/* The phone's copy of the cover, beside the title rather than
+                above it: stacked, a 92px square and a two-line title spend
+                most of a 390px screen on a single episode. */}
+            <div className="w-[92px] shrink-0 md:hidden">
+              <Artwork
+                src={entry.episode.artworkUrl ?? entry.podcastArtworkUrl}
+                alt=""
+                size={92}
+                priority
+                responsive
+                sizes="92px"
+              />
+            </div>
 
-          <div className="mt-4 flex items-center gap-4">
+            <div className="min-w-0 flex-1">
+              <h3 className="type-hero m-0 max-w-[38ch]">
+                <Link
+                  href={`/episode/${entry.episode.id}` as Route}
+                  className="clamp-3 text-[var(--color-text-primary)] no-underline"
+                >
+                  {entry.episode.title}
+                </Link>
+              </h3>
+              <p className="type-callout clamp-1 mt-1.5 mb-0 text-[var(--color-text-tertiary)]">
+                {entry.podcastTitle}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 max-w-[480px] md:mt-6">
+            <Track fraction={fraction} fill={tint?.fill} />
+            <div className="mt-1.5 flex justify-between text-[var(--color-text-tertiary)]">
+              <span className="type-timecode">
+                {formatTimestamp(entry.positionSec)}
+              </span>
+              {left ? (
+                <span className="type-timecode">
+                  {t.t('home.timeLeft', { duration: left })}
+                </span>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center gap-2.5">
             <button
               type="button"
-              onClick={() => void play(playableFromQueueEntry(entry))}
-              className="flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--radius-md)] border-0 px-5 type-body-strong text-[var(--color-text-on-accent)]"
-              style={{ backgroundColor: tint?.fill ?? 'var(--color-accent)' }}
+              onClick={() => void play(playable)}
+              className="flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-2 rounded-full border-0 bg-[var(--color-ink)] px-6 type-body-strong text-[var(--color-text-on-ink)] transition-opacity hover:opacity-90 sm:flex-none"
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14Z" />
-              </svg>
-              {t.t('episode.play')}
+              <PlayGlyph />
+              {t.t('home.continue')}
             </button>
 
-            {left ? (
-              <span className="type-caption text-[var(--color-text-secondary)]">
-                {t.t('home.timeLeft', { duration: left })}
-              </span>
-            ) : null}
+            {/* Start over is not a duplicate of Resume. A half-finished episode
+                is the one case where "play" is genuinely ambiguous, and the
+                answer the button gives — carry on — is the wrong one often
+                enough that the alternative has to be visible rather than
+                buried behind a long-press. `playAt` skips the resume lookup
+                outright, so it cannot be quietly overruled by the server's
+                stored position. */}
+            <button
+              type="button"
+              onClick={() => void playAt(playable, 0)}
+              className="flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-[var(--color-border-strong)] bg-transparent px-5 type-body-strong text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)]"
+            >
+              {t.t('home.startOver')}
+            </button>
           </div>
         </div>
-      </div>
-
-      {/* A hairline along the foot of the card. It reads as progress without
-          needing a label, and it is the same shape the player uses — so the
-          two are recognisably the same idea. */}
-      <div
-        aria-hidden="true"
-        className="h-[3px] w-full bg-[var(--color-border)]"
-      >
-        <div
-          className="h-full origin-left"
-          style={{
-            width: `${fraction * 100}%`,
-            backgroundColor: tint?.fill ?? 'var(--color-accent)',
-          }}
-        />
       </div>
     </article>
   );
 }
 
-function CompactRow({ entry }: { entry: ContinueEntry }) {
+/**
+ * One of the also-rans.
+ *
+ * A card, and the only card chrome on Home — everything else is artwork with
+ * text under it. These earn it because they are a set of peers sitting in a
+ * scroller, and without an edge each one there is nothing to say where a swipe
+ * has landed.
+ */
+function ProgressCard({ entry }: { entry: ContinueEntry }) {
   const t = useTranslator();
   const { play } = usePlayerActions();
   const { left, fraction } = remainingOf(entry, t);
+  const duration = t.duration(entry.durationSec ?? entry.episode.durationSec);
 
   return (
-    <div className="flex items-center gap-4 border-b border-[var(--color-border)] py-3 last:border-b-0">
-      <Artwork
-        src={entry.episode.artworkUrl ?? entry.podcastArtworkUrl}
-        alt={entry.podcastTitle}
-        size={44}
-      />
-
-      <div className="min-w-0 flex-1">
-        <p className="type-body-strong clamp-1 m-0 text-[var(--color-text-primary)]">
-          {entry.episode.title}
-        </p>
-        <p className="type-caption clamp-1 mt-0.5 mb-0 text-[var(--color-text-tertiary)]">
-          {entry.podcastTitle}
-          {left ? <span aria-hidden="true"> · </span> : null}
-          {left ? t.t('home.timeLeft', { duration: left }) : null}
-        </p>
+    <article className="flex h-full flex-col gap-3.5 rounded-[var(--radius-lg)] bg-[var(--color-surface-raised)] p-4 [box-shadow:var(--elevation-sm)]">
+      <div className="flex items-center gap-3.5">
+        <Artwork
+          src={entry.episode.artworkUrl ?? entry.podcastArtworkUrl}
+          alt=""
+          size={64}
+        />
+        <div className="min-w-0 flex-1">
+          <h3 className="type-title3 m-0">
+            <Link
+              href={`/episode/${entry.episode.id}` as Route}
+              className="clamp-2 text-[var(--color-text-primary)] no-underline"
+            >
+              {entry.episode.title}
+            </Link>
+          </h3>
+          <p className="type-caption clamp-1 mt-1 mb-0 text-[var(--color-text-tertiary)]">
+            {entry.podcastTitle}
+          </p>
+        </div>
       </div>
 
-      {/* A ring rather than a bar: at this size a 44px bar reads as a divider,
-          and the ring sits comfortably inside the same 44px touch target the
-          button already needs. */}
-      <button
-        type="button"
-        onClick={() => void play(playableFromQueueEntry(entry))}
-        aria-label={t.t('home.resume', { title: entry.episode.title })}
-        className="relative flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)]"
-      >
-        <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
-          <circle
-            cx="16"
-            cy="16"
-            r="14"
-            fill="none"
-            stroke="var(--color-border-strong)"
-            strokeWidth="2"
-          />
-          <circle
-            cx="16"
-            cy="16"
-            r="14"
-            fill="none"
-            stroke="var(--color-accent)"
-            strokeWidth="2"
-            strokeLinecap="round"
-            // Drawn from the top, clockwise, like every other progress ring
-            // anyone has seen. Without the rotation it starts at three o'clock.
-            transform="rotate(-90 16 16)"
-            strokeDasharray={`${fraction * 2 * Math.PI * 14} ${2 * Math.PI * 14}`}
-          />
-          <path
-            d="M13 11.5v9l7-4.5z"
-            fill="currentColor"
-          />
-        </svg>
-      </button>
+      {/* The play control sits on the floor of the card beside the bar it
+          belongs to, rather than in the corner of the artwork. On the artwork
+          it covers the thing the reader is using to recognise the show. */}
+      <div className="mt-auto flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => void play(playableFromQueueEntry(entry))}
+          aria-label={t.t('home.resume', { title: entry.episode.title })}
+          className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-[var(--color-ink)] text-[var(--color-text-on-ink)] transition-opacity hover:opacity-90"
+        >
+          <PlayGlyph />
+        </button>
+
+        <div className="min-w-0 flex-1">
+          <Track fraction={fraction} />
+          <div className="mt-1.5 flex justify-between text-[var(--color-text-tertiary)]">
+            {left ? (
+              <span className="type-timecode">
+                {t.t('home.timeLeft', { duration: left })}
+              </span>
+            ) : (
+              <span />
+            )}
+            {duration ? <span className="type-timecode">{duration}</span> : null}
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/**
+ * The rule-and-label eyebrow.
+ *
+ * The one place the accent is spent on text. It marks the section that is
+ * about *what is playing* — which is the only thing the accent means anywhere
+ * else in this palette — so it is consistent rather than decorative.
+ */
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="type-overline m-0 flex items-center gap-2 text-[var(--color-accent-text)]">
+      <span aria-hidden="true" className="h-px w-4 bg-current md:w-5" />
+      {children}
+    </p>
+  );
+}
+
+/**
+ * Progress, as a bar.
+ *
+ * The same shape the player uses, so the two are recognisably the same idea —
+ * and it needs no label, which is what lets it sit under a title without
+ * adding a line of text to every row it appears in.
+ */
+function Track({ fraction, fill }: { fraction: number; fill?: string }) {
+  return (
+    <div
+      aria-hidden="true"
+      className="h-1 overflow-hidden rounded-full bg-[var(--color-border)] md:h-[5px]"
+    >
+      <div
+        className="h-full rounded-full"
+        style={{
+          width: `${fraction * 100}%`,
+          backgroundColor: fill ?? 'var(--color-accent)',
+        }}
+      />
     </div>
+  );
+}
+
+function PlayGlyph() {
+  return (
+    <svg width="11" height="12" viewBox="0 0 10 12" fill="currentColor" aria-hidden="true">
+      <path d="M0 0 10 6 0 12Z" />
+    </svg>
   );
 }

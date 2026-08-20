@@ -69,7 +69,7 @@ export default function LibraryScreen() {
 
   const header = (
     <View style={styles.header}>
-      <Text style={[type('title1'), { color: theme.textPrimary }]}>{t.t('library.title')}</Text>
+      <Text style={[type('display'), { color: theme.textPrimary }]}>{t.t('library.title')}</Text>
 
       <View style={styles.headerActions}>
         {/* Playlists live beside the library for the same reason downloads do:
@@ -168,8 +168,8 @@ export default function LibraryScreen() {
           getItemType={(item) => item.kind}
           renderItem={({ item }) =>
             item.kind === 'heading' ? (
-              <Text style={[type('overline'), styles.heading, { color: theme.textTertiary }]}>
-                {item.title.toUpperCase()}
+              <Text style={[type('title2'), styles.heading, { color: theme.textPrimary }]}>
+                {item.title}
               </Text>
             ) : (
               <LibraryRow podcast={item.podcast} />

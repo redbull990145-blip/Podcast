@@ -2,6 +2,7 @@
 
 import { applyQueueMutation } from '@cue/api-client';
 import {
+  PlaybackClock,
   PlayerMachine,
   playableFromQueueEntry,
   type PlayableEpisode,
@@ -308,11 +309,25 @@ export function usePlayerActions() {
     },
     toggle: () => void getPlayer().toggle(),
     pause: () => getPlayer().pause(),
-    seek: (sec: number) => getPlayer().seek(sec),
-    skipBack: () => getPlayer().skipBack(),
-    skipForward: () => getPlayer().skipForward(),
+    // Every deliberate move of the playhead re-anchors the smoothing model.
+    // Without it a small backwards seek is indistinguishable from drift.
+    seek: (sec: number) => {
+      resyncClock();
+      getPlayer().seek(sec);
+    },
+    skipBack: () => {
+      resyncClock();
+      getPlayer().skipBack();
+    },
+    skipForward: () => {
+      resyncClock();
+      getPlayer().skipForward();
+    },
     setRate: (rate: PlaybackRate) => {
       const player = getPlayer();
+      // The model extrapolates by wall time scaled by rate, so the rate
+      // changing mid-flight invalidates the step it is part-way through.
+      resyncClock();
       player.setRate(rate);
       // Speed changed from the player is the same setting as speed changed
       // from Settings, so it persists the same way. Otherwise the two agree
@@ -339,9 +354,70 @@ export function usePlayerActions() {
   };
 }
 
-/** Read the live position without re-rendering — for rAF-driven progress. */
+/**
+ * The model that turns the element's stepped clock into a continuous one.
+ *
+ * A module singleton alongside the engine, because there is exactly one
+ * playhead. See `PlaybackClock` for why sampling `currentTime` directly is not
+ * good enough to drive a caption sweep.
+ */
+const clock = new PlaybackClock();
+
+/**
+ * The last answer, and the instant it was computed for.
+ *
+ * Reading the clock *advances* it — one easing step per call — so the number of
+ * components that happen to be mounted would otherwise change how smooth the
+ * motion is. Three consumers on the same frame (scrubber, captions, transcript
+ * panel) took three steps instead of one, which both over-smoothed the model
+ * and handed the three of them different answers for the same moment.
+ *
+ * Memoising on the frame's timestamp makes the read idempotent within a frame:
+ * everything painted together sees one position, and the model advances once
+ * per frame no matter who is watching.
+ */
+let lastReadAtMs = -1;
+let lastReadSec = 0;
+
+/**
+ * Read the live position without re-rendering — for rAF-driven progress.
+ *
+ * Smoothed, not raw. Every caller is a render loop: the scrubber and the
+ * caption sweep, both of which run at the display's refresh rate against a
+ * clock that only advances 25 times a second. Progress *reporting* does not
+ * come through here — it takes its positions from the machine — so nothing
+ * durable is ever written from the model.
+ */
 export function readPosition(): number {
-  return engine?.getPosition() ?? 0;
+  if (!engine) return 0;
+
+  const nowMs = performance.now();
+  if (nowMs === lastReadAtMs) return lastReadSec;
+
+  const state = machine?.getState();
+  lastReadAtMs = nowMs;
+  lastReadSec = clock.read(engine.getPosition(), {
+    playing: state?.status === 'playing',
+    rate: state?.rate ?? 1,
+    nowMs,
+  });
+
+  return lastReadSec;
+}
+
+/**
+ * Tell the clock the playhead moved on purpose.
+ *
+ * A seek while playing leaves `status` untouched, so the model has no way to
+ * tell a deliberate jump from its own drift and falls back on a threshold. A
+ * *small* backwards seek — tapping a caption line that has only just begun —
+ * lands under that threshold, where the model's "never run backwards" guard
+ * pins it until the audio catches up: up to a quarter of a second of frozen
+ * sweep. Saying so explicitly is cheaper and surer than tuning the threshold.
+ */
+function resyncClock(): void {
+  clock.reset();
+  lastReadAtMs = -1;
 }
 
 /** Apply changed settings to the running player and remember them. */

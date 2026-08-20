@@ -143,12 +143,31 @@ function toWire(row: {
   language: string;
   segments: Transcript['segments'];
 }): Transcript {
+  /**
+   * Sorted on the way out as well as on the way in.
+   *
+   * Both writers order their segments now, but rows written before they did are
+   * still in the database and cannot be fixed by changing a writer. A generated
+   * transcript assembled from several chunks could carry a hallucinated tail
+   * that starts after the following chunk begins, and `activeSegmentIndex` is a
+   * binary search — over an unsorted array it does not fail at the bad element,
+   * it returns wrong answers across a whole region of the episode.
+   *
+   * Copied rather than sorted in place: `row.segments` is the object the query
+   * returned, and mutating it would reorder whatever else holds a reference.
+   * Indices are reassigned to match, because the client uses them both as React
+   * keys and to find a line in the DOM.
+   */
+  const segments = [...row.segments]
+    .sort((a, b) => a.startMs - b.startMs)
+    .map((segment, index) => ({ ...segment, index }));
+
   return {
     episodeId: row.episodeId,
     source: row.source as Transcript['source'],
     status: row.status as Transcript['status'],
     language: row.language,
-    timed: isTimed(row.segments),
-    segments: row.segments,
+    timed: isTimed(segments),
+    segments,
   };
 }

@@ -234,8 +234,20 @@ async function run(
     );
   }
 
+  /**
+   * What this particular copy of the audio actually was.
+   *
+   * Measured by walking frame headers, so it describes the bytes in hand rather
+   * than anything the publisher claimed. Kept in a variable and *stored* with
+   * the transcript, because the enclosure is stitched per request: the file a
+   * listener is served is routinely a different length from this one, and the
+   * cues below are only valid against this one. See `transcripts.audioDurationMs`.
+   */
+  const audioDurationMs = durationMs(audio.bytes);
+  const audioBytes = audio.bytes.length;
+
   app.log.info(
-    { episodeId, chunks: pieces.length, bytes: audio.bytes.length, durationMs: durationMs(audio.bytes) },
+    { episodeId, chunks: pieces.length, bytes: audioBytes, durationMs: audioDurationMs },
     'transcribing',
   );
 
@@ -265,7 +277,7 @@ async function run(
     // worker halfway through.
     await heartbeat(app.db, episodeId, { stage: 'transcribing', done, total: pieces.length });
 
-    for (const segment of shift(segments, piece.startMs)) {
+    for (const segment of placeChunk(segments, piece)) {
       collected.push({
         index: collected.length,
         startMs: segment.startMs,
@@ -275,6 +287,7 @@ async function run(
         // would be a guess presented as a fact, so it stays null and the UI
         // simply does not offer speaker labels for generated transcripts.
         speaker: null,
+        words: segment.words,
       });
     }
   }
@@ -282,6 +295,28 @@ async function run(
   if (collected.length === 0) {
     throw new AppError('upstream_unavailable', 'The transcription came back empty');
   }
+
+  /**
+   * Sorted before it is stored, exactly as the publisher path does.
+   *
+   * `parseTranscript` has sorted defensively from the start, and its comment
+   * gives the reason: "a concatenated or re-timed transcript can arrive out of
+   * order, and every consumer downstream assumes ascending starts." This *is*
+   * the concatenated case — it is assembled here, from separate uploads — and
+   * it was the one path that skipped the sort.
+   *
+   * `placeChunk` now keeps each chunk inside its own span, so this should be a
+   * no-op. It stays because the cost is one sort of an already-ordered array
+   * per episode, and the thing it protects against is a binary search silently
+   * returning wrong answers across a whole region of the transcript.
+   *
+   * Indices are assigned after sorting: they are positions, and the client uses
+   * them as React keys and for `data-line` lookups.
+   */
+  collected.sort((a, b) => a.startMs - b.startMs);
+  collected.forEach((segment, index) => {
+    segment.index = index;
+  });
 
   await heartbeat(app.db, episodeId, {
     stage: 'saving',
@@ -296,28 +331,139 @@ async function run(
       source: 'generated',
       detail: null,
       segments: collected,
+      // Recorded with the cues they describe, in the same write, so a transcript
+      // can never exist without the measurement that says what it is timed
+      // against.
+      audioDurationMs,
+      audioBytes,
       fetchedAt: new Date(),
     })
     .where(eq(transcripts.episodeId, episodeId));
 
-  app.log.info({ episodeId, segments: collected.length }, 'transcription ready');
+  app.log.info(
+    { episodeId, segments: collected.length, audioDurationMs, audioBytes },
+    'transcription ready',
+  );
 }
 
 /**
- * Move a chunk's cues into episode time.
+ * Move a chunk's cues into episode time, and hold them inside it.
  *
  * Whisper times every upload from zero, so without this every chunk after the
  * first would claim to start at the beginning of the episode — and the
  * follow-along highlight would jump back to the top three times an hour.
  */
-export function shift(segments: TranscribedSegment[], offsetMs: number): TranscribedSegment[] {
-  if (offsetMs === 0) return segments;
+/**
+ * A cue may not leave the audio it was transcribed from.
+ *
+ * Whisper's timings are inferred rather than measured, and its documented
+ * failure mode on trailing silence or music is to run the last cue of a chunk
+ * well past the end of that chunk — sometimes by tens of seconds. Left alone,
+ * such a cue starts *after* the first cue of the following chunk, and the
+ * concatenated array is no longer sorted by `startMs`.
+ *
+ * That is worse than it sounds. `activeSegmentIndex` is a binary search, and a
+ * binary search over unsorted data does not fail politely at the bad element —
+ * it can return the wrong answer for a whole region of the episode. The visible
+ * result is the highlight sitting on the wrong line minutes away from the
+ * actual fault, which is exactly the shape of an intermittent, hard-to-describe
+ * desync report.
+ *
+ * `durationMs` is 0 for the single-piece fallback path, where the audio was not
+ * MP3 and never went through frame-walking. Zero means "not measured", so it
+ * clamps nothing rather than clamping everything to the start of the episode.
+ */
+export function placeChunk(
+  segments: TranscribedSegment[],
+  chunk: { startMs: number; durationMs: number },
+): TranscribedSegment[] {
+  const known = chunk.durationMs > 0;
+  const chunkEndMs = chunk.startMs + chunk.durationMs;
 
-  return segments.map((segment) => ({
-    startMs: segment.startMs + offsetMs,
-    // A zero end is the untimed fallback from a chunk with no segment
-    // boundaries; shifting it would invent a span that was never measured.
-    endMs: segment.endMs === 0 ? 0 : segment.endMs + offsetMs,
-    text: segment.text,
-  }));
+  /**
+   * The untimed fallback: one cue, no boundaries, both times zero.
+   *
+   * Produced by `transcribeChunk` when a response carries only flat text. It
+   * used to be shifted by its start alone and left with `endMs: 0`, which on
+   * any chunk but the first produced a cue ending forty minutes before it
+   * began. Everything downstream treats that as corrupt — `segmentWords` finds
+   * a non-positive span and sweeps nothing, and `gapBefore` reads the zero as
+   * the previous cue's end and reports a silence stretching back to the start
+   * of the episode, which the player draws as a row of waiting dots over the
+   * whole transcript.
+   *
+   * The honest reading is that the text was spoken *somewhere in this chunk*,
+   * so it is given the chunk. That is a real span, not an invented one.
+   */
+  if (segments.length === 1 && segments[0]!.startMs === 0 && segments[0]!.endMs === 0) {
+    return [
+      {
+        startMs: chunk.startMs,
+        endMs: known ? chunkEndMs : chunk.startMs,
+        text: segments[0]!.text,
+        // An untimed cue cannot have timed words. Whatever came back describes
+        // a timeline this segment does not have.
+        words: null,
+      },
+    ];
+  }
+
+  const placed: TranscribedSegment[] = [];
+
+  for (const segment of segments) {
+    const startMs = segment.startMs + chunk.startMs;
+
+    // Past the end of its own chunk entirely. The following chunk covers this
+    // audio and transcribed it properly, so this is a hallucinated tail.
+    if (known && startMs >= chunkEndMs) continue;
+
+    /**
+     * A cue whose end Whisper omitted comes back as 0, which is before its own
+     * start. Give it the rest of the chunk rather than a negative span.
+     *
+     * Where the chunk's length was never measured — the single-piece fallback
+     * for audio that is not MP3 — there is no "rest of the chunk" to give, and
+     * `chunkEndMs` is just the chunk's own start. Falling back to that produced
+     * an end before the start and the cue was dropped, silently punching a hole
+     * in the transcript of every AAC episode. The cue's own start is the honest
+     * answer there: a zero-length span, which downstream already understands.
+     */
+    const openEnd = known ? chunkEndMs : startMs;
+    const rawEnd = segment.endMs > segment.startMs ? segment.endMs + chunk.startMs : openEnd;
+    const endMs = known ? Math.min(rawEnd, chunkEndMs) : rawEnd;
+
+    if (endMs < startMs) continue;
+
+    /**
+     * Words are shifted, and otherwise left exactly as they were measured.
+     *
+     * They are timed from the same zero as the segment, so they need the same
+     * offset. They are deliberately *not* clamped to the cue, and not filtered.
+     *
+     * Clamping them was a real bug and an instructive one. The cue above may
+     * have just been trimmed to the end of the chunk; folding a word into that
+     * trimmed span collapsed both of its ends onto the same millisecond, and
+     * the span filter that followed then deleted it outright — so the clamp
+     * fired precisely when it was needed and destroyed the last word or two of
+     * the final cue in every chunk.
+     *
+     * It also broke the invariant `partitionWords` exists to establish: these
+     * words must still spell `segment.text`, because the player renders the
+     * *active* line from them and every other line from the text. A deleted
+     * word makes the line lose a word at the instant the highlight reaches it.
+     *
+     * A word running a little past its cue costs nothing — the sweep is driven
+     * by each word's own span, and the cue's end is only used for ordering.
+     */
+    const words =
+      segment.words?.map((word) => ({
+        startMs: word.startMs + chunk.startMs,
+        endMs: word.endMs + chunk.startMs,
+        text: word.text,
+      })) ?? null;
+
+    placed.push({ startMs, endMs, text: segment.text, words: words?.length ? words : null });
+  }
+
+  return placed;
 }

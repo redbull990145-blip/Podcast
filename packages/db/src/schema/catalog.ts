@@ -105,7 +105,7 @@ export const podcasts = pgTable(
     /** Drives "which feeds are due a refresh". */
     index('podcasts_refresh_idx').on(t.lastFetchedAt),
   ],
-);
+).enableRLS();
 
 export const episodes = pgTable(
   'episodes',
@@ -184,7 +184,7 @@ export const episodes = pgTable(
     /** Global "new releases" across all subscribed shows. */
     index('episodes_published_idx').on(t.publishedAt.desc(), t.id.desc()),
   ],
-);
+).enableRLS();
 
 export const categories = pgTable(
   'categories',
@@ -196,7 +196,7 @@ export const categories = pgTable(
     name: text('name').notNull(),
   },
   (t) => [uniqueIndex('categories_slug_key').on(t.slug)],
-);
+).enableRLS();
 
 export const podcastCategories = pgTable(
   'podcast_categories',
@@ -213,7 +213,7 @@ export const podcastCategories = pgTable(
     /** Browse-by-category reads this direction. */
     index('podcast_categories_category_idx').on(t.categoryId),
   ],
-);
+).enableRLS();
 
 export type PodcastRow = typeof podcasts.$inferSelect;
 export type NewPodcastRow = typeof podcasts.$inferInsert;

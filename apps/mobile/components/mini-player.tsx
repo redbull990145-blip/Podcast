@@ -111,16 +111,19 @@ export function MiniPlayer({ bottomOffset = TAB_BAR_HEIGHT }: { bottomOffset?: n
         accessibilityLabel={`Now playing: ${episode.title}. Open the player.`}
         style={[
           styles.bar,
-          { backgroundColor: theme.surfaceRaised, borderColor: theme.border },
+          { backgroundColor: theme.surfaceOverlay, borderTopColor: theme.border },
         ]}
       >
-        <Artwork url={episode.artworkUrl} size={40} />
+        <Artwork url={episode.artworkUrl} size={44} />
 
         <View style={styles.text}>
-          <Text numberOfLines={1} style={[type('caption'), { color: theme.textPrimary }]}>
+          <Text numberOfLines={1} style={[type('bodyStrong'), { color: theme.textPrimary }]}>
             {episode.title}
           </Text>
-          <Text numberOfLines={1} style={[type('overline'), { color: theme.textTertiary }]}>
+          <Text
+            numberOfLines={1}
+            style={[type('caption'), { color: theme.textTertiary, marginTop: 1 }]}
+          >
             {state.status === 'loading' ? 'Loading…' : episode.podcastTitle}
           </Text>
         </View>
@@ -148,27 +151,35 @@ export function MiniPlayer({ bottomOffset = TAB_BAR_HEIGHT }: { bottomOffset?: n
   );
 }
 
+/**
+ * Flush to the edges, sitting *on* the tab bar rather than floating above it.
+ *
+ * It was an inset card with rounded corners and its own border, which on a
+ * phone put two stacked floating objects at the bottom of every screen — and
+ * the gap between them showed a stripe of scrolling list, which is the one
+ * place in the layout where nothing should be moving. Flush, the mini player
+ * and the tab bar read as one strip of chrome, which is what they are.
+ */
 const styles = StyleSheet.create({
   wrap: {
     position: 'absolute',
-    left: space[2],
-    right: space[2],
+    left: 0,
+    right: 0,
   },
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space[3],
-    padding: space[2],
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: space[3],
+    paddingVertical: space[2],
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   text: { flex: 1 },
   transport: { padding: space[1] },
+  /* Along the very floor of the bar, edge to edge. A progress hairline inset
+     from the sides reads as an underline belonging to the text above it. */
   track: {
     height: 2,
-    marginHorizontal: space[3],
-    borderBottomLeftRadius: 2,
-    borderBottomRightRadius: 2,
     overflow: 'hidden',
   },
   fill: { height: 2 },

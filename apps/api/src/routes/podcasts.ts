@@ -7,7 +7,13 @@
 
 import { clampLimit, decodeCursor, encodeCursor, paginate, podcasts, episodes, categories, podcastCategories } from '@cue/db';
 import type { PodcastSearchResult } from '@cue/types';
-import { feedUrlInput, paginationQuery, searchQuery, uuidParam } from '@cue/validation';
+import {
+  catalogueQuery,
+  feedUrlInput,
+  paginationQuery,
+  searchQuery,
+  uuidParam,
+} from '@cue/validation';
 import { and, desc, eq, lt, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { PodcastIndexFeed } from '../catalog/podcastindex.ts';
@@ -17,6 +23,8 @@ import { ingestFeed } from '../feed/ingest.ts';
 import { normalizeFeedUrl } from '../feed/url-guard.ts';
 import { badRequest, notFound, ok } from '../errors.ts';
 import { rateLimit } from '../rate-limit.ts';
+
+const SEARCH_CANDIDATES = 50;
 
 /**
  * A directory hit on our wire.
@@ -41,6 +49,147 @@ function serializeDirectoryFeed(feed: PodcastIndexFeed): PodcastSearchResult {
   };
 }
 
+function normalizeSearchText(value: string | null | undefined): string {
+  return (value ?? '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function searchTokens(value: string): string[] {
+  return normalizeSearchText(value)
+    .split(' ')
+    .filter((token) => token.length > 0);
+}
+
+function boundedDistance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let index = 1; index <= a.length; index += 1) {
+    const current = [index];
+    let rowBest = current[0]!;
+
+    for (let other = 1; other <= b.length; other += 1) {
+      const cost = a[index - 1] === b[other - 1] ? 0 : 1;
+      const value = Math.min(
+        current[other - 1]! + 1,
+        previous[other]! + 1,
+        previous[other - 1]! + cost,
+      );
+      current[other] = value;
+      rowBest = Math.min(rowBest, value);
+    }
+
+    if (rowBest > max) return max + 1;
+    previous = current;
+  }
+
+  return previous[b.length]!;
+}
+
+function fuzzyTokenScore(queryTokens: string[], candidateTokens: string[]): number {
+  let score = 0;
+
+  for (const queryToken of queryTokens) {
+    if (queryToken.length < 4) continue;
+    const maxDistance = queryToken.length <= 5 ? 1 : 2;
+    const matched = candidateTokens.some((candidate) => {
+      if (candidate.length < 4) return false;
+      return boundedDistance(queryToken, candidate, maxDistance) <= maxDistance;
+    });
+
+    if (matched) score += 3;
+  }
+
+  return score;
+}
+
+function scoreFeed(feed: PodcastIndexFeed, rawQuery: string, language?: string): number {
+  const query = normalizeSearchText(rawQuery);
+  const title = normalizeSearchText(feed.title);
+  const author = normalizeSearchText(feed.author);
+  const categoriesText = normalizeSearchText(feed.categories.join(' '));
+  const description = normalizeSearchText(feed.description);
+  const queryTokens = searchTokens(rawQuery);
+  const candidateTokens = searchTokens(
+    [feed.title, feed.author, feed.categories.join(' '), feed.description]
+      .filter(Boolean)
+      .join(' '),
+  );
+
+  let score = 0;
+
+  if (title === query) score += 120;
+  else if (title.startsWith(query)) score += 95;
+  else if (title.includes(query)) score += 70;
+
+  if (author === query) score += 65;
+  else if (author.startsWith(query)) score += 48;
+  else if (author.includes(query)) score += 32;
+
+  if (categoriesText.split(' ').includes(query)) score += 36;
+  else if (categoriesText.includes(query)) score += 24;
+
+  if (description.includes(query)) score += 12;
+
+  for (const token of queryTokens) {
+    if (token.length < 2) continue;
+    if (title.split(' ').some((candidate) => candidate.startsWith(token))) score += 12;
+    if (author.split(' ').some((candidate) => candidate.startsWith(token))) score += 8;
+    if (categoriesText.split(' ').some((candidate) => candidate.startsWith(token))) score += 6;
+    if (description.split(' ').some((candidate) => candidate.startsWith(token))) score += 2;
+  }
+
+  score += fuzzyTokenScore(queryTokens, candidateTokens);
+
+  if (language && feed.language?.toLowerCase().startsWith(language.toLowerCase())) score += 8;
+  if (feed.episodeCount !== null) score += Math.min(10, Math.log10(feed.episodeCount + 1) * 3);
+  if (feed.lastPublishedAt) score += 3;
+  if (feed.artworkUrl) score += 1;
+
+  return score;
+}
+
+function normalizedFeedKey(feedUrl: string): string {
+  try {
+    const url = new URL(feedUrl);
+    url.hash = '';
+    url.hostname = url.hostname.toLowerCase();
+    return url.href.replace(/\/$/, '');
+  } catch {
+    return feedUrl.trim().toLowerCase();
+  }
+}
+
+function rankSearchResults(
+  feeds: PodcastIndexFeed[],
+  query: string,
+  options: { language?: string; limit: number },
+): PodcastIndexFeed[] {
+  const seen = new Set<string>();
+  const ranked = feeds
+    .filter((feed) => {
+      const key = normalizedFeedKey(feed.url);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((feed, index) => ({
+      feed,
+      index,
+      score: scoreFeed(feed, query, options.language),
+    }))
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  const strong = ranked.filter((entry) => entry.score >= 20);
+  const usable = strong.length >= Math.min(options.limit, 6) ? strong : ranked;
+
+  return usable.slice(0, options.limit).map((entry) => entry.feed);
+}
+
 export function podcastRoutes(app: FastifyInstance): void {
   /**
    * Search. Hits PodcastIndex rather than our own table, because the catalog
@@ -49,13 +198,19 @@ export function podcastRoutes(app: FastifyInstance): void {
    */
   app.get('/podcasts/search', { preHandler: rateLimit(app, 'search') }, async (request) => {
     const query = searchQuery.parse(request.query);
+    const limit = query.limit ?? 25;
 
     const feeds = await app.podcastIndex.search(query.q, {
       ...(query.language ? { language: query.language } : {}),
-      ...(query.limit ? { limit: query.limit } : {}),
+      limit: Math.max(limit, SEARCH_CANDIDATES),
     });
 
-    return ok({ results: feeds.map(serializeDirectoryFeed) });
+    return ok({
+      results: rankSearchResults(feeds, query.q, {
+        ...(query.language ? { language: query.language } : {}),
+        limit,
+      }).map(serializeDirectoryFeed),
+    });
   });
 
   app.get('/podcasts/trending', { preHandler: rateLimit(app, 'search') }, async (request) => {
@@ -118,7 +273,7 @@ export function podcastRoutes(app: FastifyInstance): void {
    * yet has no claim on the top of the page.
    */
   app.get('/podcasts', async (request) => {
-    const query = paginationQuery.parse(request.query);
+    const query = catalogueQuery.parse(request.query);
     const limit = clampLimit(query.limit);
 
     const cursor = decodeCursor(query.cursor);
@@ -132,10 +287,28 @@ export function podcastRoutes(app: FastifyInstance): void {
         )
       : undefined;
 
+    /**
+     * Narrowed by an `EXISTS`, not a join.
+     *
+     * A show can carry several categories, and joining through the link table
+     * would return it once per matching row — which is invisible while
+     * filtering on one category and becomes duplicate covers the moment anyone
+     * asks for two. `EXISTS` also lets the planner stop at the first hit
+     * instead of materialising every pairing.
+     */
+    const inCategory = query.category
+      ? sql`EXISTS (
+          SELECT 1 FROM ${podcastCategories}
+          JOIN ${categories} ON ${categories.id} = ${podcastCategories.categoryId}
+          WHERE ${podcastCategories.podcastId} = ${podcasts.id}
+            AND ${categories.slug} = ${query.category}
+        )`
+      : undefined;
+
     const rows = await app.db
       .select()
       .from(podcasts)
-      .where(keyset)
+      .where(and(keyset, inCategory))
       .orderBy(sql`${podcasts.lastPublishedAt} DESC NULLS LAST`, desc(podcasts.id))
       .limit(limit + 1);
 
@@ -147,6 +320,42 @@ export function podcastRoutes(app: FastifyInstance): void {
       items: page.items.map((row) => serializePodcast(row)),
       nextCursor: page.nextCursor,
     });
+  });
+
+  /**
+   * The catalogue's categories, with a count and a colour each.
+   *
+   * One query, not one per category. The obvious shape — list the categories,
+   * then count each one — is a dozen round trips to render a screen of tiles,
+   * and it gets worse as the catalogue grows. Grouping does it in a single
+   * pass over the index that exists for exactly this direction
+   * (`podcast_categories_category_idx`).
+   *
+   * `MIN(accent_color)` is doing something slightly sneaky and worth naming: it
+   * is not the minimum of anything meaningful, it is *any non-null one*, which
+   * is what an aggregate has to be when the value is only there to be
+   * representative. Picking deterministically also means the tile does not
+   * change colour between two renders of the same data.
+   *
+   * Categories with no shows never appear, because the join produces no row
+   * for them — a browse screen offering an empty shelf is worse than a shorter
+   * one.
+   */
+  app.get('/categories', async () => {
+    const rows = await app.db
+      .select({
+        slug: categories.slug,
+        name: categories.name,
+        count: sql<number>`count(*)::int`,
+        accentColor: sql<string | null>`min(${podcasts.accentColor})`,
+      })
+      .from(podcastCategories)
+      .innerJoin(categories, eq(categories.id, podcastCategories.categoryId))
+      .innerJoin(podcasts, eq(podcasts.id, podcastCategories.podcastId))
+      .groupBy(categories.slug, categories.name)
+      .orderBy(sql`count(*) DESC`, categories.name);
+
+    return ok({ items: rows });
   });
 
   app.get('/podcasts/:id', async (request) => {

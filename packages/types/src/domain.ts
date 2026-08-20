@@ -120,6 +120,23 @@ export type PodcastSearchResult = {
   lastPublishedAt: IsoDateTime | null;
 };
 
+/**
+ * A browsable slice of the catalogue.
+ *
+ * `accentColour` is borrowed from one of the shows inside it rather than
+ * assigned. The product's rule is that colour arrives from content, and a
+ * category has no artwork of its own — so it wears the colour of a show that
+ * belongs to it, which means the palette of the browse screen is whatever the
+ * catalogue actually contains rather than a set of hues someone picked.
+ */
+export type Category = {
+  slug: string;
+  name: string;
+  /** How many shows in the catalogue carry it. Never zero — empty ones are dropped. */
+  count: number;
+  accentColor: string | null;
+};
+
 // ------------------------------------------------------------ user state --
 
 export type Subscription = {
@@ -177,6 +194,9 @@ export type QueueMutation =
 export type TranscriptSource = 'feed' | 'generated';
 export type TranscriptStatus = 'pending' | 'processing' | 'ready' | 'failed';
 
+/** One word of a cue, with the span the transcriber measured for it. */
+export type TranscriptWord = { startMs: number; endMs: number; text: string };
+
 export type TranscriptSegment = {
   /** Position within the transcript, 0-based. */
   index: number;
@@ -185,6 +205,15 @@ export type TranscriptSegment = {
   text: string;
   /** Speaker label where the source provides one. */
   speaker: string | null;
+  /**
+   * Measured per-word timings, where they exist.
+   *
+   * Absent or null for publisher caption files, which are cue-level by format,
+   * and for transcripts generated before word timings were requested. The
+   * player estimates word spans from the cue in that case — well enough to read
+   * along with, but an estimate. This is the real thing when it is here.
+   */
+  words?: TranscriptWord[] | null;
 };
 
 export type Transcript = {

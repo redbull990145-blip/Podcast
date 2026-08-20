@@ -1,0 +1,19 @@
+ALTER TABLE "accounts" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "ai_usage" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "categories" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "episode_ai" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "episodes" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "playback_progress" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "playlist_items" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "playlists" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "podcast_categories" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "podcasts" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "profiles" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "queue_items" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "sessions" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "subscriptions" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "transcription_jobs" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "transcripts" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "user_api_keys" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "users" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "verifications" ENABLE ROW LEVEL SECURITY;

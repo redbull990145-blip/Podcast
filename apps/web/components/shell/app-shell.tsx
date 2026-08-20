@@ -1,13 +1,18 @@
 'use client';
 
+import { queryKeys, staleTime } from '@cue/api-client';
+import type { LibraryPodcast } from '@cue/types';
+import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, type ReactNode } from 'react';
 import { useSession, useSignOut } from '@/lib/session';
+import { Artwork } from '@/components/media/artwork';
 import { Player } from '@/components/player/player';
 import { OfflineBanner } from '@/components/pwa/offline-banner';
 import { ServiceWorker } from '@/components/pwa/service-worker';
-import { hydrateQueue, setSyncState } from '@/lib/player/store';
+import { api } from '@/lib/api';
+import { hydrateQueue, setSyncState, usePlayerState } from '@/lib/player/store';
 import { NavIcon } from './nav-icon';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { navItems, settingsItem } from './nav-items';
@@ -17,8 +22,8 @@ import { navItems, settingsItem } from './nav-items';
  *
  * Persistent across navigation: the sidebar and tab bar never unmount, so
  * moving between screens replaces only the content area. That is what makes
- * navigation read as instant — there is no chrome to rebuild, and later the
- * player will live here too and keep playing straight through a route change.
+ * navigation read as instant — there is no chrome to rebuild, and the player
+ * lives here too and keeps playing straight through a route change.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   useSessionSync();
@@ -33,11 +38,20 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <SidebarNav />
 
-      {/* Left gutter on desktop clears the sidebar; bottom padding on mobile
-          clears the tab bar so the last row is never trapped under it. The
-          extra 24px is breathing room — content ending exactly at the bar's
-          edge reads as clipped even when it is technically clear of it. */}
-      <main className="pb-[calc(160px+env(safe-area-inset-bottom))] md:pb-[88px] md:pl-[240px]">
+      {/* Leading gutter on desktop clears the sidebar; bottom padding on
+          mobile clears the tab bar so the last row is never trapped under it.
+          The extra 24px is breathing room — content ending exactly at the
+          bar's edge reads as clipped even when it is technically clear of it.
+
+          `ps-`, not `pl-`. The sidebar is pinned with `start-0`, so under
+          Arabic it moves to the right of the window while a physical
+          `padding-left` stayed on the left — holding the rail's width open
+          against an empty edge and letting the whole page run underneath the
+          sidebar on the other side. Every screen in the app was affected; it
+          showed up here because Home is the one that fills the width.
+
+          The desktop figure is the player bar's 84px plus room to breathe. */}
+      <main className="pb-[calc(160px+env(safe-area-inset-bottom))] md:pb-[104px] md:ps-[var(--measure-sidebar)]">
         {children}
       </main>
 
@@ -81,68 +95,172 @@ function useSessionSync() {
 function SidebarNav() {
   const pathname = usePathname();
   const t = useTranslator();
+  /* How many episodes are waiting, shown against Queue. It is the one number
+     in the app that changes because of something you did on another screen,
+     which is exactly the kind of fact a persistent rail is for. */
+  const queued = usePlayerState().queue.length;
 
   return (
     <aside
-      className="fixed inset-y-0 start-0 z-20 hidden w-[240px] flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] px-3 pt-6 pb-8 md:flex"
+      className="fixed inset-y-0 start-0 z-20 hidden w-[var(--measure-sidebar)] flex-col border-e border-[var(--color-border)] px-[18px] pt-6 pb-8 md:flex"
       aria-label={t.t('nav.main')}
     >
       <Link
         href={'/' as never}
-        className="mb-8 px-3 type-title2 text-[var(--color-text-primary)] no-underline"
+        className="mb-6 px-3 type-title3 text-[var(--color-text-primary)] no-underline"
       >
         Cue
       </Link>
 
       <nav>
-        <ul className="flex list-none flex-col gap-1 p-0">
-          {navItems.map((item) => {
-            const active = isActive(pathname, item.href);
-
-            return (
-              <li key={item.href}>
-                <Link
-                  href={item.href as never}
-                  aria-current={active ? 'page' : undefined}
-                  className={[
-                    'flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 no-underline',
-                    'type-body-strong transition-colors',
-                    active
-                      ? 'bg-[var(--color-accent-muted)] text-[var(--color-accent-text)]'
-                      : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]',
-                  ].join(' ')}
-                >
-                  <NavIcon path={item.icon} filled={active} />
-                  {t.t(item.label)}
-                </Link>
-              </li>
-            );
-          })}
+        <ul className="flex list-none flex-col gap-0.5 p-0">
+          {navItems.map((item) => (
+            <li key={item.href}>
+              <RailLink
+                item={item}
+                active={isActive(pathname, item.href)}
+                badge={item.href === '/queue' ? queued : undefined}
+              />
+            </li>
+          ))}
         </ul>
       </nav>
+
+      {/* The shows themselves, under the four destinations.
+
+          Not a fifth destination — Library is still where you go to *manage*
+          them. This is the list, so that following a show puts it somewhere you
+          can see from every screen rather than only from the one page that
+          knows about it. It is the single thing that makes the rail feel like
+          it belongs to a listener rather than to the app. */}
+      <SidebarShows />
 
       {/* A hairline separates the account row from navigation: it is a
           different kind of control, and pinning it to the floor without one
           reads as an item that fell off the list. */}
       <div className="mt-auto border-t border-[var(--color-border)] pt-4">
-        <Link
-          href={settingsItem.href as never}
-          aria-current={isActive(pathname, settingsItem.href) ? 'page' : undefined}
-          className={[
-            'mb-1 flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 no-underline',
-            'type-body-strong transition-colors',
-            isActive(pathname, settingsItem.href)
-              ? 'bg-[var(--color-accent-muted)] text-[var(--color-accent-text)]'
-              : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]',
-          ].join(' ')}
-        >
-          <NavIcon path={settingsItem.icon} filled={false} />
-          {t.t(settingsItem.label)}
-        </Link>
-
+        <RailLink
+          item={settingsItem}
+          active={isActive(pathname, settingsItem.href)}
+        />
         <AccountStrip />
       </div>
     </aside>
+  );
+}
+
+/**
+ * One destination in the rail.
+ *
+ * The current page is marked in the accent and nothing else — no filled pill,
+ * no raised surface. A rail that paints a block behind the active row makes
+ * the chrome the highest-contrast shape on the screen, competing with the
+ * artwork it exists to frame; a coloured word does the same job at a fraction
+ * of the visual weight. Inactive rows sit at full text colour rather than
+ * greyed out, because they are destinations, not disabled controls — the
+ * hierarchy here is hue, not opacity.
+ */
+function RailLink({
+  item,
+  active,
+  badge,
+}: {
+  item: (typeof navItems)[number];
+  active: boolean;
+  /** A count worth seeing from every screen. Absent when zero. */
+  badge?: number | undefined;
+}) {
+  const t = useTranslator();
+
+  return (
+    <Link
+      href={item.href as never}
+      aria-current={active ? 'page' : undefined}
+      className={[
+        'flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 no-underline',
+        'transition-colors',
+        active
+          ? 'text-[var(--color-accent-text)]'
+          : 'text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]',
+      ].join(' ')}
+    >
+      <NavIcon path={item.icon} filled={active} size={16} />
+      <span className="type-body-strong">{t.t(item.label)}</span>
+
+      {badge ? (
+        <span className="type-caption ms-auto text-[var(--color-accent-text)]">
+          {badge}
+        </span>
+      ) : null}
+    </Link>
+  );
+}
+
+/**
+ * The shows you follow, in the rail.
+ *
+ * Signed-out or following nothing, this is absent rather than empty: a heading
+ * over nothing is the app advertising a feature you have not reached, and it
+ * would sit there on every screen rather than only on the one that owns it.
+ *
+ * Scrolls on its own so a listener with forty shows cannot push Settings and
+ * the account row off the bottom of the window.
+ */
+function SidebarShows() {
+  const t = useTranslator();
+  const { isSignedIn } = useSession();
+
+  const { data } = useQuery({
+    queryKey: queryKeys.library.subscriptions(),
+    queryFn: () => api.listSubscriptions({ limit: 100 }),
+    enabled: isSignedIn,
+    staleTime: staleTime.podcast,
+  });
+
+  const shows = data?.items ?? [];
+  if (shows.length === 0) return null;
+
+  return (
+    <div className="mt-6 flex min-h-0 flex-col">
+      <p className="type-overline m-0 mb-1.5 px-3 text-[var(--color-text-tertiary)]">
+        {t.t('nav.yourShows')}
+      </p>
+
+      <ul className="m-0 flex list-none flex-col overflow-y-auto p-0">
+        {shows.map((show) => (
+          <li key={show.id}>
+            <ShowLink show={show} />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ShowLink({ show }: { show: LibraryPodcast }) {
+  const t = useTranslator();
+  const unread = show.newEpisodeCount > 0;
+
+  return (
+    <Link
+      href={`/podcast/${show.id}` as never}
+      className="flex items-center gap-2.5 rounded-[var(--radius-sm)] px-3 py-1.5 no-underline transition-colors hover:bg-[var(--color-surface-hover)]"
+    >
+      <Artwork src={show.artworkUrl} alt="" size={22} />
+      <span className="type-caption clamp-1 min-w-0 flex-1 text-[var(--color-text-secondary)]">
+        {show.title}
+      </span>
+
+      {/* A dot, not a count. The number is on the Library row where there is
+          room to read it; here it only has to answer "is there anything?", and
+          a two-digit badge at this size is a smudge. */}
+      {unread ? (
+        <span
+          className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
+          title={t.t('library.newEpisodes', { count: show.newEpisodeCount })}
+        />
+      ) : null}
+    </Link>
   );
 }
 
@@ -165,7 +283,7 @@ function AccountStrip() {
     return (
       <Link
         href={'/signin' as never}
-        className="flex min-h-[44px] items-center rounded-[var(--radius-md)] px-3 type-body-strong text-[var(--color-text-secondary)] no-underline transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+        className="mt-1 flex min-h-[44px] items-center rounded-[var(--radius-md)] px-3 type-body-strong text-[var(--color-text-secondary)] no-underline transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
       >
         Sign in
       </Link>
@@ -173,7 +291,7 @@ function AccountStrip() {
   }
 
   return (
-    <div className="px-3">
+    <div className="mt-2 px-3">
       <p className="type-caption clamp-1 m-0 text-[var(--color-text-primary)]">{user.name}</p>
       <button
         type="button"
@@ -187,13 +305,21 @@ function AccountStrip() {
   );
 }
 
+/**
+ * The tab bar.
+ *
+ * Translucent over a blur rather than opaque, so the list underneath is
+ * visibly *continuing* behind it instead of ending at a solid strip. It is the
+ * one place in the app that blurs: everything else is flat, and a floating bar
+ * over scrolling content is exactly the case the effect was invented for.
+ */
 function TabBar() {
   const pathname = usePathname();
   const t = useTranslator();
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--color-border)] bg-[var(--color-surface)] pb-[env(safe-area-inset-bottom)] md:hidden"
+      className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--color-border)] bg-[var(--color-surface-overlay)]/92 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden"
       aria-label={t.t('nav.main')}
     >
       <ul className="m-0 flex list-none justify-around p-0">
@@ -214,8 +340,8 @@ function TabBar() {
                   'flex h-16 flex-col items-center justify-center gap-1 no-underline',
                   'type-caption transition-colors',
                   active
-                    ? 'text-[var(--color-accent-text)]'
-                    : 'text-[var(--color-text-secondary)]',
+                    ? 'text-[var(--color-text-primary)]'
+                    : 'text-[var(--color-text-tertiary)]',
                 ].join(' ')}
               >
                 <NavIcon path={item.icon} filled={active} />

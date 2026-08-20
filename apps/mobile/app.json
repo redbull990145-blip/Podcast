@@ -8,8 +8,13 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "platforms": [
-      "android"
+      "android",
+      "ios"
     ],
+    "ios": {
+      "bundleIdentifier": "app.cue.podcast",
+      "supportsTablet": true
+    },
     "android": {
       "package": "app.cue.podcast",
       "edgeToEdgeEnabled": true,

@@ -13,6 +13,7 @@ import type {
   ApiError,
   ApiResult,
   AskCitation,
+  Category,
   Chapter,
   ContinueEntry,
   Cursor,
@@ -323,6 +324,12 @@ export function createClient(options: ClientOptions) {
       return request('/me/continue', { query: { limit } });
     },
 
+    getRecommendations(
+      params: { limit?: number } = {},
+    ): Promise<{ items: Podcast[] }> {
+      return request('/me/recommendations', { query: { limit: params.limit } });
+    },
+
     getQueue(): Promise<{ items: QueueEntry[] }> {
       return request('/me/queue');
     },
@@ -426,6 +433,11 @@ export function createClient(options: ClientOptions) {
       });
     },
 
+    /** The catalogue's categories, each with a count and a borrowed colour. */
+    listCategories(): Promise<{ items: Category[] }> {
+      return request('/categories');
+    },
+
     trendingPodcasts(
       params: { language?: string; limit?: number } = {},
     ): Promise<{ results: PodcastSearchResult[] }> {
@@ -439,12 +451,16 @@ export function createClient(options: ClientOptions) {
       return request('/podcasts', { method: 'POST', body: { feedUrl } });
     },
 
-    /** The catalog, most recently active first. */
+    /** The catalog, most recently active first, optionally one category of it. */
     getPodcasts(
-      params: { cursor?: Cursor | null; limit?: number } = {},
+      params: { cursor?: Cursor | null; limit?: number; category?: string } = {},
     ): Promise<Page<Podcast>> {
       return request('/podcasts', {
-        query: { cursor: params.cursor, limit: params.limit },
+        query: {
+          cursor: params.cursor,
+          limit: params.limit,
+          category: params.category,
+        },
       });
     },
 

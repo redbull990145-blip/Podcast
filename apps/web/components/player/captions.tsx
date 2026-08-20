@@ -1,11 +1,19 @@
 'use client';
 
 import { queryKeys } from '@cue/api-client';
-import { activeSegmentIndex, seekTargetSec } from '@cue/core';
+import {
+  activeSegmentIndex,
+  CAPTION_LEAD_MS,
+  gapBefore,
+  seekTargetSec,
+  segmentWords,
+  wordProgress,
+  type TimedWord,
+} from '@cue/core';
 import type { TranscriptSegment } from '@cue/types';
 import { useQuery } from '@tanstack/react-query';
 import { animate, useMotionValue } from 'motion/react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { api } from '@/lib/api';
 import { usePrefersReducedMotion, useTransition } from '@/lib/motion';
@@ -16,17 +24,29 @@ import { GenerateCaptions } from './generate-captions';
  * The captions, following the audio.
  *
  * **Nothing here re-renders per frame.** A `requestAnimationFrame` loop reads
- * the audio clock and asks which line is active, but React state is written
- * only when that answer *changes* — roughly once every few seconds of speech.
+ * the audio clock and writes what it finds *straight to the DOM* — custom
+ * properties on the words of the line being spoken, and `scrollTop` through a
+ * motion value. React state is written only when the *active line* changes,
+ * which is roughly once every few seconds of speech.
+ *
+ * That distinction is the whole design. There are two clocks on this screen:
+ * one that ticks a few times a minute (which line) and one that ticks at the
+ * refresh rate (how far into the word). Putting the second one through React
+ * would be a re-render of a several-thousand-element list at 120Hz.
+ *
+ * **The line is swept word by word, not lit all at once.** A cue says "these
+ * eleven words occupy four seconds" and nothing finer, so the words' individual
+ * timings are estimated — see `segmentWords`. The estimate is good to within a
+ * syllable, which is the tolerance at which the eye stops being able to tell.
  *
  * **The scroll is a spring, not `scrollIntoView`.** The browser's smooth scroll
  * is a fixed-duration ease with no interruption model: ask it to scroll again
  * before it has finished and implementations variously queue, restart, or jump.
- * Since a caption advances every few seconds, that was happening constantly,
- * and it is why the old version stuttered. Here the scroll offset is a
- * `MotionValue` driven by the same spring vocabulary as everything else, so a
- * new target mid-flight is picked up with the current position *and velocity*
- * carried into it — the list changes course rather than starting again.
+ * Since a caption advances every few seconds, that was happening constantly.
+ * Here the scroll offset is a `MotionValue` driven by the same spring
+ * vocabulary as everything else, so a new target mid-flight is picked up with
+ * the current position *and velocity* carried into it — the list changes course
+ * rather than starting again.
  */
 
 /**
@@ -38,6 +58,22 @@ import { GenerateCaptions } from './generate-captions';
  * of the way down and it is the right answer for the same reason.
  */
 const ANCHOR = 0.36;
+
+/** How many dots the silence indicator fills across a gap. */
+const DOTS = 3;
+
+/**
+ * The clock the captions run on: smoothed, in ms, and slightly ahead.
+ *
+ * Both corrections are here rather than in `readPosition` because they are
+ * specific to reading along. The scrubber wants the honest position — a bar
+ * that reports 80ms further on than the audio is simply wrong — whereas a
+ * highlight has to be *drawn* before the sound it belongs to reaches the ear,
+ * or it reads as late. See `CAPTION_LEAD_MS`.
+ */
+function captionClockMs(): number {
+  return readPosition() * 1000 + CAPTION_LEAD_MS;
+}
 
 export function Captions({ episodeId, className }: { episodeId: string; className?: string }) {
   const t = useTranslator();
@@ -82,6 +118,155 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
   const isCurrent = state.current?.id === episodeId;
   const playing = isCurrent && state.status === 'playing';
 
+  /** Whether the sweep should run at all: it needs a clock and a live episode. */
+  const syncing = timed && isCurrent && segments.length > 0;
+
+  // ------------------------------------------------------ the word clock ---
+
+  /**
+   * The words of the line being spoken, where the transcriber timed them.
+   *
+   * Only ever computed for one segment. Timing every word of a four-thousand
+   * segment transcript up front would be a hundred thousand objects allocated
+   * to render the dozen that are on screen, and all of it thrown away when the
+   * listener switches episode.
+   *
+   * **Null for a publisher transcript**, which is the common case: a caption
+   * file has no place to put per-word timings, so there is nothing to sweep
+   * with. The line is then highlighted whole — see `Line`. Sweeping it on
+   * guessed timings looks better in a screenshot and is worse to read along
+   * with, because the highlight moves at a constant rate through speech that
+   * does not.
+   */
+  const activeWords = useMemo<TimedWord[] | null>(() => {
+    if (!syncing || activeIndex < 0) return null;
+    const segment = segments[activeIndex];
+    return segment ? segmentWords(segment) : null;
+  }, [syncing, segments, activeIndex]);
+
+  /**
+   * The silence the playhead is about to sit in, if there is one.
+   *
+   * The gap *after* the active line, which is the one a listener is inside
+   * while nothing is being said — the highlight holds the last line spoken (see
+   * `activeSegmentIndex`), so "no line is active" is never the signal.
+   */
+  const liveGap = useMemo(() => {
+    if (!syncing) return null;
+    return gapBefore(segments, activeIndex + 1);
+  }, [syncing, segments, activeIndex]);
+
+  /**
+   * What the frame loop writes to, resolved once per line rather than searched
+   * for every frame.
+   *
+   * `last` is the per-word value most recently written. Comparing against it is
+   * what keeps the loop honest: of the dozen or so words in a line, exactly one
+   * is being spoken at any instant, so this turns a full pass over the line into
+   * a single property write. The rest are already showing the right thing.
+   */
+  const paintRef = useRef<{ words: TimedWord[]; els: HTMLElement[]; last: number[] } | null>(null);
+  const gapRef = useRef<{ dots: HTMLElement[]; startMs: number; endMs: number } | null>(null);
+
+  const listRef = useRef<HTMLOListElement>(null);
+
+  /**
+   * Push the audio clock into the DOM.
+   *
+   * Deliberately not `useCallback` over state — it reads only refs, so it never
+   * needs rebuilding and can be shared by the playing loop and the paused
+   * one-shot without either restarting the other.
+   */
+  const paint = useCallback((positionMs: number) => {
+    const target = paintRef.current;
+    if (target) {
+      const { words, els, last } = target;
+      for (let i = 0; i < words.length; i += 1) {
+        const el = els[i];
+        const word = words[i];
+        if (!el || !word) continue;
+
+        // Rounded *before* the comparison, not just before the write, so a
+        // sub-thousandth change genuinely costs nothing rather than costing a
+        // style invalidation to produce an identical value. NaN on the first
+        // pass, so every word is written once and none is left showing the
+        // previous line's state.
+        const p = Math.round(wordProgress(word, positionMs) * 1000) / 1000;
+        if (p === last[i]) continue;
+        last[i] = p;
+
+        // The attribute is only touched when the *state* changes, not on every
+        // frame the value does. Re-setting an attribute to the string it
+        // already holds still invalidates style for the element, which for the
+        // in-flight word means doing it at the refresh rate for no reason.
+        const settled = p <= 0 ? 'no' : p >= 1 ? 'yes' : 'now';
+        if (el.dataset['sung'] !== settled) el.dataset['sung'] = settled;
+
+        if (settled !== 'now') {
+          // Flat colour: no gradient, no clip. This is every word on screen but
+          // one, and it is why the sweep is cheap.
+          el.style.removeProperty('--caption-p');
+          continue;
+        }
+
+        /**
+         * One property, on one element, per frame — and nothing else.
+         *
+         * This loop is the whole per-frame cost of the feature, so what is
+         * *absent* matters as much as what is here. It writes no transform and
+         * no shadow (see the note in `globals.css`: together they cost two
+         * thirds of the frame budget), and it rounds to three places so a value
+         * that has not meaningfully moved does not invalidate style at all.
+         */
+        el.style.setProperty('--caption-p', p.toFixed(3));
+      }
+    }
+
+    const gap = gapRef.current;
+    if (gap) {
+      const span = gap.endMs - gap.startMs;
+      const g = span > 0 ? Math.max(0, Math.min(1, (positionMs - gap.startMs) / span)) : 0;
+      for (let i = 0; i < gap.dots.length; i += 1) {
+        // Each dot owns its own share of the silence and fills across it, so
+        // three dots read as a progress bar rather than as a decoration.
+        const lit = Math.max(0, Math.min(1, (g - i / DOTS) * DOTS));
+        gap.dots[i]?.style.setProperty('--caption-lit-amount', lit.toFixed(3));
+      }
+    }
+  }, []);
+
+  /**
+   * Re-resolve the frame loop's targets whenever the line changes.
+   *
+   * `useLayoutEffect` rather than `useEffect`: the new line's words exist in the
+   * DOM but have never been written to, and a frame rendered between the commit
+   * and a passive effect would show the whole line unlit. Painting before the
+   * browser gets to draw closes that window.
+   */
+  useLayoutEffect(() => {
+    const list = listRef.current;
+
+    if (!list || !activeWords || activeWords.length === 0) {
+      paintRef.current = null;
+    } else {
+      const els = Array.from(
+        list.querySelectorAll<HTMLElement>(`[data-line="${activeIndex}"] [data-word]`),
+      );
+      paintRef.current = { words: activeWords, els, last: new Array(activeWords.length).fill(NaN) };
+    }
+
+    if (!list || !liveGap) {
+      gapRef.current = null;
+    } else {
+      const dots = Array.from(
+        list.querySelectorAll<HTMLElement>(`[data-gap="${activeIndex + 1}"] [data-dot]`),
+      );
+      gapRef.current = { dots, startMs: liveGap.startMs, endMs: liveGap.endMs };
+    }
+
+    paint(captionClockMs());
+  }, [activeIndex, activeWords, liveGap, paint]);
+
   /**
    * Follow the audio.
    *
@@ -92,34 +277,43 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
   const lastRef = useRef(-1);
 
   useEffect(() => {
-    if (!timed || !isCurrent || segments.length === 0) return;
+    if (!syncing || !playing) return;
 
     let frame = 0;
     const tick = () => {
-      const next = activeSegmentIndex(segments, readPosition() * 1000);
+      const positionMs = captionClockMs();
+
+      const next = activeSegmentIndex(segments, positionMs);
       if (next !== lastRef.current) {
         lastRef.current = next;
         setActiveIndex(next);
       }
+
+      paint(positionMs);
       frame = requestAnimationFrame(tick);
     };
 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [timed, isCurrent, segments]);
+  }, [syncing, playing, segments, paint]);
 
-  // Paused, the position still moves on a seek, so read it once when playback
-  // settles rather than leaving the highlight where the loop last left it.
+  /**
+   * Paused, the position still moves on a seek.
+   *
+   * Read once when playback settles rather than leaving the highlight and the
+   * sweep wherever the loop last left them — and, equally, rather than running
+   * a frame loop against a clock that is not going anywhere.
+   */
   useEffect(() => {
-    if (!timed || !isCurrent || playing || segments.length === 0) return;
-    const next = activeSegmentIndex(segments, readPosition() * 1000);
+    if (!syncing || playing) return;
+    const positionMs = captionClockMs();
+    const next = activeSegmentIndex(segments, positionMs);
     lastRef.current = next;
     setActiveIndex(next);
-  }, [timed, isCurrent, playing, segments, state.positionSec]);
+    paint(positionMs);
+  }, [syncing, playing, segments, state.positionSec, paint]);
 
   // ------------------------------------------------------- the scroll ------
-
-  const listRef = useRef<HTMLOListElement>(null);
 
   /**
    * The scroll offset, as a motion value.
@@ -259,6 +453,26 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
   const onSeek = useCallback((sec: number) => seekRef.current(sec), []);
 
   /**
+   * Where the silences are, and where the speaker changes.
+   *
+   * Computed once per transcript rather than per line, because both questions
+   * are about a segment's *neighbour* and answering them inside the render of
+   * each line would be a pass over the array for every line in it.
+   */
+  const structure = useMemo(() => {
+    return segments.map((segment, index) => ({
+      gap: timed ? gapBefore(segments, index) : null,
+      // A label on every line would be a column of names down the side of the
+      // transcript. It is a change of voice that is worth marking, and only
+      // then — which is also how a script is written.
+      speaker:
+        segment.speaker && segment.speaker !== segments[index - 1]?.speaker
+          ? segment.speaker
+          : null,
+    }));
+  }, [segments, timed]);
+
+  /**
    * The lines, rebuilt only when something about them changed.
    *
    * Without this the list is rebuilt on every position report — four times a
@@ -266,18 +480,28 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
    * that is thousands of allocations a second to move one highlight, and it is
    * the kind of cost that never shows up as a single slow frame, just as a
    * screen that never feels quite smooth.
+   *
+   * `activeWords` is in the dependency list and changes with the line, but only
+   * the active `Line` receives it — every other line is handed `null` and its
+   * memo holds.
    */
   const lines = useMemo(
     () =>
-      segments.map((segment) => (
-        <Line
-          key={segment.index}
-          segment={segment}
-          distance={timed ? bucket(segment.index, activeIndex) : null}
-          onSelect={timed && isCurrent ? () => onSeek(seekTargetSec(segment)) : null}
-        />
+      segments.map((segment, index) => (
+        <Fragment key={segment.index}>
+          {structure[index]?.gap ? (
+            <Silence index={index} label={t.t('captions.silence')} />
+          ) : null}
+          <Line
+            segment={segment}
+            speaker={structure[index]?.speaker ?? null}
+            distance={timed ? bucket(segment.index, activeIndex) : null}
+            words={index === activeIndex ? activeWords : null}
+            onSelect={timed && isCurrent ? () => onSeek(seekTargetSec(segment)) : null}
+          />
+        </Fragment>
       )),
-    [segments, timed, activeIndex, isCurrent, onSeek],
+    [segments, structure, timed, activeIndex, activeWords, isCurrent, onSeek, t],
   );
 
   // ------------------------------------------------------------- states --
@@ -333,6 +557,20 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
         // height the browser "helpfully" compensates, which lands the active
         // line somewhere other than the anchor.
         overflowAnchor: 'none',
+        /**
+         * The two ends of the sweep, set once for the whole column.
+         *
+         * Written here rather than in the stylesheet because they are derived
+         * from the theme's text colour, and `color-mix` against a custom
+         * property is the only way to get "the same colour, quieter" that
+         * survives a theme change. The unsung weight is the number that took
+         * the most looking at: much below this the line is unreadable ahead of
+         * the voice, which defeats reading along; much above it and the sweep
+         * stops being visible at all.
+         */
+        ['--caption-lit' as string]: 'var(--color-text-primary)',
+        ['--caption-dim' as string]:
+          'color-mix(in oklab, var(--color-text-primary) 38%, transparent)',
       }}
       className={[
         'm-0 h-full list-none overflow-y-auto overscroll-contain',
@@ -376,6 +614,11 @@ function bucket(index: number, active: number): 0 | 1 | 2 | 3 {
  * at once was enough to lose frames on the exact interaction this screen exists
  * for. Most of the depth is carried by opacity and scale, which cost nothing,
  * and the blur is left only as the finishing touch it should have been.
+ *
+ * The active line's opacity is 1 and stays 1: its *words* carry the state now,
+ * lit behind the voice and dim ahead of it, and dimming the line as a whole on
+ * top of that would mean the unsung half of the current line and the whole of
+ * the next one were the same colour.
  */
 const DEPTH = {
   0: { opacity: 1, blur: 0, scale: 1 },
@@ -386,19 +629,25 @@ const DEPTH = {
 
 const Line = memo(function Line({
   segment,
+  speaker,
   distance,
+  words,
   onSelect,
 }: {
   segment: TranscriptSegment;
+  /** Set only where the voice changes, so the column is not a list of names. */
+  speaker: string | null;
   /** Null when the transcript carries no timings — every line reads the same. */
   distance: 0 | 1 | 2 | 3 | null;
+  /** The per-word timings, on the active line only. Null on every other. */
+  words: TimedWord[] | null;
   onSelect: (() => void) | null;
 }) {
   const depth = distance === null ? { opacity: 0.85, blur: 0, scale: 1 } : DEPTH[distance];
 
   const content = (
     <span
-      className="block transition-[opacity,filter,transform] duration-[var(--duration-slow)] ease-standard"
+      className="block"
       style={{
         opacity: depth.opacity,
         // Grown from the start edge rather than the centre: scaling about the
@@ -407,9 +656,54 @@ const Line = memo(function Line({
         transform: `scale(${depth.scale})`,
         transformOrigin: 'left center',
         filter: depth.blur ? `blur(${depth.blur}px)` : undefined,
+        /**
+         * The advance is sprung; the fade is not.
+         *
+         * `transform` settles on the real spring curve — the same physics the
+         * player's own expansion uses, tabulated for CSS — so a line arriving
+         * at full size overshoots once and settles, which is what makes it read
+         * as a line stepping forward rather than a number being assigned.
+         *
+         * Opacity and blur stay tweens, because a spring overshoots past 1, the
+         * compositor clamps it, and the clamp reads as a flicker at the end of
+         * every fade. Springs move things; tweens fade them.
+         */
+        transition: [
+          'opacity var(--duration-slow) var(--ease-standard)',
+          'filter var(--duration-slow) var(--ease-standard)',
+          'transform var(--spring-standard-duration) var(--spring-standard)',
+        ].join(', '),
       }}
     >
-      {segment.text}
+      {/*
+        Two ways to be the line being spoken.
+
+        With measured word timings the line is split into pieces the frame loop
+        sweeps through. Without them — every publisher caption file, since the
+        format has nowhere to put per-word timings — the line is simply itself,
+        lit as a whole against the dimmed lines around it.
+
+        The second is not a degraded first. A swept line built on guessed
+        timings advances at a constant rate through speech that does not, so it
+        spends most of a sentence highlighting the wrong word; the eye follows
+        it and is misled. A line that says only "this sentence, now" says less
+        and is never wrong, which is the trade Apple makes too.
+      */}
+      {words ? (
+        words.map((word, i) => (
+          <Fragment key={word.index}>
+            {i > 0 ? ' ' : null}
+            {/* `data-word` is what the frame loop writes to. The initial
+                `data-sung` matters: a word that has never been painted still
+                has to render as unsung rather than as unstyled. */}
+            <span data-word={word.index} data-sung="no" className="caption-word">
+              {word.text}
+            </span>
+          </Fragment>
+        ))
+      ) : (
+        segment.text
+      )}
     </span>
   );
 
@@ -425,17 +719,57 @@ const Line = memo(function Line({
       // along with speech and reading a transcript.
       className="my-[0.72em] font-bold text-[var(--color-text-primary)]"
     >
+      {speaker ? (
+        // Small, quiet, and in the UI size rather than the caption size — it is
+        // a label on the speech, not part of it, and setting it in the caption
+        // size would make every change of voice louder than the words.
+        <span
+          className="type-caption mb-[0.35em] block font-semibold tracking-wide text-[var(--color-text-tertiary)] uppercase"
+          style={{ opacity: depth.opacity, letterSpacing: '0.06em' }}
+        >
+          {speaker}
+        </span>
+      ) : null}
+
       {onSelect ? (
         <button
           type="button"
           onClick={onSelect}
-          className="w-full cursor-pointer border-0 bg-transparent p-0 text-start font-[inherit] text-[inherit] leading-[inherit] tracking-[inherit]"
+          className="caption-line w-full cursor-pointer border-0 bg-transparent p-0 text-start font-[inherit] text-[inherit] leading-[inherit] tracking-[inherit]"
         >
           {content}
         </button>
       ) : (
         content
       )}
+    </li>
+  );
+});
+
+/**
+ * A gap in the speech, drawn.
+ *
+ * Three dots that fill in turn while nothing is being said. The alternative is
+ * a screen that simply freezes for thirty seconds of theme music, which is
+ * indistinguishable from captions that have crashed — and the moment a listener
+ * most needs to be told the sync is alive is the moment it has nothing to say.
+ *
+ * Rendered for every long gap in the transcript but only *animated* for the one
+ * the playhead is inside; the rest sit at rest, which is also how they read
+ * when scrolling back through an episode.
+ */
+const Silence = memo(function Silence({ index, label }: { index: number; label: string }) {
+  return (
+    <li data-gap={index} className="my-[0.72em] flex items-center gap-[0.34em]">
+      <span className="sr-only">{label}</span>
+      {Array.from({ length: DOTS }, (_, i) => (
+        <span
+          key={i}
+          data-dot={i}
+          aria-hidden="true"
+          className="caption-dot block h-[0.34em] w-[0.34em] rounded-full bg-[var(--color-text-primary)]"
+        />
+      ))}
     </li>
   );
 });
