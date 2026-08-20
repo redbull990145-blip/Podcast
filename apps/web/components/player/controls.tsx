@@ -1,6 +1,5 @@
 'use client';
 
-import { PLAYBACK_RATES, type PlaybackRate } from '@cue/core';
 import { icon } from '@cue/design';
 import * as m from 'motion/react-m';
 import { usePrefersReducedMotion, usePressScale, useTransition } from '@/lib/motion';
@@ -28,16 +27,14 @@ export function PlayPauseButton({
   loading,
   onToggle,
   size = 44,
-  tint,
   variant = 'filled',
 }: {
   playing: boolean;
   loading: boolean;
   onToggle: () => void;
   size?: number;
-  tint?: string | undefined;
   /**
-   * `filled` is a tinted disc — the one obvious action in a dense bar of text.
+   * `filled` is an accent disc — the one obvious action in a dense bar of text.
    * `bare` is the glyph alone, for the full player, where it sits in open space
    * on a backdrop taken from the artwork. A coloured disc there competes with
    * the cover it was sampled from; the glyph does not.
@@ -46,6 +43,16 @@ export function PlayPauseButton({
    * in a bar whose entire subject is the thing that is playing it says nothing
    * — while an orange disc next to an orange progress fill puts two saturated
    * shapes on one 84px strip competing to be looked at.
+   *
+   * There used to be a fourth behaviour: an optional `tint` that overrode both
+   * fills with the episode's own colour, on the reasoning that a show with a
+   * colour of its own is carrying information rather than just being loud. In
+   * practice `deriveTint`'s `fill` is fitted to OKLab L 0.62 with the chroma
+   * capped at 0.12 — deliberately muted, because it is designed to sit *behind*
+   * things — so the most important control in the product came out a flat
+   * mid-grey-blue on a light bar. Muted is right for a wash and wrong for the
+   * button you press most. The artwork still colours the backdrop, the progress
+   * fill and the page; the transport is ink.
    */
   variant?: 'filled' | 'bare' | 'ink';
 }) {
@@ -77,10 +84,9 @@ export function PlayPauseButton({
       style={{
         width: size,
         height: size,
-        // `tint` still wins over the ink fill: an episode with a colour of its
-        // own is the one case where the disc is carrying information rather
-        // than just being the loudest thing available.
-        ...(bare ? {} : ink && !tint ? {} : { backgroundColor: tint ?? 'var(--color-accent)' }),
+        // `ink` and `bare` are handled by the classes above; only the accent
+        // disc needs a fill written here.
+        ...(bare || ink ? {} : { backgroundColor: 'var(--color-accent)' }),
       }}
     >
       {loading ? (
@@ -220,38 +226,8 @@ export function SkipButton({
   );
 }
 
-/**
- * Playback speed.
- *
- * A cycling button rather than a dropdown: speed is set once and adjusted
- * rarely, and opening a menu to move from 1× to 1.2× is more interaction than
- * the decision deserves.
+/*
+ * Playback speed used to live here as a cycling button. It is now a panel of
+ * presets plus a slider, in `speed-control.tsx` — see the note there for why
+ * cycling had to go.
  */
-export function SpeedButton({
-  rate,
-  onChange,
-}: {
-  rate: PlaybackRate;
-  onChange: (rate: PlaybackRate) => void;
-}) {
-  const press = usePressScale(0.9);
-  const transition = useTransition('responsive');
-
-  function cycle() {
-    const index = PLAYBACK_RATES.indexOf(rate);
-    onChange(PLAYBACK_RATES[(index + 1) % PLAYBACK_RATES.length]!);
-  }
-
-  return (
-    <m.button
-      type="button"
-      onClick={cycle}
-      aria-label={`Playback speed: ${rate}×. Tap to change.`}
-      whileTap={{ scale: press }}
-      transition={transition}
-      className="h-9 min-w-11 cursor-pointer rounded-full border-0 bg-[var(--color-surface-hover)] px-3 type-caption text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
-    >
-      {rate}×
-    </m.button>
-  );
-}

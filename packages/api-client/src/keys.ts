@@ -22,6 +22,8 @@ export const queryKeys = {
      */
     continue: () => ['library', 'continue'] as const,
     recommendations: () => ['library', 'recommendations'] as const,
+    history: () => ['library', 'history'] as const,
+    stats: () => ['library', 'stats'] as const,
   },
 
   /**

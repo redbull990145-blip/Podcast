@@ -5,7 +5,7 @@ import { formatTimestamp } from '@cue/core';
 import { playableFromQueueEntry } from '@cue/core';
 import type { Translator } from '@cue/i18n';
 import { useTranslator } from '@/components/i18n/locale-provider';
-import { deriveTint } from '@cue/design';
+import { colorVarStyle, deriveTint, tintedScheme } from '@cue/design';
 import type { ContinueEntry } from '@cue/types';
 import { useQuery } from '@tanstack/react-query';
 import type { Route } from 'next';
@@ -174,15 +174,34 @@ function ResumeHero({ entry }: { entry: ContinueEntry }) {
   const { play, playAt } = usePlayerActions();
   const { left, fraction } = remainingOf(entry, t);
   const tint = entry.accentColor ? deriveTint(entry.accentColor, 'dark') : null;
+  /**
+   * The show's colour as a whole palette, not just a background.
+   *
+   * The panel was painted with `tint.wash` — a deliberately dark value, because
+   * this ground has to work under artwork — while everything on top of it kept
+   * reading the *theme's* tokens. In the dark theme those agree by luck. In the
+   * light theme this hero rendered `#17140F` text on a near-black panel: the
+   * episode title, the timecodes and the whole "Start over" button were
+   * present, correct and invisible, on the most-visited screen in the app.
+   *
+   * Scoping a scheme here fixes every descendant at once and cannot drift the
+   * way a hand-picked foreground colour would — it is the same move the
+   * expanded player and the podcast page make, for the same reason.
+   */
+  const scheme = entry.accentColor ? tintedScheme(entry.accentColor) : null;
 
   const playable = playableFromQueueEntry(entry);
 
   return (
     <article
       className="relative -mx-5 overflow-hidden border-y border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-7 md:mx-0 md:rounded-[var(--radius-lg)] md:border-0 md:px-8 md:py-8"
-      // The show's own colour, at wash strength — felt as warmth behind the
-      // panel rather than seen as a coloured box.
-      style={tint ? { backgroundColor: tint.wash } : undefined}
+      style={
+        scheme
+          ? // `surface`, not `bg`: this is a panel sitting on the page, and the
+            // scheme's own surface is the value that says so.
+            { ...colorVarStyle(scheme), backgroundColor: scheme.surface }
+          : undefined
+      }
     >
       <div className="flex flex-col gap-6 md:flex-row md:items-center md:gap-8">
         {/* One cover, two sizes. Sized by its wrapper rather than by the

@@ -18,7 +18,10 @@ import type {
   ContinueEntry,
   Cursor,
   Episode,
+  HistoryEntry,
   LibraryPodcast,
+  ListeningStats,
+  NumberedPage,
   Page,
   Playlist,
   PlaylistDetail,
@@ -26,6 +29,7 @@ import type {
   PodcastSearchResult,
   QueueEntry,
   QueueMutation,
+  RecommendedPodcast,
   SessionUser,
   StoredProgress,
   Transcript,
@@ -326,8 +330,18 @@ export function createClient(options: ClientOptions) {
 
     getRecommendations(
       params: { limit?: number } = {},
-    ): Promise<{ items: Podcast[] }> {
+    ): Promise<{ personalized: boolean; items: RecommendedPodcast[] }> {
       return request('/me/recommendations', { query: { limit: params.limit } });
+    },
+
+    /** Recently played, finished or not — the sibling of `getContinue`. */
+    getHistory(limit = 10): Promise<{ items: HistoryEntry[] }> {
+      return request('/me/history', { query: { limit } });
+    },
+
+    /** How much has been listened to, and to whom. */
+    getStats(): Promise<ListeningStats> {
+      return request('/me/stats');
     },
 
     getQueue(): Promise<{ items: QueueEntry[] }> {
@@ -474,6 +488,24 @@ export function createClient(options: ClientOptions) {
     ): Promise<Page<Episode>> {
       return request(`/podcasts/${podcastId}/episodes`, {
         query: { cursor: params.cursor, limit: params.limit },
+        ...(params.signal ? { signal: params.signal } : {}),
+      });
+    },
+
+    /**
+     * One numbered page of a show's episodes.
+     *
+     * A separate method rather than an optional `page` on `getEpisodes`,
+     * because the two return different shapes and a union return type would put
+     * a narrowing check at every call site to answer a question the caller
+     * already knew when it picked the arguments.
+     */
+    getEpisodePage(
+      podcastId: string,
+      params: { page: number; limit?: number; signal?: AbortSignal },
+    ): Promise<NumberedPage<Episode>> {
+      return request(`/podcasts/${podcastId}/episodes`, {
+        query: { page: params.page, limit: params.limit },
         ...(params.signal ? { signal: params.signal } : {}),
       });
     },

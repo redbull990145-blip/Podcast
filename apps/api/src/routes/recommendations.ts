@@ -22,6 +22,7 @@ import {
   subscriptions,
   type PodcastRow,
 } from '@cue/db';
+import type { RecommendationReason } from '@cue/types';
 import { desc, eq, inArray, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -51,8 +52,15 @@ const HISTORY_LIMIT = 200;
  */
 const HALF_LIFE_DAYS = 45;
 
-/** How long a computed rail is reused. Long enough to matter, short enough to feel live. */
-const CACHE_TTL_SEC = 600;
+/**
+ * How far behind a show falls once the listener has clearly found it.
+ *
+ * Larger than any score this ranker can produce, so it is an ordering rule
+ * rather than a weight: nothing a candidate accumulates from categories,
+ * creators, keywords or catalogue quality can lift a discovered show back above
+ * one the listener has never heard.
+ */
+const DISCOVERED = 1_000;
 
 type InterestProfile = {
   /** Total signal collected. Decides whether the ranker leans on the profile at all. */
@@ -223,15 +231,43 @@ function keywordScore(profile: InterestProfile, candidate: Candidate): number {
   return score;
 }
 
+/**
+ * How much a shared category is worth, given how many shows carry it.
+ *
+ * A tag is only evidence to the extent that not everything has it. "News" is
+ * carried by a third of the catalogue — a daily politics show, a web
+ * development podcast and a true-crime series all declare it — so two shows
+ * sharing it says close to nothing, while sharing "Tech News" says a great
+ * deal. Scoring them identically is how somebody who listens to the news gets
+ * recommended a JavaScript show and is told it is because they like News.
+ *
+ * Inverse document frequency, computed over the candidate pool rather than the
+ * whole catalogue — the pool is already in memory, it is a large sample of the
+ * same distribution, and the alternative is another aggregate query per
+ * request to refine a weight, not to decide one.
+ *
+ * Clamped at both ends. A category nothing else carries would otherwise score
+ * unboundedly high on a small catalogue, and one that everything carries has to
+ * stay worth *something*, because on a young install the broad tags are all
+ * there is.
+ */
+function categorySpecificity(shareOfPool: number): number {
+  if (shareOfPool <= 0) return 1;
+  return Math.min(1.6, Math.max(0.35, Math.log(1 / shareOfPool) / Math.log(4)));
+}
+
 function recommendationScore(
   profile: InterestProfile,
   candidate: Candidate,
   now: number,
+  specificity: Map<string, number>,
 ): number {
   let score = catalogueScore(candidate.podcast, now);
 
   for (const category of candidate.categories) {
-    score += (profile.categories.get(normalizeText(category)) ?? 0) * 1.7;
+    const key = normalizeText(category);
+    score +=
+      (profile.categories.get(key) ?? 0) * 1.7 * (specificity.get(key) ?? 1);
   }
 
   score += (profile.authors.get(normalizeText(candidate.podcast.author)) ?? 0) * 0.9;
@@ -244,13 +280,97 @@ function recommendationScore(
     hiding it immediately would make the rail useless for exactly the shows
     that are working. Two or more episodes means the discovery already
     happened, and a rail whose job is to introduce something should stop
-    spending a slot on it. Following the show removes it from the pool
-    outright, further down.
+    spending a slot on it.
+
+    `DISCOVERED` rather than a tuned deduction, because a deduction does not do
+    the job. This was `-10 - consumed * 3`, which sounds decisive and is not:
+    the same listening that marks a show as discovered also piles category and
+    creator weight onto it, and in practice the show somebody had just finished
+    two episodes of came back as their *top* recommendation — captioned "More
+    from" its own host. The rule being expressed is ordinal, not arithmetic
+    ("behind everything unheard"), so it is written as a number no accumulated
+    signal can climb back over rather than as one that happened to be big
+    enough on the day it was picked.
+
+    They stay in the pool rather than being filtered out, so a rail is never
+    short on a small catalogue — `diversify` will reach them once nothing
+    unheard is left. Following a show does remove it outright, further down.
   */
   const consumed = profile.consumed.get(candidate.podcast.id) ?? 0;
-  if (consumed >= 2) score -= 10 + consumed * 3;
+  if (consumed >= 2) score -= DISCOVERED;
 
   return score;
+}
+
+/**
+ * Why this show, in one fact.
+ *
+ * Deliberately **not** an argmax over the score's own terms, which is the
+ * obvious implementation and the wrong one. Categories are weighted heavier
+ * than creators when ranking, because a category is the broader and more
+ * reliable predictor — but breadth is exactly what makes it the weaker
+ * *explanation*. "More in Self Improvement" is true of four shows in the
+ * catalogue; "More from Coach Reed" names the actual connection, and a reader
+ * can tell instantly whether they agree with it.
+ *
+ * So the caption prefers the creator whenever that connection is real, and
+ * falls back to the category when the shared author is incidental — someone
+ * who listens to forty business shows should not be told "More from Dana
+ * Okoro" because one of them happened to be hers. Half the category's weight
+ * is the line: enough to mean the creator was genuinely part of why this
+ * scored, not so much that only a superfan clears it.
+ *
+ * Raw profile weights rather than the multiplied ones, because the multipliers
+ * exist to balance the *sum* and have no meaning in a comparison whose whole
+ * question is which fact to print.
+ *
+ * Falls back to `popular` rather than guessing. A show that won on catalogue
+ * quality has no connection to this listener, and captioning it "because you
+ * like Business" when they have never played a business show is the kind of
+ * fabricated personalisation that teaches people to distrust the whole rail.
+ */
+function reasonFor(
+  profile: InterestProfile,
+  candidate: Candidate,
+  personalized: boolean,
+  specificity: Map<string, number>,
+): RecommendationReason {
+  if (!personalized) return { kind: 'popular', subject: null };
+
+  let category: string | null = null;
+  let categoryWeight = 0;
+
+  /*
+    Weighted by specificity, exactly as the score is.
+
+    Otherwise the caption names whichever of the show's categories this listener
+    has the most history in, regardless of how central it is to the show — and
+    since the broad tags are the ones most listeners accumulate weight in, that
+    is reliably the *least* descriptive label the show carries. Syntax is tagged
+    Technology, News and Tech News; captioning it "More in News" to a reader of
+    the news is true of the data and false about the show.
+  */
+  for (const name of candidate.categories) {
+    const key = normalizeText(name);
+    const weight = (profile.categories.get(key) ?? 0) * (specificity.get(key) ?? 1);
+    if (weight > categoryWeight) {
+      categoryWeight = weight;
+      category = name;
+    }
+  }
+
+  const author = candidate.podcast.author;
+  const authorWeight = profile.authors.get(normalizeText(author)) ?? 0;
+
+  if (author && authorWeight > 0 && authorWeight >= categoryWeight * 0.5) {
+    return { kind: 'creator', subject: author };
+  }
+
+  if (category && categoryWeight > 0) {
+    return { kind: 'category', subject: category };
+  }
+
+  return { kind: 'popular', subject: null };
 }
 
 /**
@@ -338,26 +458,56 @@ export function recommendationRoutes(app: FastifyInstance): void {
     const { limit } = recommendationsQuery.parse(request.query);
 
     /*
-      Ten minutes of reuse.
+      Deliberately not cached.
 
-      Recomputing on every Home load means four queries and 250 scored shows to
-      produce a rail that moves when somebody finishes an episode — which is
-      not a per-second event. Redis is optional here as everywhere: an
-      unreachable cache is a miss, and the request proceeds.
+      This endpoint had a ten-minute Redis TTL, on the reasonable-sounding
+      grounds that four queries and 250 scored shows is real work for a list
+      that changes when somebody finishes an episode. Running it revealed what
+      the tests could not: the ten minutes lands squarely on the one moment the
+      feature exists for. A new listener plays their first two episodes, opens
+      Home, and every card still says "Popular right now" — because the rail
+      they are looking at was computed before they had a taste. The transition
+      from cold start to personalised is the whole product, and a time-based
+      cache is guaranteed to hide it.
+
+      A TTL is simply the wrong invalidation strategy for data whose purpose is
+      to track a fast-moving signal. The right one is invalidate-on-write, and
+      it is not free here: the cache key would have to carry `limit` (the
+      clients ask for different sizes) so a single `del` cannot clear it, and
+      the write to invalidate on is the progress heartbeat, which is the
+      highest-frequency write in the app.
+
+      So: no cache, because four indexed queries and some arithmetic over a
+      bounded candidate set is not expensive enough to justify being wrong. If
+      this ever shows up in a profile, cache the *scored candidate list* under a
+      user-only key and run `diversify` per request — that is the shape that can
+      be invalidated in one call.
     */
-    const cacheKey = `recommendations:${user.id}:${limit}`;
-    const cached = await app.cache.get<{ items: unknown[] }>(cacheKey);
-    if (cached) return ok(cached);
-
     const now = Date.now();
 
     /*
-      Shows the listener already follows are not candidates.
+      A show the listener already knows is not a recommendation.
 
-      They are a very strong statement about taste — see below, where they feed
-      the profile — and simultaneously the worst possible thing to put in a
-      rail whose job is to introduce something. `NOT EXISTS` rather than a left
-      join and a null check, so the planner can stop at the first match.
+      Two exclusions, and the second one is the point. Following a show was
+      already disqualifying: it is a very strong statement about taste — see
+      below, where subscriptions feed the profile — and simultaneously the worst
+      possible thing to put in a rail whose job is to introduce something.
+
+      *Having played it* now disqualifies it too. That used to be handled by
+      scoring, with a `DISCOVERED` demotion applied once two or more episodes
+      had been heard, which left a real gap: play one episode of a show and its
+      whole catalogue keeps feeding the profile — its categories, its author,
+      its keywords — so it scores higher than everything around it and comes
+      straight back at the top of the rail. The listener is recommended the
+      thing they are in the middle of listening to, captioned as a discovery.
+
+      One episode is enough to know a show exists, which is all this rail is for.
+      `DISCOVERED` stays as the belt to this braces: it still catches a show
+      reached some other way, and it is what keeps the ordering sane if this
+      filter ever has to be relaxed on a thin catalogue.
+
+      `NOT EXISTS` rather than left joins and null checks, so the planner can
+      stop at the first match in each.
     */
     const candidateRows = await app.db
       .select()
@@ -367,12 +517,17 @@ export function recommendationRoutes(app: FastifyInstance): void {
           SELECT 1 FROM ${subscriptions}
           WHERE ${subscriptions.podcastId} = ${podcasts.id}
             AND ${subscriptions.userId} = ${user.id}
+        ) AND NOT EXISTS (
+          SELECT 1 FROM ${playbackProgress}
+          INNER JOIN ${episodes} ON ${episodes.id} = ${playbackProgress.episodeId}
+          WHERE ${episodes.podcastId} = ${podcasts.id}
+            AND ${playbackProgress.userId} = ${user.id}
         )`,
       )
       .orderBy(sql`${podcasts.lastPublishedAt} DESC NULLS LAST`, desc(podcasts.id))
       .limit(CANDIDATE_LIMIT);
 
-    if (candidateRows.length === 0) return ok({ items: [] });
+    if (candidateRows.length === 0) return ok({ personalized: false, items: [] });
 
     const historyRows = await app.db
       .select({
@@ -476,11 +631,30 @@ export function recommendationRoutes(app: FastifyInstance): void {
       categories: categoryMap.get(podcast.id) ?? [],
     }));
 
+    /*
+      How rare each category is among the shows being ranked.
+
+      Counted here, once, rather than inside the scorer: every candidate needs
+      every other candidate's tags to know what "rare" means, so this cannot be
+      derived per show. See `categorySpecificity` for what it buys.
+    */
+    const carriers = new Map<string, number>();
+    for (const candidate of candidates) {
+      for (const key of new Set(candidate.categories.map(normalizeText))) {
+        carriers.set(key, (carriers.get(key) ?? 0) + 1);
+      }
+    }
+
+    const specificity = new Map<string, number>();
+    for (const [key, count] of carriers) {
+      specificity.set(key, categorySpecificity(count / candidates.length));
+    }
+
     const scored: ScoredCandidate[] = candidates
       .map((candidate) => ({
         ...candidate,
         score: personalized
-          ? recommendationScore(profile, candidate, now)
+          ? recommendationScore(profile, candidate, now, specificity)
           : catalogueScore(candidate.podcast, now),
       }))
       .sort(
@@ -490,13 +664,23 @@ export function recommendationRoutes(app: FastifyInstance): void {
             (a.podcast.lastPublishedAt?.getTime() ?? 0),
       );
 
-    const payload = {
-      items: diversify(scored, limit).map((candidate) =>
-        serializePodcast(candidate.podcast, candidate.categories),
-      ),
-    };
+    /*
+      `personalized` is on the envelope, not inferred from the rows.
 
-    await app.cache.set(cacheKey, payload, CACHE_TTL_SEC);
+      A client cannot work it out for itself: this endpoint always returns a
+      full rail, because a cold start falls back to catalogue quality rather
+      than to an empty box. So "did this take my listening into account?" and
+      "did I get any shows?" are different questions, and the UI needs the
+      first one to decide between claiming the order is personal and offering
+      to make it so.
+    */
+    const payload = {
+      personalized,
+      items: diversify(scored, limit).map((candidate) => ({
+        ...serializePodcast(candidate.podcast, candidate.categories),
+        reason: reasonFor(profile, candidate, personalized, specificity),
+      })),
+    };
 
     return ok(payload);
   });

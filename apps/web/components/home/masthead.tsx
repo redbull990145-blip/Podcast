@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { HomeSearch } from '@/components/home/home-search';
+import { ListeningStats } from '@/components/home/listening-stats';
 import { ThemeToggle } from '@/components/shell/theme-toggle';
 import { useSession } from '@/lib/session';
 
@@ -72,7 +73,19 @@ export function Masthead() {
           {greeting ?? t.t('home.title')}
         </h1>
 
-        {greeting ? null : (
+        {/*
+          A stranger gets the pitch; someone signed in gets their own figures.
+
+          Both occupy the same slot under the title, and only one of them can
+          be true at a time: a returning listener does not need to be told what
+          Cue is, and a first-time visitor has no listening to report. The
+          stats strip decides for itself whether it has anything worth saying,
+          so a brand-new account falls through to nothing rather than to a row
+          of zeroes.
+        */}
+        {greeting ? (
+          <ListeningStats />
+        ) : (
           <p className="type-body mt-2 mb-0 max-w-[52ch] text-[var(--color-text-secondary)]">
             {t.t('home.lede')}
           </p>

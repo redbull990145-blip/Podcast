@@ -36,7 +36,20 @@ const TIMEOUT_MS = 180_000;
 
 export type AudioOutcome =
   | { status: 'ok'; bytes: Uint8Array; contentType: string | null }
-  | { status: 'error'; detail: string };
+  /**
+   * `permanent` means retrying cannot help.
+   *
+   * The queue retries three times, which is right for a dropped connection or
+   * a publisher's 503 and pure waste for anything about the file itself. An
+   * episode that is too big will be exactly as big on the third attempt — so
+   * without this flag the app downloads up to 120MB three times, holds the
+   * listener on "Writing captions…" for several minutes, and only then tells
+   * them something it knew within seconds of the first try.
+   *
+   * Absent means transient, deliberately: a new failure mode nobody has
+   * classified should cost a retry, not a false dead end.
+   */
+  | { status: 'error'; detail: string; permanent?: boolean };
 
 export async function fetchAudio(
   url: string,
@@ -71,15 +84,27 @@ export async function fetchAudio(
     }
 
     if (!response.ok) {
-      return { status: 'error', detail: `Publisher returned ${response.status}` };
+      return {
+        status: 'error',
+        detail: `Publisher returned ${response.status}`,
+        // A 4xx is the publisher saying the file is not there; a 5xx may well
+        // be gone by the next attempt.
+        permanent: response.status < 500,
+      };
     }
 
     const declared = Number(response.headers.get('content-length') ?? '0');
     if (declared > MAX_BYTES) {
-      return { status: 'error', detail: 'That episode is too long to transcribe' };
+      return {
+        status: 'error',
+        detail: 'That episode is too long to transcribe',
+        permanent: true,
+      };
     }
 
-    if (!response.body) return { status: 'error', detail: 'The publisher sent no audio' };
+    if (!response.body) {
+      return { status: 'error', detail: 'The publisher sent no audio', permanent: true };
+    }
 
     const reader = response.body.getReader();
     const parts: Uint8Array[] = [];
@@ -95,7 +120,11 @@ export async function fetchAudio(
         // that would be lying about it, so it cannot be the only ceiling.
         if (total > MAX_BYTES) {
           await reader.cancel();
-          return { status: 'error', detail: 'That episode is too long to transcribe' };
+          return {
+            status: 'error',
+            detail: 'That episode is too long to transcribe',
+            permanent: true,
+          };
         }
 
         parts.push(value);

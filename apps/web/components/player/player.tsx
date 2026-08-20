@@ -2,7 +2,7 @@
 
 import { queryKeys } from '@cue/api-client';
 import { SKIP_BACK_SEC, SKIP_FORWARD_SEC } from '@cue/core';
-import { deriveTint, icon, measure } from '@cue/design';
+import { colorVarStyle, icon, stage } from '@cue/design';
 import { duration } from '@cue/motion';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, useMotionValue, useTransform } from 'motion/react';
@@ -15,9 +15,11 @@ import { Artwork } from '@/components/media/artwork';
 import { api } from '@/lib/api';
 import { useCanTravel, usePressScale, useTransition } from '@/lib/motion';
 import { usePlayerActions, usePlayerState } from '@/lib/player/store';
+import { railWidth, useRailCollapsed } from '@/lib/rail';
 import { AmbientBackdrop } from './ambient-backdrop';
 import { Captions } from './captions';
-import { PlayPauseButton, SkipButton, SpeedButton } from './controls';
+import { PlayPauseButton, SkipButton } from './controls';
+import { SpeedControl } from './speed-control';
 import { ProgressBar } from './progress-bar';
 import { useSheetDrag } from './use-sheet-drag';
 import { VolumeSlider } from './volume-slider';
@@ -53,14 +55,17 @@ import { useTranslator } from '@/components/i18n/locale-provider';
 const MINI_HEIGHT = 72;
 const MINI_HEIGHT_WIDE = 84;
 
-/**
- * The shell's sidebar, which the mini bar sits beside and the full player
- * covers. Read from the token rather than written down again, because the bar
- * starting anywhere other than exactly where the rail ends leaves the mini
- * artwork out of line with the page's first column — a four-pixel drift that
- * looks like nothing and reads as sloppiness.
+/*
+ * The rail's width comes from `railWidth()` rather than from a constant here.
+ *
+ * The bar starts exactly where the rail ends, so that the mini artwork lines up
+ * with the page's first column — a four-pixel drift there looks like nothing
+ * and reads as sloppiness. Now that the rail folds, "where the rail ends" is
+ * two numbers, and this is the one place in the app that needs it as a number
+ * at all: everything else lays out in CSS against `--measure-sidebar`, which
+ * `setRailCollapsed` moves. The bar animates its own inset as a motion value
+ * during the expand gesture, which no stylesheet can reach into.
  */
-const SIDEBAR = measure.sidebar;
 /** Tailwind's `md`, which is where the shell swaps the tab bar for the rail. */
 const SIDEBAR_AT = 768;
 
@@ -280,6 +285,11 @@ export function Player() {
    */
   const [rtl, setRtl] = useState(false);
 
+  /* Subscribed rather than measured: the rail folds without the window
+     resizing, so the observer below would never fire and the bar would keep
+     starting 188px into the page with nothing beside it. */
+  const railCollapsed = useRailCollapsed();
+
   useEffect(() => {
     const measure = () => {
       setViewportHeight(window.innerHeight);
@@ -308,7 +318,7 @@ export function Player() {
    * see the sheet's geometry below — so this never enters the full layout's
    * measurements.
    */
-  const sidebar = barWide ? SIDEBAR : 0;
+  const sidebar = barWide ? railWidth(railCollapsed) : 0;
 
   /**
    * Two columns, or one at a time.
@@ -459,8 +469,9 @@ export function Player() {
     retry: false,
   });
 
+  /* Only the backdrop uses this now. The transport was tinted with it too and
+     came out muted — see `PlayPauseButton`. */
   const accentColor = tintData?.accentColor ?? episode?.accentColor ?? null;
-  const accent = accentColor ? deriveTint(accentColor, 'dark') : null;
 
   if (!episode) return null;
 
@@ -550,6 +561,12 @@ export function Player() {
             insetInlineStart: sidebar,
             height: miniHeight,
           }}
+          /* Repainted by a page that has a ground of its own — see
+             `ChromeTint`. The bar sits on the page rather than on the backdrop,
+             so leaving it themed while the page behind it is navy reads as a
+             strip of a different application. The expanded sheet below is
+             deliberately not marked: it carries `stage`, which must not move. */
+          data-chrome-tint=""
           className={[
             'absolute top-0 end-0 touch-none',
             'border-t border-[var(--color-border)] bg-[var(--color-surface-overlay)]/92 backdrop-blur-xl',
@@ -595,7 +612,6 @@ export function Player() {
                   onToggle={actions.toggle}
                   size={40}
                   variant="ink"
-                  tint={accent?.fill}
                 />
                 <SkipButton
                   direction="forward"
@@ -620,7 +636,15 @@ export function Player() {
 
             {/* --------------------------------------------- wide utilities -- */}
             <div className="hidden items-center justify-end gap-3 md:flex">
-              <SpeedButton rate={state.rate} onChange={actions.setRate} />
+              {/* Anchored to its end edge: this cluster is right-aligned in
+                  the bar, so a panel hanging from the start edge would open
+                  across the volume slider and off the window. */}
+              <SpeedControl
+                rate={state.rate}
+                onChange={actions.setRate}
+                align="end"
+                offscreen={expanded}
+              />
 
               <Link
                 href={'/queue' as Route}
@@ -641,11 +665,14 @@ export function Player() {
                 {t.t('nav.queue')}
               </Link>
 
-              {/* Widest at the end of the row, where a pointer overshooting it
-                  hits the window edge rather than another control. */}
               <div className="w-[132px] shrink-0">
                 <VolumeSlider volume={state.volume} onChange={actions.setVolume} />
               </div>
+
+              {/* Last, on the outside edge — the position every window's close
+                  control has, and far enough from the volume track that a drag
+                  overshooting the end of the level cannot land on it. */}
+              <DismissButton onClick={actions.dismiss} label={t.t('player.dismiss')} />
             </div>
 
             {/* ------------------------------------------- narrow transport -- */}
@@ -656,8 +683,9 @@ export function Player() {
                 loading={loading}
                 onToggle={actions.toggle}
                 size={40}
-                tint={accent?.fill}
+                variant="ink"
               />
+              <DismissButton onClick={actions.dismiss} label={t.t('player.dismiss')} />
             </div>
           </div>
 
@@ -669,8 +697,38 @@ export function Player() {
         </m.div>
 
         {/* ------------------------------------------------------- full -- */}
+        {/*
+          Painted white, whatever the theme is and whatever is playing.
+
+          `AmbientBackdrop` is a fixed dark ground on purpose — blurred cover,
+          tint wash, black scrim — so that legibility never depends on which
+          cover happens to be playing. The foreground was not. It read the
+          ordinary theme tokens, so in the light theme this entire sheet
+          rendered `#17140F` text on that dark ground: title, show name,
+          timecodes, transport glyphs and the captions panel all present,
+          correct, and invisible.
+
+          Pointing it at `dark` fixed the invisibility and left a subtler
+          version of the same fault. `dark`'s text is `#F1EAD9` — a warm cream,
+          correct on warm paper, and on a backdrop taken from the artwork it
+          reads as *tinted by the cover*: cream over a brown cover, faintly
+          green over a green one. The colour of the words appeared to depend on
+          the picture behind them, which is the one thing this screen must never
+          do. `stage` is the neutral white answer; see its note in the design
+          tokens.
+
+          Re-declaring the colour variables here re-points every descendant at
+          once, including components added later, without any of them knowing
+          the sheet is special. The mini bar is a sibling rather than a child
+          precisely so it keeps following the theme — it sits on the page, not
+          on the backdrop.
+        */}
         <m.div
-          style={{ opacity: fullOpacity, pointerEvents: expanded ? 'auto' : 'none' }}
+          style={{
+            ...colorVarStyle(stage),
+            opacity: fullOpacity,
+            pointerEvents: expanded ? 'auto' : 'none',
+          }}
           className="absolute inset-0 flex h-full flex-col"
         >
           {/* The drag surface, and the only affordance saying this sheet moves.
@@ -772,7 +830,11 @@ export function Player() {
                 {/* The utility row, on the floor of the column: speed on the
                     start edge, the two destinations on the other. */}
                 <div className="mt-5 flex items-center justify-between">
-                  <SpeedButton rate={state.rate} onChange={actions.setRate} />
+                  <SpeedControl
+                    rate={state.rate}
+                    onChange={actions.setRate}
+                    offscreen={!expanded}
+                  />
 
                   <div className="flex items-center gap-1">
                     {/* At both widths now. Two columns previously offered no
@@ -908,6 +970,45 @@ export function Player() {
         </m.div>
       </m.div>
     </>
+  );
+}
+
+/**
+ * Close the player.
+ *
+ * The mini bar is permanent once anything has played — it is how playback
+ * survives navigation — and until now that meant permanently, with no way to
+ * put it away short of reloading the page. On a phone it is a strip across the
+ * bottom of every screen; on a desktop it is 84px of every window. Somebody who
+ * has finished listening should be able to say so.
+
+ * A cross rather than a stop button, and quiet rather than prominent: it
+ * removes a piece of chrome, it does not destroy anything. The position is
+ * saved on the way out and the queue is left alone, so pressing it is
+ * recoverable — which is the only reason it can be this small.
+ */
+function DismissButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-0 text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+    >
+      <svg
+        width="15"
+        height="15"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        aria-hidden="true"
+      >
+        <path d="M6 6 18 18M18 6 6 18" />
+      </svg>
+    </button>
   );
 }
 

@@ -16,6 +16,8 @@
  * that inconsistency is exactly what makes a tinted UI look accidental.
  */
 
+import { dark, stage, type ColorScheme } from './color.ts';
+
 export type Rgb = { r: number; g: number; b: number };
 
 export function hexToRgb(hex: string): Rgb | null {
@@ -120,8 +122,19 @@ export function deriveTint(hex: string, theme: 'dark' | 'light'): TintSet | null
 
   if (theme === 'dark') {
     return {
-      // Barely above the near-black ground: felt more than seen.
-      wash: rgbToHex(oklabToRgb(refit(lab, 0.26, 0.055))),
+      /*
+        Barely above the near-black ground: felt more than seen — and the
+        "barely" is a contrast budget, not a mood.
+
+        This is a ground the *page's own* text lands on: Library paints it
+        behind a whole row, the episode header paints it as a band under the
+        title and date. Those roles were fitted against `bg`, so every step the
+        wash takes away from `bg` is contrast spent. At 0.26 it had spent
+        enough to put `textTertiary` at 4.43–4.49:1 — under AA for every cover
+        tried, by a margin small enough that nobody would ever see it and a
+        checker would always catch it.
+      */
+      wash: rgbToHex(oklabToRgb(refit(lab, 0.24, 0.05))),
       fill: rgbToHex(oklabToRgb(refit(lab, 0.62, 0.12))),
       // Light enough to clear 4.5:1 on the dark background.
       text: rgbToHex(oklabToRgb(refit(lab, 0.8, 0.11))),
@@ -129,13 +142,113 @@ export function deriveTint(hex: string, theme: 'dark' | 'light'): TintSet | null
   }
 
   return {
-    wash: rgbToHex(oklabToRgb(refit(lab, 0.95, 0.045))),
+    /*
+      Same budget, from the other end: the light ground is `#FBFAF7`, so here
+      the wash has to stay *up* near white rather than down near black.
+
+      0.967 rather than a rounder 0.96 because of ember specifically. OKLab
+      lightness is perceptual and luminance is not, so a warm orange at a given
+      L carries measurably less luminance than a neutral at the same L — and
+      ember is both the app's own accent and a very common cover colour, so it
+      is the one hue guaranteed to be exercised. At 0.96 it landed at 4.49:1.
+    */
+    wash: rgbToHex(oklabToRgb(refit(lab, 0.967, 0.04))),
     fill: rgbToHex(oklabToRgb(refit(lab, 0.62, 0.12))),
     // Dark enough to clear 4.5:1 on white.
     text: rgbToHex(oklabToRgb(refit(lab, 0.45, 0.11))),
   };
 }
 
+
+/**
+ * A whole palette, taken from one cover.
+ *
+ * `deriveTint` colours a *band* — a wash behind a header, a fill on a chip.
+ * This colours a **page**: Apple Music's album view, where opening a record
+ * repaints the window in that record's colour and switching records repaints it
+ * again. A gradient that fades out 300px down is a decoration; a ground that
+ * runs to the bottom of the scroll is the show's own room.
+ *
+ * Three rules make it work rather than look like a skin.
+ *
+ * **Darkened, always.** The extracted colour is the *loudest* thing in the
+ * artwork — that is how dominant-colour extraction works — so painting the page
+ * in it puts the cover on a ground of its own brightest region and the two
+ * fight. Every surface here is refit to a low OKLab lightness, so the artwork is
+ * the brightest object on its own page by construction, whatever it contains.
+ *
+ * **Chroma is capped hard.** A page at the cover's real saturation is a themed
+ * skin; at a tenth of it, it is a room the cover is lit in. The cap is also what
+ * keeps forty different shows feeling like one product.
+ *
+ * **The foreground does not move.** Only grounds and the accent take the hue —
+ * text stays a fixed neutral white ramp, so legibility is a property of the
+ * function rather than of which cover happened to be passed in. That is the same
+ * reasoning as `stage`, for the same reason: the input is a publisher's JPEG.
+ *
+ * Returns `null` for a colour it cannot parse, and the caller falls back to the
+ * ordinary theme — an untinted page is a perfectly good page.
+ */
+export function tintedScheme(hex: string): ColorScheme | null {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return null;
+
+  const lab = rgbToOklab(rgb);
+  const at = (L: number, chroma: number) => rgbToHex(oklabToRgb(refit(lab, L, chroma)));
+
+  /*
+    For a neutral, OKLab's L is the cube root of relative luminance — so
+    L = 0.30 is Y ≈ 0.027, and white on it clears 13:1. The chroma ceilings are
+    low enough that a hue's own luminance cannot move that far. Every pair below
+    is checked in `contrast.test.ts` against a spread of real cover colours
+    rather than argued for here.
+  */
+  return {
+    ...dark,
+
+    bg: at(0.22, 0.045),
+    surface: at(0.26, 0.05),
+    surfaceRaised: at(0.3, 0.05),
+    surfaceOverlay: at(0.3, 0.05),
+    surfaceHover: 'rgba(255, 255, 255, 0.08)',
+    surfacePressed: 'rgba(255, 255, 255, 0.13)',
+
+    border: at(0.35, 0.045),
+    borderStrong: 'rgba(255, 255, 255, 0.45)',
+
+    // Neutral, and neutral on purpose — see above. A warm cream on a cool
+    // cover's page is the tell that a palette was tinted rather than designed.
+    textPrimary: '#FFFFFF',
+    textSecondary: 'rgba(255, 255, 255, 0.76)',
+    textTertiary: 'rgba(255, 255, 255, 0.62)',
+
+    // The one foreground that *does* take the hue, because on a page this
+    // saturated the ember accent would be a second, unrelated colour.
+    accent: at(0.74, 0.13),
+    accentText: at(0.86, 0.1),
+    accentMuted: 'rgba(255, 255, 255, 0.14)',
+    textOnAccent: at(0.18, 0.05),
+
+    ink: '#FFFFFF',
+    textOnInk: at(0.18, 0.05),
+
+    /*
+      Borrowed from `stage`, not from `dark`, and the tests are the reason.
+
+      `dark`'s status colours were fitted against a ground that is fixed and
+      very dark. These surfaces are lighter — they have to be, or a tinted page
+      has no colour in it — and `danger` landed at 4.1–4.3:1 on the raised one
+      for every cover tried. `stage` already solved the identical problem for
+      the identical reason, so this points at that answer rather than inventing
+      a third set of three constants to keep in sync.
+    */
+    danger: stage.danger,
+    success: stage.success,
+    warning: stage.warning,
+
+    skeleton: at(0.26, 0.05),
+  };
+}
 
 /**
  * A gradient for a surface that has no artwork of its own.

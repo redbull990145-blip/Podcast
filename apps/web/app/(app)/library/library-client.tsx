@@ -3,7 +3,7 @@
 import { queryKeys, staleTime } from '@cue/api-client';
 import { groupLibrary } from '@cue/core';
 import { useTranslator } from '@/components/i18n/locale-provider';
-import { deriveTint } from '@cue/design';
+import { TINT_ATTR, tintVars } from '@cue/design';
 import type { LibraryPodcast } from '@cue/types';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
@@ -121,21 +121,27 @@ export function LibraryClient() {
 
 function ShowRow({ show }: { show: LibraryPodcast }) {
   const t = useTranslator();
-  // Dark-first: the server has no way to know the user's theme before paint,
-  // and reading it at render would cause a flash. Light mode inherits the same
-  // hue through the CSS variables below.
-  const tint = show.accentColor ? deriveTint(show.accentColor, 'dark') : null;
+  /*
+    Both fits of the show's colour, resolved by the stylesheet.
+
+    This used to be `deriveTint(…, 'dark')`, with a comment claiming light mode
+    "inherits the same hue through the CSS variables below" — it did not. The
+    wash it produced is fitted to sit under a near-black ground, so hovering a
+    row in the light theme dropped a dark bar behind text that is still
+    `#17140F`: the show, its author and its date all disappeared under the
+    cursor. `--tint-wash` now carries whichever fit matches the live theme.
+
+    `--row-text` went with it. It was declared here and read nowhere — the
+    badge below always used the value directly.
+  */
+  const tint = tintVars(show.accentColor);
   const hasNew = show.newEpisodeCount > 0;
 
   return (
     <Link
       href={`/podcast/${show.id}` as never}
       className="group relative flex items-center gap-4 rounded-[var(--radius-lg)] px-3 py-3 no-underline"
-      style={
-        tint
-          ? ({ '--row-wash': tint.wash, '--row-text': tint.text } as React.CSSProperties)
-          : undefined
-      }
+      {...(tint ? { [TINT_ATTR]: '', style: tint as React.CSSProperties } : {})}
     >
       {/* The tint sits behind the row and only surfaces on hover. Painting it
           on every row at rest would turn a list into a stack of coloured bars;
@@ -144,7 +150,7 @@ function ShowRow({ show }: { show: LibraryPodcast }) {
       <span
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 rounded-[var(--radius-lg)] opacity-0 transition-opacity duration-[var(--duration-base)] ease-standard group-hover:opacity-100"
-        style={{ background: tint ? 'var(--row-wash)' : 'var(--color-surface-hover)' }}
+        style={{ background: tint ? 'var(--tint-wash)' : 'var(--color-surface-hover)' }}
       />
 
       <Artwork src={show.artworkUrl} alt={show.title} size={64} className="relative" />
@@ -171,8 +177,13 @@ function ShowRow({ show }: { show: LibraryPodcast }) {
           style={{
             // The one place artwork colour is used at full strength: it marks
             // the single fact this screen exists to surface.
-            color: tint?.text ?? 'var(--color-accent-text)',
-            backgroundColor: tint ? 'var(--row-wash)' : 'var(--color-accent-muted)',
+            //
+            // Both halves come from the same fit, so this pair is legible in
+            // either theme by construction — it is text on the tint's *own*
+            // wash rather than on the page, which is why it was never part of
+            // the bug the row above had.
+            color: tint ? 'var(--tint-text)' : 'var(--color-accent-text)',
+            backgroundColor: tint ? 'var(--tint-wash)' : 'var(--color-accent-muted)',
           }}
         >
           {/* Terse on purpose. "20 new episodes" squeezed a 375px row until the

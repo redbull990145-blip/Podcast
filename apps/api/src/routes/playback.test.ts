@@ -271,6 +271,167 @@ describe('continue listening', () => {
   });
 });
 
+/**
+ * The sibling of continue listening, and the reason it is a separate endpoint.
+ *
+ * Everything worth testing here is a difference from `/me/continue`: it keeps
+ * what that one drops, and it says which is which.
+ */
+describe('recently played', () => {
+  it('refuses anonymous callers', async () => {
+    const response = await app.inject({ method: 'GET', url: '/me/history' });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('keeps a finished episode, which is exactly what continue drops', async () => {
+    await report(episodeId, {
+      positionSec: 3600,
+      durationSec: 3600,
+      completed: true,
+      deviceId: 'phone',
+    });
+
+    const history = await app.inject({
+      method: 'GET',
+      url: '/me/history',
+      headers: { cookie },
+    });
+    const cont = await app.inject({
+      method: 'GET',
+      url: '/me/continue',
+      headers: { cookie },
+    });
+
+    expect(history.json().data.items).toHaveLength(1);
+    expect(cont.json().data.items).toHaveLength(0);
+  });
+
+  /**
+   * The flag the row's second line is written from. Without it a finished
+   * episode and an abandoned one are the same shape, and the section cannot
+   * say "Finished" instead of a date.
+   */
+  it('says whether each episode was finished', async () => {
+    await report(episodeId, {
+      positionSec: 3600,
+      durationSec: 3600,
+      completed: true,
+      deviceId: 'phone',
+    });
+    await report(otherEpisodeId, { positionSec: 90, durationSec: 1800, deviceId: 'phone' });
+
+    const items = (
+      await app.inject({ method: 'GET', url: '/me/history', headers: { cookie } })
+    ).json().data.items;
+
+    const byId = Object.fromEntries(
+      items.map((item: { episode: { id: string }; completed: boolean }) => [
+        item.episode.id,
+        item.completed,
+      ]),
+    );
+
+    expect(byId[episodeId]).toBe(true);
+    expect(byId[otherEpisodeId]).toBe(false);
+  });
+
+  it('puts the most recently touched episode first', async () => {
+    await report(episodeId, { positionSec: 100, durationSec: 3600, deviceId: 'phone' });
+    await report(otherEpisodeId, { positionSec: 200, durationSec: 1800, deviceId: 'phone' });
+
+    const items = (
+      await app.inject({ method: 'GET', url: '/me/history', headers: { cookie } })
+    ).json().data.items;
+
+    expect(items[0].episode.id).toBe(otherEpisodeId);
+    // Carries enough of its show to render a row without a second request.
+    expect(items[0].podcastTitle).toBe('Playback Show');
+  });
+
+  it('honours the limit', async () => {
+    await report(episodeId, { positionSec: 100, durationSec: 3600, deviceId: 'phone' });
+    await report(otherEpisodeId, { positionSec: 200, durationSec: 1800, deviceId: 'phone' });
+
+    const items = (
+      await app.inject({ method: 'GET', url: '/me/history?limit=1', headers: { cookie } })
+    ).json().data.items;
+
+    expect(items).toHaveLength(1);
+  });
+});
+
+describe('listening stats', () => {
+  it('refuses anonymous callers', async () => {
+    const response = await app.inject({ method: 'GET', url: '/me/stats' });
+    expect(response.statusCode).toBe(401);
+  });
+
+  /**
+   * The state the masthead has to handle without printing a row of zeroes at
+   * somebody who just signed up.
+   */
+  it('reports an untouched account as empty rather than failing', async () => {
+    const stats = (
+      await app.inject({ method: 'GET', url: '/me/stats', headers: { cookie } })
+    ).json().data;
+
+    expect(stats).toMatchObject({
+      listenedSec: 0,
+      episodesStarted: 0,
+      episodesFinished: 0,
+      showCount: 0,
+      topShow: null,
+    });
+  });
+
+  it('adds up positions and counts finished episodes separately', async () => {
+    await report(episodeId, {
+      positionSec: 1200,
+      durationSec: 3600,
+      completed: true,
+      deviceId: 'phone',
+    });
+    await report(otherEpisodeId, { positionSec: 300, durationSec: 1800, deviceId: 'phone' });
+
+    const stats = (
+      await app.inject({ method: 'GET', url: '/me/stats', headers: { cookie } })
+    ).json().data;
+
+    expect(stats.listenedSec).toBe(1500);
+    expect(stats.episodesStarted).toBe(2);
+    expect(stats.episodesFinished).toBe(1);
+    // Both episodes belong to the same show, so this counts shows and not rows.
+    expect(stats.showCount).toBe(1);
+  });
+
+  it('names the show with the most time against it', async () => {
+    await report(episodeId, { positionSec: 900, durationSec: 3600, deviceId: 'phone' });
+
+    const stats = (
+      await app.inject({ method: 'GET', url: '/me/stats', headers: { cookie } })
+    ).json().data;
+
+    expect(stats.topShow).toMatchObject({ title: 'Playback Show', listenedSec: 900 });
+  });
+
+  /**
+   * One listener's figures must never include another's — this is the same
+   * boundary every `/me` route depends on, and the one that would be least
+   * obvious if it broke.
+   */
+  it('counts only the caller', async () => {
+    await report(episodeId, { positionSec: 900, durationSec: 3600, deviceId: 'phone' });
+
+    const stranger = await signUp(`stranger-${Math.random().toString(36).slice(2)}@example.com`);
+    const stats = (
+      await app.inject({ method: 'GET', url: '/me/stats', headers: { cookie: stranger } })
+    ).json().data;
+
+    expect(stats.listenedSec).toBe(0);
+    expect(stats.topShow).toBeNull();
+  });
+});
+
 describe('queue', () => {
   function enqueue(id: string, playNext = false) {
     return app.inject({

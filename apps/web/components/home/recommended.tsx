@@ -1,40 +1,61 @@
 'use client';
 
 import { queryKeys, staleTime } from '@cue/api-client';
-import type { Podcast } from '@cue/types';
+import type { Podcast, RecommendationReason, RecommendedPodcast } from '@cue/types';
+import type { Translator } from '@cue/i18n';
 import { useQuery } from '@tanstack/react-query';
+import type { Route } from 'next';
+import Link from 'next/link';
 import { useTranslator } from '@/components/i18n/locale-provider';
-import { PodcastTile } from '@/components/podcast/podcast-tile';
+import { Artwork } from '@/components/media/artwork';
 import { SectionHeader } from '@/components/ui/section-header';
 import { api } from '@/lib/api';
 import { useSession } from '@/lib/session';
 
 /**
- * Kept in step with the `limit` Home fetches its fallback with. The two lists
- * occupy the same grid, and a rail that changes length when it personalises is
- * a layout shift for no reason.
+ * Three, and only three.
+ *
+ * This section used to be the whole catalogue re-ordered — eighteen covers in
+ * a five-column grid, which is a *listing*, and a listing cannot recommend
+ * anything. Eighteen equally-sized tiles ask the reader to do the choosing,
+ * which is the job the ranking was supposed to have already done.
+ *
+ * Three cards at editorial size can each carry a reason, a title people can
+ * read from across the desk, and enough artwork to recognise a show by. The
+ * catalogue still exists further down the page for anyone who does want to
+ * browse; it just is not pretending to be advice.
  */
-const RAIL = 18;
+const RAIL = 3;
 
 /**
- * Home's main grid — the catalogue, or the listener's own version of it.
+ * Roughly how many episodes it takes before the ranker stops guessing.
  *
- * Deliberately **one section, not two**. The obvious implementation is a
- * "Recommended for you" rail above "Everything on Cue", and it is wrong here:
- * both are the same eighteen covers in the same grid, so the page would show
- * the same shows twice under two headings and make the reader work out which
- * one to trust. The personalisation is an *ordering*, and the honest way to
- * present an ordering is to change the order and say what it means.
+ * Approximate on purpose. The server's threshold is a weighted total, not a
+ * count — a finished episode is worth several abandoned ones — so no single
+ * number is exactly right. This is the honest round figure to put in front of
+ * someone, and it is deliberately small: the promise has to be one an evening
+ * can keep.
+ */
+const EPISODES_TO_LEARN = 4;
+
+/**
+ * Recommended for you.
  *
- * The catalogue arrives rendered from the server, because Home is a cached
- * static page and a shared catalogue is the same for everybody. Recommendations
- * cannot be: they are per-listener, so they are fetched on the client and swap
- * in over the top. That is why the fallback is a prop rather than a second
- * query — the reader never sees a skeleton, and never sees the grid jump,
- * because there is always something in it.
+ * Every card says why it is there. A rail of covers with no explanation is
+ * indistinguishable from a rail of random covers, which was the original
+ * complaint about this section, and no amount of better ranking fixes it if
+ * the reasoning stays invisible.
  *
- * Signed out, or if the request fails, this is exactly the section that was
- * here before.
+ * **A cold start is a state, not an absence.** The obvious handling — hide the
+ * section until there is history to rank — is wrong twice over: it makes the
+ * app look emptier exactly when a new listener is deciding whether to stay,
+ * and it never tells them the feature exists or what would switch it on. So a
+ * new account gets the same three cards, honestly captioned as popular rather
+ * than as personal, plus one line saying what to do about it. The section then
+ * changes under them as they listen, which is the feature demonstrating itself.
+ *
+ * Signed out it is the same shape again, from the shared catalogue, with no
+ * invitation attached — there is nowhere to put history without an account.
  */
 export function Recommended({ fallback }: { fallback: Podcast[] }) {
   const t = useTranslator();
@@ -52,42 +73,157 @@ export function Recommended({ fallback }: { fallback: Podcast[] }) {
     retry: false,
   });
 
+  /*
+    From the envelope, not counted from the rows.
+
+    The endpoint always returns a full rail — a cold start falls back to
+    catalogue quality rather than to an empty box — so `items.length > 0` is
+    true for a listener it knows nothing about. Reading the flag is the
+    difference between claiming an order is personal and offering to make it so.
+  */
+  const personalized = data?.personalized ?? false;
   const items = data?.items ?? [];
-  const personalized = items.length > 0;
-  const shows = personalized ? items : fallback;
+
+  const shows: RecommendedPodcast[] =
+    items.length > 0
+      ? items
+      : fallback.slice(0, RAIL).map((podcast) => ({
+          ...podcast,
+          reason: { kind: 'popular', subject: null } as const,
+        }));
 
   if (shows.length === 0) return null;
 
   return (
-    <section aria-labelledby="catalogue-heading" className="mb-14">
-      {/*
-        Not "in your catalogue", which it never was.
-
-        `GET /podcasts` returns every show anyone has added — it is one shared
-        catalogue, not a per-listener one. Calling it *yours* meant that opening
-        a search result, which has to read the feed to have anything to show
-        you, made a show appear under a heading claiming you had collected it.
-        Your shows live in Library, behind Follow, and always did.
-
-        The recommended heading is the one case where a possessive is true, and
-        it comes with a note saying what it is based on — a personalised order
-        that does not admit to being personalised just reads as an arbitrary one.
-      */}
+    <section aria-labelledby="recommended-heading" className="mb-14">
       <SectionHeader
-        id="catalogue-heading"
-        label={personalized ? t.t('home.recommended') : t.t('home.catalogue')}
-        note={personalized ? t.t('home.recommendedNote') : t.t('home.catalogueNote')}
+        id="recommended-heading"
+        label={t.t('home.recommended')}
+        // Only claimed when it is true. Telling a listener with no history
+        // that this was shaped by their listening is the kind of small lie
+        // that makes the whole feature read as decoration.
+        note={personalized ? t.t('home.recommendedNote') : t.t('home.recommendedGeneric')}
       />
 
-      <ul className="grid list-none grid-cols-2 gap-x-5 gap-y-7 p-0 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-        {shows.map((podcast, index) => (
+      {/*
+        Three equal columns, matching Latest episodes directly below.
+
+        The design draws this row as a wide lead and two followers, and that
+        does not survive contact with square artwork: a wider column is a
+        taller cover, so the lead card's caption sits on a different baseline
+        from its neighbours' and the row reads as broken rather than ranked.
+        Sequence already carries the ranking.
+      */}
+      <ul className="m-0 grid list-none grid-cols-1 gap-x-5 gap-y-9 p-0 sm:grid-cols-3">
+        {shows.map((podcast) => (
           <li key={podcast.id}>
-            {/* The first row is above the fold on every breakpoint, so it
-                loads eagerly; the rest stay lazy. */}
-            <PodcastTile podcast={podcast} priority={index < 5} />
+            <RecommendationCard podcast={podcast} />
           </li>
         ))}
       </ul>
+
+      {isSignedIn && !personalized ? <StartLearning /> : null}
     </section>
   );
+}
+
+/**
+ * The invitation, for an account with nothing behind it yet.
+ *
+ * Under the cards rather than instead of them. Put above, it would be a
+ * setup task standing between someone and the three shows they could press
+ * play on right now — and the way to complete the task *is* to press play on
+ * one of them, so the cards are the call to action and this is only the
+ * caption explaining what it leads to.
+ *
+ * It says what will happen, not what to do: "listen to a few and this becomes
+ * yours" is a description of the mechanism, which is both true and the only
+ * version a reader can decide to believe. There is no button, because there is
+ * no separate thing to press — every cover above it already is one.
+ */
+function StartLearning() {
+  const t = useTranslator();
+
+  return (
+    <p className="type-callout mt-7 mb-0 max-w-[56ch] border-t border-[var(--color-border)] pt-5 text-[var(--color-text-secondary)]">
+      {t.t('home.recommendedLearning', { count: EPISODES_TO_LEARN })}{' '}
+      <Link
+        href={'/search' as Route}
+        className="text-[var(--color-accent-text)] underline-offset-4 hover:underline"
+      >
+        {t.t('home.recommendedBrowse')}
+      </Link>
+    </p>
+  );
+}
+
+/**
+ * One recommendation.
+ *
+ * Artwork-led like every other show tile in the app — no card chrome, no
+ * border, no raised surface. The only thing distinguishing this from a
+ * catalogue tile is scale and the reason above the title, which is exactly the
+ * difference being claimed.
+ */
+function RecommendationCard({ podcast }: { podcast: RecommendedPodcast }) {
+  const t = useTranslator();
+
+  const meta = [
+    podcast.author,
+    podcast.episodeCount === null
+      ? null
+      : t.t('podcast.episodeCount', { count: podcast.episodeCount }),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  return (
+    <Link href={`/podcast/${podcast.id}` as Route} className="group block no-underline">
+      <div className="transition-transform duration-[var(--duration-fast)] ease-standard group-hover:-translate-y-0.5 group-active:translate-y-0 motion-reduce:transition-none motion-reduce:group-hover:translate-y-0">
+        <Artwork
+          src={podcast.artworkUrl}
+          alt={podcast.title}
+          size={320}
+          priority
+          responsive
+          sizes="(min-width: 640px) 33vw, 92vw"
+        />
+      </div>
+
+      {/* The one place besides Continue listening where the accent is spent on
+          text, and for the same reason: it marks the sentence the section is
+          *making*, not the content it is made of. */}
+      <p className="type-overline clamp-1 mt-3.5 mb-1 text-[var(--color-accent-text)]">
+        {reasonLabel(podcast.reason, t)}
+      </p>
+
+      <h3 className="type-title3 clamp-2 m-0 text-[var(--color-text-primary)]">
+        {podcast.title}
+      </h3>
+
+      {meta ? (
+        <p className="type-caption clamp-1 mt-1 mb-0 text-[var(--color-text-tertiary)]">
+          {meta}
+        </p>
+      ) : null}
+    </Link>
+  );
+}
+
+/**
+ * The reason, as a sentence in the reader's language.
+ *
+ * The server sends a fact — which signal won, and what it was — rather than a
+ * finished phrase, because it does not know the locale. Assembling it here is
+ * also what keeps "More in Business" from being four separate string
+ * concatenations in four catalogs.
+ */
+function reasonLabel(reason: RecommendationReason, t: Translator): string {
+  if (reason.kind === 'category' && reason.subject) {
+    return t.t('home.becauseCategory', { subject: reason.subject });
+  }
+  if (reason.kind === 'creator' && reason.subject) {
+    return t.t('home.becauseCreator', { subject: reason.subject });
+  }
+  return t.t('home.becausePopular');
 }

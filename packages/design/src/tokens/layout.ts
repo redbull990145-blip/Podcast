@@ -127,6 +127,15 @@ export const measure = {
    * that would otherwise have been applied in two places out of three.
    */
   sidebar: 260,
+  /**
+   * The same rail, collapsed to icons.
+   *
+   * 72, not 56: the rows keep their 40px round hit target and their 16px of
+   * gutter either side, so collapsing changes what the rail *says* and not how
+   * it is touched. Narrower than this and the icons start sitting on the window
+   * edge, which reads as the rail having been clipped rather than folded.
+   */
+  sidebarCollapsed: 72,
   /** Transcripts and show notes: ~76 characters at body size. */
   prose: 720,
   /** Main app column. */

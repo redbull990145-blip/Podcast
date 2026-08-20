@@ -371,6 +371,76 @@ export type ContinueEntry = QueueEntry & {
   updatedAt: IsoDateTime;
 };
 
+/**
+ * An episode that was played, finished or not.
+ *
+ * A continue entry plus the one fact continue does not need: whether it
+ * reached the end. "Recently played" is the only surface where a finished
+ * episode is the *point* rather than something to filter out, and without this
+ * flag a row saying "12 min left" is indistinguishable from one that should
+ * say "Finished".
+ */
+export type HistoryEntry = ContinueEntry & {
+  completed: boolean;
+};
+
+/**
+ * What a listener has done, as Home's masthead reports it.
+ *
+ * `listenedSec` is the sum of how far into each episode they have reached, not
+ * a measured play time — nothing in the app counts seconds of audio. It
+ * over-counts skipping and under-counts replays. Close enough to show, wrong
+ * to call a play log.
+ *
+ * `topCategories` is ordered by time and deliberately does not sum to
+ * `listenedSec`: a show carrying three categories contributes its time to all
+ * three, and any rule for splitting it would be a guess dressed as arithmetic.
+ */
+export type ListeningStats = {
+  listenedSec: number;
+  episodesStarted: number;
+  episodesFinished: number;
+  /** Distinct shows touched. */
+  showCount: number;
+  topShow: {
+    id: PodcastId;
+    title: string;
+    author: string | null;
+    artworkUrl: string | null;
+    listenedSec: number;
+  } | null;
+  topCategories: Array<{ name: string; listenedSec: number }>;
+};
+
+/**
+ * Why a show was recommended, in the ranker's own terms.
+ *
+ * `kind` is what matched, `subject` is the thing that matched — a category
+ * name, a creator's name — and either may be absent, because plenty of shows
+ * are recommended on catalogue quality alone and saying so is more honest than
+ * inventing a connection.
+ *
+ * Two fields rather than a finished sentence, because the sentence has to be
+ * written in the reader's language and the server does not know it. The
+ * clients hold the phrasing; this holds the fact.
+ */
+export type RecommendationReason = {
+  kind: 'category' | 'creator' | 'popular';
+  subject: string | null;
+};
+
+/**
+ * A recommended show, carrying its own justification.
+ *
+ * A rail of covers with no explanation is indistinguishable from a rail of
+ * random covers, which is exactly the complaint that started this — so the
+ * reason travels with the show rather than being reconstructed client-side
+ * from data the client does not have.
+ */
+export type RecommendedPodcast = Podcast & {
+  reason: RecommendationReason;
+};
+
 // ------------------------------------------------------------- playlists --
 
 export type PlaylistId = string;

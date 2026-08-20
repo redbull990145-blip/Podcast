@@ -1,7 +1,11 @@
 export {
   DEFAULT_PREFERENCES,
   normalizePreferences,
+  normalizeRate,
   PLAYBACK_RATES,
+  RATE_MAX,
+  RATE_MIN,
+  RATE_STEP,
   SKIP_BACK_OPTIONS,
   SKIP_BACK_SEC,
   SKIP_FORWARD_OPTIONS,

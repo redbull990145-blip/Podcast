@@ -111,6 +111,54 @@ function reportProgress(episodeId: string, record: ProgressRecord, force: boolea
     });
 }
 
+/**
+ * Fired once the server has been told what is now playing.
+ *
+ * Home reads "pick up where you left off" from `/me/continue`, which is the
+ * server's view of recent progress — and progress is written on a 15-second
+ * debounce. So pressing play put the player and the hero into open
+ * disagreement: the bar said one episode, and the panel directly above it
+ * confidently said another, for a quarter of a minute, on the screen where both
+ * are visible at once.
+ *
+ * The gap cannot be closed by invalidating the query when playback starts,
+ * because at that moment the server still has the old answer and would simply
+ * re-send it. The write has to land first, which is why this announces
+ * *afterwards* rather than at the moment of the press.
+ */
+export const NOW_PLAYING_SYNCED = 'cue:now-playing-synced';
+
+/**
+ * Write the new episode's position immediately, then say so.
+ *
+ * The position is usually 0 or a resumed offset, which is not interesting in
+ * itself — what matters is `updatedAt`, because that is what orders the
+ * continue list. One request makes the thing you just pressed play on the most
+ * recent thing you listened to, which it is.
+ */
+function announceEpisodeStarted(episodeId: string, state: PlayerState): void {
+  if (!canSync()) return;
+
+  void api
+    .reportProgress(episodeId, {
+      positionSec: Math.round(state.positionSec),
+      durationSec: state.durationSec,
+      completed: false,
+      deviceId: deviceId(),
+      observedAt: Date.now(),
+    })
+    .then(() => {
+      // The debounce is reset rather than bypassed: this *was* the write for
+      // this window, and letting the next heartbeat fire immediately after
+      // would send the same position twice.
+      lastWrite = Date.now();
+      window.dispatchEvent(new Event(NOW_PLAYING_SYNCED));
+    })
+    .catch(() => {
+      // Home stays a beat behind, which is where it was before this existed.
+    });
+}
+
 export function getPlayer(): PlayerMachine {
   if (machine) return machine;
 
@@ -135,7 +183,15 @@ export function getPlayer(): PlayerMachine {
   });
 
   machine.subscribe((state) => {
+    const previous = pendingEpisodeId;
     pendingEpisodeId = state.current?.id ?? null;
+
+    // Starting something new is the one progress event that cannot wait for the
+    // debounce — see `announceEpisodeStarted`.
+    if (pendingEpisodeId && pendingEpisodeId !== previous) {
+      announceEpisodeStarted(pendingEpisodeId, state);
+    }
+
     updateMediaSession(state);
   });
 
@@ -344,6 +400,8 @@ export function usePlayerActions() {
      * a slider that does not work. The clamp is there too, and tested.
      */
     setVolume: (volume: number) => getPlayer().setVolume(volume),
+    /** Close the mini bar. Flushes the position first — see `dismiss`. */
+    dismiss: () => getPlayer().dismiss(),
     setSleepTimer: (minutes: number | null) => getPlayer().setSleepTimer(minutes),
     next: () => void getPlayer().next(),
     enqueue: (...episodes: PlayableEpisode[]) => getPlayer().enqueue(...episodes),

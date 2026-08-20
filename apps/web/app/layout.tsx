@@ -103,13 +103,35 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           Absent or unrecognised means *follow the system*, which is what the
           `prefers-color-scheme` block in tokens.css already does — so the
           script writes nothing at all in the common case rather than baking a
-          choice nobody made. The key matches STORAGE_KEY in
-          components/shell/theme-toggle.tsx; a script tag cannot import it.
+          choice nobody made. The key matches THEME_KEY in lib/theme.ts, and
+          the accepted values match `ThemeChoice` there; a script tag cannot
+          import either, so adding a scheme means editing this string too.
         */}
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "try{var t=localStorage.getItem('cue-theme');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t}catch(e){}",
+              "try{var t=localStorage.getItem('cue-theme');if(t==='dark'||t==='onyx'||t==='light')document.documentElement.dataset.theme=t}catch(e){}",
+          }}
+        />
+
+        {/*
+          And the navigation rail's width, for the same reason and at the same
+          cost.
+
+          This one is layout rather than colour, so getting it late is worse:
+          an effect would paint a 260px rail, then jump it to 72 and reflow the
+          entire page under the cursor on every navigation that reloads the
+          document. Writing the custom property here means the first paint is
+          already the right shape.
+
+          The key and the collapsed width match RAIL_KEY and
+          `measure.sidebarCollapsed` in lib/rail.ts; a script tag cannot import
+          either.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{if(localStorage.getItem('cue-rail')==='collapsed'){var r=document.documentElement;r.dataset.rail='collapsed';r.style.setProperty('--measure-sidebar','72px')}}catch(e){}",
           }}
         />
       </head>

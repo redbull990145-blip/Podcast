@@ -58,13 +58,57 @@ export interface PlaybackEngine {
 }
 
 /**
- * Playback speed options.
+ * The speeds worth putting on a button.
  *
- * A short list, not a slider: people pick a speed once and keep it, and the
- * granularity between 1.6 and 1.65 is not a decision anyone wants to make.
+ * These used to *be* the type — speed was a union of these eight literals, on
+ * the reasoning that the difference between 1.6 and 1.65 is not a decision
+ * anyone wants to make. That is right for the common case and wrong as a
+ * ceiling: people who listen fast converge on a specific number and can tell
+ * 1.85 from 2, and a product that offers eight stops tells them their setting
+ * does not exist. So these remain the presets — one press, no aiming — and the
+ * type below allows anything between the bounds for the people who want it.
+ *
+ * Typed as `readonly number[]` rather than a literal tuple so that a value
+ * arriving from the slider can be compared against it without a cast at every
+ * call site.
  */
-export const PLAYBACK_RATES = [0.8, 1, 1.2, 1.5, 1.75, 2, 2.5, 3] as const;
-export type PlaybackRate = (typeof PLAYBACK_RATES)[number];
+export const PLAYBACK_RATES: readonly number[] = [0.8, 1, 1.2, 1.5, 1.75, 2, 2.5, 3];
+
+/** Any speed inside the bounds below. Validate with `normalizeRate`. */
+export type PlaybackRate = number;
+
+/**
+ * The bounds, and the granularity between them.
+ *
+ * Below 0.5 speech stops being speech, and above 3 the browser's own
+ * time-stretching gives up — Safari and Firefox silently clamp, so offering
+ * more would be offering a number that does not happen. The step is 0.05
+ * because 0.01 is a slider nobody can land on and 0.1 is coarser than the
+ * difference people can hear at the top of the range.
+ */
+export const RATE_MIN = 0.5;
+export const RATE_MAX = 3;
+export const RATE_STEP = 0.05;
+
+/**
+ * Coerce a speed, or refuse it.
+ *
+ * Returns `null` rather than clamping, and the distinction matters: input to
+ * this comes from a slider (already in range) and from stored preferences a
+ * previous version of the app wrote and the user can edit by hand. A stored 47
+ * is not "someone who wanted 3" — it is a value from a different schema or a
+ * typo, and silently answering 3 is a worse guess than falling back to the
+ * default the caller already has.
+ */
+export function normalizeRate(value: unknown): PlaybackRate | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  if (value < RATE_MIN || value > RATE_MAX) return null;
+
+  // Snapped to the step so that what is stored is always a value the slider
+  // can return to — otherwise a rate restored from an older build sits between
+  // two stops and the control jumps the first time it is touched.
+  return Math.round(value / RATE_STEP) * RATE_STEP;
+}
 
 /** Seconds each skip control moves. Back is shorter than forward on purpose:
  *  you skip back to re-hear something specific and forward to escape an ad. */
@@ -110,7 +154,7 @@ export const DEFAULT_PREFERENCES: PlaybackPreferences = {
 export function normalizePreferences(input: unknown): PlaybackPreferences {
   const value = (input ?? {}) as Partial<Record<keyof PlaybackPreferences, unknown>>;
 
-  const rate = PLAYBACK_RATES.find((option) => option === value.rate);
+  const rate = normalizeRate(value.rate);
   const skipBack = SKIP_BACK_OPTIONS.find((option) => option === value.skipBackSec);
   const skipForward = SKIP_FORWARD_OPTIONS.find((option) => option === value.skipForwardSec);
 

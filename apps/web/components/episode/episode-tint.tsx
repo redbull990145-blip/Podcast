@@ -1,7 +1,7 @@
 'use client';
 
 import { queryKeys } from '@cue/api-client';
-import { deriveTint } from '@cue/design';
+import { TINT_ATTR, tintVars } from '@cue/design';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { api } from '@/lib/api';
@@ -43,16 +43,32 @@ export function EpisodeTint({
   });
 
   const color = data?.accentColor ?? initialColor;
-  const tint = useMemo(() => (color ? deriveTint(color, 'dark') : null), [color]);
+  const tint = useMemo(() => tintVars(color), [color]);
 
   if (!tint) return null;
 
   return (
     <div
       aria-hidden="true"
+      {...{ [TINT_ATTR]: '' }}
       className="pointer-events-none absolute inset-x-0 top-0 h-[300px] transition-[background] duration-[var(--duration-slow)] ease-standard sm:h-[380px]"
+      /*
+        The wash has to follow the theme, because the text it sits behind does.
+
+        This was fitted to `'dark'` unconditionally, which put a near-black band
+        across the top of the light theme while the episode's date, duration and
+        the show link over it stayed near-black too — the whole header went
+        blank on the one screen a shared link opens to. The dark fit is still
+        the dark fit; `--tint-wash` just picks the one that matches whatever
+        theme is live.
+
+        Unlike the podcast page — which scopes an entire dark palette, so a dark
+        wash is correct there in both themes — this is a band on the ordinary
+        page, with the ordinary page's text on top of it.
+      */
       style={{
-        background: `linear-gradient(to bottom, ${tint.wash} 0%, transparent 100%)`,
+        ...tint,
+        background: 'linear-gradient(to bottom, var(--tint-wash) 0%, transparent 100%)',
         zIndex: 0,
       }}
     />

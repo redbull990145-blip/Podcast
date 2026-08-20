@@ -10,11 +10,12 @@ import type { PodcastSearchResult } from '@cue/types';
 import {
   catalogueQuery,
   feedUrlInput,
+  numberedPageQuery,
   paginationQuery,
   searchQuery,
   uuidParam,
 } from '@cue/validation';
-import { and, desc, eq, lt, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, lt, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { PodcastIndexFeed } from '../catalog/podcastindex.ts';
 import { serializeEpisode, serializePodcast } from '../catalog/serialize.ts';
@@ -374,8 +375,81 @@ export function podcastRoutes(app: FastifyInstance): void {
    * `episodes_podcast_published_idx`, so page 50 of a 900-episode show costs
    * the same as page 1.
    */
+  /**
+   * A show's episodes, either continued or jumped to.
+   *
+   * Two pagination modes on one route, because the two callers want genuinely
+   * different things and neither is served well by the other's shape.
+   *
+   * **Keyset** — `?cursor=` — is the default and stays the default. It is cheap
+   * at any depth and never skips or repeats a row when a publisher posts
+   * mid-scroll, which is what an infinite list needs.
+   *
+   * **Offset** — `?page=` — exists because a podcast archive is one of the few
+   * lists in this product people navigate deliberately rather than by
+   * scrolling: 2,947 episodes of a daily show is eleven years, and "somewhere
+   * near the start" is a real destination that a cursor cannot express, since
+   * the cursor for page 40 only exists once pages 1 to 39 have been read.
+   *
+   * The offset path pays for that with a `COUNT(*)` — a pager cannot render
+   * without knowing how many pages there are — so it runs only when asked for.
+   */
+/**
+ * Which pagination mode the caller asked for.
+ *
+ * Presence of `page`, not a mode flag. A client that sends neither gets the
+ * cheap keyset path, which is what every existing caller does and must keep
+ * doing — adding an explicit `?mode=` would have meant changing all of them to
+ * keep the behaviour they already had.
+ */
+function hasPageParam(query: unknown): boolean {
+  return typeof query === 'object' && query !== null && 'page' in query;
+}
+
   app.get('/podcasts/:id/episodes', async (request) => {
     const { id } = uuidParam.parse(request.params);
+    const mine = eq(episodes.podcastId, id);
+    const newestFirst = [desc(episodes.publishedAt), desc(episodes.id)] as const;
+
+    if (hasPageParam(request.query)) {
+      const query = numberedPageQuery.parse(request.query);
+      const pageSize = clampLimit(query.limit);
+
+      const [counted] = await app.db
+        .select({ total: count() })
+        .from(episodes)
+        .where(mine);
+      const total = counted?.total ?? 0;
+      const pageCount = Math.max(1, Math.ceil(total / pageSize));
+
+      /*
+        Clamped rather than 404'd or answered empty.
+
+        `?page=900` on a show that has four is not an error a person can act on
+        — it is a stale link, or a pager rendered against a count that has since
+        changed because the publisher deleted a back catalogue. Answering with
+        the last real page shows them something and leaves the pager honest;
+        answering with nothing shows them a blank archive and no way back.
+      */
+      const page = Math.min(query.page ?? 1, pageCount);
+
+      const rows = await app.db
+        .select()
+        .from(episodes)
+        .where(mine)
+        .orderBy(...newestFirst)
+        .limit(pageSize)
+        .offset((page - 1) * pageSize);
+
+      return ok({
+        items: rows.map(serializeEpisode),
+        page,
+        pageSize,
+        total,
+        pageCount,
+      });
+    }
+
     const query = paginationQuery.parse(request.query);
     const limit = clampLimit(query.limit);
 
@@ -390,8 +464,8 @@ export function podcastRoutes(app: FastifyInstance): void {
     const rows = await app.db
       .select()
       .from(episodes)
-      .where(keyset ? and(eq(episodes.podcastId, id), keyset) : eq(episodes.podcastId, id))
-      .orderBy(desc(episodes.publishedAt), desc(episodes.id))
+      .where(keyset ? and(mine, keyset) : mine)
+      .orderBy(...newestFirst)
       // One extra row answers "is there more?" without a second COUNT(*).
       .limit(limit + 1);
 

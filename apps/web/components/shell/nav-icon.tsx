@@ -1,9 +1,13 @@
 /**
  * Nav icons as inline SVG.
  *
- * No icon library. Three icons do not justify a dependency, and inline paths
+ * No icon library. Five icons do not justify a dependency, and inline paths
  * mean no extra request, no font-loading flash, and no icon set whose visual
  * language quietly overrides the product's own.
+ *
+ * They are all *line* icons, and that is a constraint rather than a
+ * coincidence — see the fill note below for what happened when the active
+ * state forgot it.
  */
 export function NavIcon({
   path,
@@ -11,6 +15,10 @@ export function NavIcon({
   size = 22,
 }: {
   path: string;
+  /**
+   * Whether this is the page you are on. Renders as extra stroke weight, not
+   * as a fill — see below.
+   */
   filled: boolean;
   /**
    * 22 in the tab bar, where the icon carries the row; 16 in the rail, where
@@ -24,9 +32,25 @@ export function NavIcon({
       width={size}
       height={size}
       viewBox="0 0 24 24"
-      fill={filled ? 'currentColor' : 'none'}
+      /*
+        Always stroked, never filled.
+
+        The active state used to swap to `fill="currentColor"` with a zero
+        stroke, which works only for icons that happen to be closed shapes.
+        Two of the five are not. Search is a circle plus a separate handle
+        stroke, so filling it produced a solid orange disc with no handle —
+        the "Search" row in the sidebar was marked by a dot. Queue and
+        Settings are bare horizontal lines with no interior at all, so filling
+        them erased the icon completely: the row you were on was the one with
+        no icon.
+
+        Weight is the cue that works for every path shape, and it composes with
+        the colour and the ground the active row now carries rather than
+        replacing them.
+      */
+      fill="none"
       stroke="currentColor"
-      strokeWidth={filled ? 0 : 1.7}
+      strokeWidth={filled ? 2.2 : 1.7}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"

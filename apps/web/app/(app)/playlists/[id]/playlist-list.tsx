@@ -1,7 +1,7 @@
 'use client';
 
 import { playableFromQueueEntry } from '@cue/core';
-import { deriveTint } from '@cue/design';
+import { tintTextProps } from '@cue/design';
 import { duration } from '@cue/motion';
 import type { PlaylistEntry } from '@cue/types';
 import { AnimatePresence, Reorder, useDragControls } from 'motion/react';
@@ -73,7 +73,6 @@ function PlaylistRow({
   const settle = useTransition('standard');
 
   const playable = playableFromQueueEntry(entry);
-  const tint = entry.accentColor ? deriveTint(entry.accentColor, 'dark') : null;
   const length = t.duration(entry.episode.durationSec);
 
   return (
@@ -134,7 +133,7 @@ function PlaylistRow({
         type="button"
         onClick={() => void actions.play(playable)}
         className="type-caption shrink-0 cursor-pointer rounded-[var(--radius-sm)] border-none bg-transparent px-3 py-2 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
-        style={tint ? { color: tint.text } : undefined}
+        {...tintTextProps(entry.accentColor)}
       >
         {t.t('episode.play')}
       </button>

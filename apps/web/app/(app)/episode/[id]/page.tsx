@@ -1,6 +1,6 @@
 import { ApiClientError } from '@cue/api-client';
 import { getTranslator } from '@/lib/i18n';
-import { deriveTint } from '@cue/design';
+import { deriveTint, tintTextProps } from '@cue/design';
 import type { Metadata } from 'next';
 import type { Route } from 'next';
 import Link from 'next/link';
@@ -79,12 +79,25 @@ export default async function EpisodePage({ params }: Params) {
    * Null until the episode has been played once, since the colour is extracted
    * on demand rather than for every episode of every feed. `EpisodeTint` below
    * fills that gap from the client without making this page wait on an image.
+   *
+   * Kept as the raw colour rather than a fitted `TintSet`. This is a server
+   * component, so it genuinely cannot know the theme — the choice is applied by
+   * a blocking script after this HTML is written — and fitting it to the dark
+   * ground here meant the show name below rendered light-on-light for anybody
+   * using the light theme. `tintTextProps` emits both fits and lets the
+   * stylesheet choose; see `tintVars` in @cue/design.
    */
-  const tint = episode.accentColor
-    ? deriveTint(episode.accentColor, 'dark')
-    : podcast.accentColor
-      ? deriveTint(podcast.accentColor, 'dark')
-      : null;
+  const tintColor = episode.accentColor ?? podcast.accentColor;
+
+  /*
+    `fill` is the one part of a tint that does not change with the theme.
+
+    It is a saturated background that carries its own foreground — a chip, a
+    progress bar — so what sits behind it is irrelevant, and `deriveTint`
+    returns the same value for both themes. It is read here rather than through
+    the CSS variable because it is handed to components as a prop.
+  */
+  const fill = tintColor ? (deriveTint(tintColor, 'dark')?.fill ?? null) : null;
 
   const artwork = episode.artworkUrl ?? podcast.artworkUrl;
   const t = await getTranslator();
@@ -102,10 +115,7 @@ export default async function EpisodePage({ params }: Params) {
         already inset by the sidebar, it does so without having to know the
         sidebar is there.
       */}
-      <EpisodeTint
-        episodeId={episode.id}
-        initialColor={episode.accentColor ?? podcast.accentColor}
-      />
+      <EpisodeTint episodeId={episode.id} initialColor={tintColor} />
 
       <div className="relative mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
         <header className="mb-8 flex flex-col gap-6 sm:flex-row sm:items-start">
@@ -117,7 +127,7 @@ export default async function EpisodePage({ params }: Params) {
             <Link
               href={`/podcast/${podcast.id}` as Route}
               className="type-callout text-[var(--color-text-secondary)] no-underline hover:underline"
-              style={tint ? { color: tint.text } : undefined}
+              {...tintTextProps(tintColor)}
             >
               {podcast.title}
             </Link>
@@ -151,7 +161,7 @@ export default async function EpisodePage({ params }: Params) {
                   podcastTitle={podcast.title}
                   podcastArtworkUrl={podcast.artworkUrl}
                   accentColor={podcast.accentColor}
-                  {...(tint ? { tint: tint.fill } : {})}
+                  {...(fill ? { tint: fill } : {})}
                 />
               </Suspense>
 
@@ -160,7 +170,7 @@ export default async function EpisodePage({ params }: Params) {
                 podcastTitle={podcast.title}
                 podcastArtworkUrl={podcast.artworkUrl}
                 accentColor={podcast.accentColor}
-                {...(tint ? { tint: tint.fill } : {})}
+                {...(fill ? { tint: fill } : {})}
               />
             </div>
           </div>

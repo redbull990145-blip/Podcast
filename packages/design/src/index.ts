@@ -1,4 +1,4 @@
-export { colorSchemes, dark, ember, light, paper } from './tokens/color.ts';
+export { colorSchemes, dark, ember, light, onyx, paper, stage } from './tokens/color.ts';
 export type { ColorScheme, ThemeName } from './tokens/color.ts';
 
 export {
@@ -10,8 +10,11 @@ export {
   relativeLuminance,
   rgbToHex,
   rgbToOklab,
+  tintedScheme,
 } from './tokens/tint.ts';
 export type { Rgb, TintSet } from './tokens/tint.ts';
+
+export { colorVarStyle, TINT_ATTR, tintTextProps, tintVars } from './css.ts';
 
 export { icon } from './tokens/icons.ts';
 export type { IconPath, IconToken } from './tokens/icons.ts';

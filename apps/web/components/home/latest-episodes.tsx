@@ -35,8 +35,14 @@ type Pick = { episode: Episode; podcast: Podcast };
  * making three specific episodes look worth an hour of someone's evening, and
  * that takes a cover you can actually see.
  *
- * The first column is wider than the other two. Three equal columns is a
- * table, and the eye has to be told where to start.
+ * Three **equal** columns. The first used to be 1.4× the others, on the theory
+ * that the eye has to be told where to start — but covers are square, so a
+ * wider first column is also a *taller* one, and the caption under it dropped
+ * to a different baseline from the two beside it. What that reads as is not
+ * emphasis, it is a grid that has gone wrong: one enormous cover and two
+ * ordinary ones, with their titles refusing to line up. Sequence already says
+ * where to start, and every cover on Home is now the same size as its
+ * neighbours.
  */
 export async function LatestEpisodes({ podcasts }: { podcasts: Podcast[] }) {
   const picks = await latestPerShow(podcasts);
@@ -52,7 +58,7 @@ export async function LatestEpisodes({ podcasts }: { podcasts: Podcast[] }) {
         note={t.t('home.latestNote')}
       />
 
-      <ul className="m-0 grid list-none grid-cols-1 gap-x-5 gap-y-6 p-0 md:grid-cols-[1.4fr_1fr_1fr]">
+      <ul className="m-0 grid list-none grid-cols-1 gap-x-5 gap-y-6 p-0 md:grid-cols-3">
         {picks.map(({ episode, podcast }) => (
           <li key={episode.id}>
             <LatestPick episode={episode} podcast={podcast} />
@@ -192,7 +198,7 @@ export function LatestEpisodesSkeleton() {
         <span className="mt-2 block h-3 w-52 rounded-[var(--radius-xs)] bg-[var(--color-skeleton)]" />
       </div>
 
-      <div className="grid grid-cols-1 gap-x-5 gap-y-6 md:grid-cols-[1.4fr_1fr_1fr]">
+      <div className="grid grid-cols-1 gap-x-5 gap-y-6 md:grid-cols-3">
         {Array.from({ length: PICKS }, (_, index) => (
           <div key={index} className="flex items-center gap-4 md:block">
             <div className="aspect-square w-[72px] shrink-0 rounded-[var(--radius-md)] bg-[var(--color-skeleton)] md:mb-3.5 md:w-full" />

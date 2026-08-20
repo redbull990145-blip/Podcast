@@ -176,9 +176,25 @@ export async function runJob(
     const detail = detailOf(error);
     const { exhausted } = await fail(app.db, episodeId, detail);
 
-    app.log.error({ err: error, episodeId, exhausted }, 'transcription attempt failed');
+    /*
+      Some failures are answers, not accidents.
 
-    if (exhausted) {
+      A missing episode, a deleted account, an enclosure that is too long or is
+      not audio: none of those change between attempt one and attempt three, so
+      spending two more attempts on them costs the listener several minutes of
+      "Writing captions…" and this server up to another 240MB of download to
+      reach a conclusion it already had. Terminal on the first failure instead —
+      the message is the same one it would have shown eventually, several
+      minutes earlier.
+    */
+    const terminal = isPermanent(error);
+
+    app.log.error(
+      { err: error, episodeId, exhausted, terminal },
+      'transcription attempt failed',
+    );
+
+    if (exhausted || terminal) {
       // Only now is this a dead end worth showing. Marking the transcript
       // failed while a retry is still queued would report one to a reader who
       // is about to get a transcript.
@@ -193,6 +209,20 @@ export async function runJob(
   }
 }
 
+/**
+ * Whether this error will still be true on the next attempt.
+ *
+ * Reads the code rather than the message: the strings are written for people
+ * and change freely, and matching on them is how a retry policy silently stops
+ * working the day somebody improves the wording.
+ */
+function isPermanent(error: unknown): boolean {
+  return (
+    error instanceof AppError &&
+    (error.code === 'bad_request' || error.code === 'not_found')
+  );
+}
+
 async function run(
   app: FastifyInstance,
   episodeId: string,
@@ -204,7 +234,16 @@ async function run(
   const audio = await fetchAudio(audioUrl);
 
   if (audio.status !== 'ok') {
-    throw new AppError('upstream_unavailable', `Could not fetch the audio: ${audio.detail}`);
+    /*
+      Two codes for one situation, because they mean different things to the
+      queue. `bad_request` is this file will never work — too big, empty, gone
+      — and is terminal; `upstream_unavailable` is it did not work *this time*
+      and earns the retries.
+    */
+    throw new AppError(
+      audio.permanent ? 'bad_request' : 'upstream_unavailable',
+      `Could not fetch the audio: ${audio.detail}`,
+    );
   }
 
   await heartbeat(app.db, episodeId, { stage: 'splitting', done: 0, total: 0 });

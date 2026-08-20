@@ -2,11 +2,9 @@
 
 import {
   DEFAULT_PREFERENCES,
-  PLAYBACK_RATES,
   SKIP_BACK_OPTIONS,
   SKIP_FORWARD_OPTIONS,
   type PlaybackPreferences,
-  type PlaybackRate,
 } from '@cue/core';
 import type { Route } from 'next';
 import Link from 'next/link';
@@ -14,17 +12,24 @@ import { useEffect, useState } from 'react';
 import { ApiKeyField } from '@/components/ai/api-key-field';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { LanguagePicker } from '@/components/i18n/language-picker';
-import { ThemeToggle } from '@/components/shell/theme-toggle';
+import { SpeedScale } from '@/components/player/speed-control';
+import { ThemePicker } from '@/components/shell/theme-picker';
 import { readPreferences, updatePreferences } from '@/lib/player/store';
 import { useSession, useSignOut } from '@/lib/session';
 
 /**
  * Settings.
  *
- * Only what the product actually supports. There is no theme toggle because
- * dark is the design, not a preference; no notification settings because
- * nothing sends them. A settings screen full of switches that do nothing is
- * the fastest way to make an app feel fake.
+ * Only what the product actually supports. There are no notification settings
+ * because nothing sends them, and no download quality because there is one
+ * quality — a settings screen full of switches that do nothing is the fastest
+ * way to make an app feel fake.
+ *
+ * Appearance is the exception that proves it, and it earned its place twice.
+ * It went in when the light theme turned out to be reachable only by changing
+ * the whole machine's setting, and it grew a second dark scheme when "dark"
+ * stopped being one answer. Both times the control followed something the app
+ * could already do and had no way to say.
  */
 export function SettingsClient() {
   const t = useTranslator();
@@ -73,7 +78,11 @@ export function SettingsClient() {
         caption={t.t('theme.appearanceCaption')}
       >
         <Field label={t.t('theme.label')} hint={t.t('theme.hint')}>
-          <ThemeToggle />
+          {/* The full set lives here rather than behind the masthead's toggle:
+              that control has one axis and there are now two darks, and a
+              button that cycles four states is a control you have to press
+              repeatedly to find out what it does. */}
+          <ThemePicker />
         </Field>
       </Section>
 
@@ -82,12 +91,17 @@ export function SettingsClient() {
         caption={t.t('settings.playbackCaption')}
       >
         <Field label={t.t('settings.speed')} hint={t.t('settings.speedHint')}>
-          <Choices
-            options={PLAYBACK_RATES.map((rate) => ({ value: rate, label: `${rate}×` }))}
-            selected={preferences.rate}
-            onSelect={(rate) => change({ rate: rate as PlaybackRate })}
-            name={t.t('settings.speed')}
-          />
+          {/* The same control the player has, rather than a second one that
+              can disagree with it. A radio group of eight presets could not
+              describe a speed set on the slider — someone listening at 1.85
+              opened this screen and found nothing selected, which reads as the
+              app having lost their preference. */}
+          <div className="max-w-[320px]">
+            <SpeedScale
+              rate={preferences.rate}
+              onChange={(rate) => change({ rate })}
+            />
+          </div>
         </Field>
 
         <Field label={t.t('settings.skipBack')} hint={t.t('settings.skipBackHint')}>

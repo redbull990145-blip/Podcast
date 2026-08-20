@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { buildCssVariables } from './css.ts';
-import { dark, light } from './tokens/color.ts';
+import { dark, light, onyx } from './tokens/color.ts';
 import { radiusForArtwork } from './index.ts';
 import { artworkRadius } from './tokens/layout.ts';
+
+/** The same camelCase → custom-property transform `css.ts` applies. */
+function kebab(value: string): string {
+  return value.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+}
 
 describe('buildCssVariables', () => {
   const css = buildCssVariables();
@@ -10,8 +15,26 @@ describe('buildCssVariables', () => {
   it('emits dark as the default on :root', () => {
     // Dark-first is a design decision, not an accident of ordering: artwork
     // sits better on a dark ground and that is where most listening happens.
-    const root = css.slice(css.indexOf(':root {'), css.indexOf("[data-theme='light']"));
+    const root = css.slice(css.indexOf(':root {'), css.indexOf("[data-theme='onyx']"));
     expect(root).toContain(`--color-bg: ${dark.bg};`);
+    // And specifically *warm* dark. Onyx is the neutral variant and it is an
+    // opt-in; landing it on :root would repaint the app for everyone who has
+    // never opened Settings.
+    expect(root).not.toContain(`--color-bg: ${onyx.bg};`);
+  });
+
+  it('emits onyx as an opt-in variant rather than a second default', () => {
+    const block = css.slice(
+      css.indexOf("[data-theme='onyx']"),
+      css.indexOf("[data-theme='light']"),
+    );
+    expect(block).toContain(`--color-bg: ${onyx.bg};`);
+    for (const key of Object.keys(onyx)) {
+      // Every key, not just the ground: a variant that overrides some of the
+      // palette leaves the rest reading dark's warm values, which is a worse
+      // theme than either of the two it is mixing.
+      expect(block).toContain(`--color-${kebab(key)}:`);
+    }
   });
 
   it('overrides every colour when light is selected explicitly', () => {

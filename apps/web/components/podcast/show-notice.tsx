@@ -77,12 +77,12 @@ export function ShowNotice({
   if (source === 'directory' && !isSignedIn) {
     return (
       <Notice tint={tint}>
-        <p className="type-callout m-0 text-[var(--color-text-secondary)]">
+        <p className="type-caption clamp-1 m-0 min-w-0 text-[var(--color-text-secondary)]">
           {t.t('podcast.needsAccount')}
         </p>
         <Link
           href={'/signin' as Route}
-          className="type-body-strong shrink-0 rounded-full bg-[var(--color-text-primary)] px-4 py-2 text-[var(--color-bg)] no-underline"
+          className="type-body-strong shrink-0 whitespace-nowrap text-[var(--color-text-primary)] underline decoration-transparent underline-offset-4 transition-colors hover:decoration-current"
         >
           {t.t('podcast.signIn')}
         </Link>
@@ -99,14 +99,14 @@ export function ShowNotice({
 
   return (
     <Notice tint={tint}>
-      <p className="type-callout m-0 text-[var(--color-text-secondary)]">
+      <p className="type-caption clamp-1 m-0 min-w-0 text-[var(--color-text-secondary)]">
         {t.t('podcast.enjoying')}
       </p>
       <button
         type="button"
         onClick={() => follow.mutate()}
         disabled={follow.isPending}
-        className="type-body-strong shrink-0 cursor-pointer rounded-full border-0 bg-[var(--color-text-primary)] px-4 py-2 text-[var(--color-bg)] disabled:opacity-60"
+        className="type-body-strong shrink-0 cursor-pointer whitespace-nowrap border-0 bg-transparent p-0 text-[var(--color-text-primary)] underline decoration-transparent underline-offset-4 transition-colors hover:decoration-current disabled:cursor-not-allowed disabled:opacity-60"
       >
         {follow.isPending ? t.t('search.adding') : t.t('podcast.addToLibrary')}
       </button>
@@ -114,10 +114,23 @@ export function ShowNotice({
   );
 }
 
+/**
+ * The chip the notice lives in.
+ *
+ * A pill at the same 44px height as Follow, not a bordered card — this used to
+ * be a box with its own paragraph and its own boxed button stacked inside it,
+ * which next to a single pill read as two controls arguing about which one was
+ * the actual action. As a chip in the same row it reads as one decision:
+ * Follow, or this shortcut to the same place.
+ *
+ * The sentence is clamped to one line rather than left to wrap, and the chip
+ * has no fixed width — long copy truncates with an ellipsis instead of
+ * stretching the pill until it dominates the row it is a guest in.
+ */
 function Notice({ children, tint }: { children: React.ReactNode; tint?: string | undefined }) {
   return (
     <div
-      className="mb-8 flex flex-wrap items-center justify-between gap-4 rounded-[var(--radius-lg)] border border-[var(--color-border)] px-5 py-4"
+      className="flex min-h-[44px] max-w-[340px] items-center gap-3 rounded-full border border-[var(--color-border)] px-4"
       // Tinted from the show's own cover, so the strip reads as belonging to
       // this page rather than as a system banner dropped onto it.
       style={tint ? { backgroundColor: `${tint}1f`, borderColor: `${tint}33` } : undefined}

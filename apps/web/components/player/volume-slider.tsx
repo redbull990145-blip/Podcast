@@ -25,6 +25,22 @@ import { usePressScale, useTransition } from '@/lib/motion';
 export function VolumeSlider({ volume, onChange }: { volume: number; onChange: (v: number) => void }) {
   const t = useTranslator();
   const trackRef = useRef<HTMLDivElement>(null);
+
+  /*
+    Two copies of "is a finger down", and both are needed.
+
+    The ref is the one the move handler reads. React state is applied on the
+    next render, but pointer events keep arriving before that render happens —
+    so a handler closed over `dragging` still saw `false` for the first several
+    moves of every drag. The slider therefore jumped to wherever you pressed
+    and then ignored you until you let go and pressed again, which is exactly
+    the "doesn't work properly" people report. A ref updates synchronously, so
+    the very next move is already live.
+
+    The state exists only because the bar thickens while you hold it, and
+    thickening is a render.
+  */
+  const draggingRef = useRef(false);
   const [dragging, setDragging] = useState(false);
 
   /**
@@ -89,18 +105,28 @@ export function VolumeSlider({ volume, onChange }: { volume: number; onChange: (
           }
         }}
         onPointerDown={(event) => {
+          // Capture, so a drag that leaves the 6px track — which every drag
+          // does — keeps delivering moves here instead of to whatever is
+          // underneath.
           event.currentTarget.setPointerCapture(event.pointerId);
+          draggingRef.current = true;
           setDragging(true);
           const next = levelFromPointer(event.clientX);
           if (next !== null) onChange(next);
         }}
         onPointerMove={(event) => {
-          if (!dragging) return;
+          if (!draggingRef.current) return;
           const next = levelFromPointer(event.clientX);
           if (next !== null) onChange(next);
         }}
-        onPointerUp={() => setDragging(false)}
-        onPointerCancel={() => setDragging(false)}
+        onPointerUp={() => {
+          draggingRef.current = false;
+          setDragging(false);
+        }}
+        onPointerCancel={() => {
+          draggingRef.current = false;
+          setDragging(false);
+        }}
         // Focus is left to the global `:focus-visible` outline rather than
         // given a ring of its own, so this control gets the same one as every
         // other focusable thing in the app.

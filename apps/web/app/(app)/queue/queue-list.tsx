@@ -1,7 +1,7 @@
 'use client';
 
 import type { PlayableEpisode } from '@cue/core';
-import { deriveTint } from '@cue/design';
+import { tintTextProps } from '@cue/design';
 import { duration } from '@cue/motion';
 import { AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import type { Route } from 'next';
@@ -60,7 +60,6 @@ function QueueRow({ episode, position }: { episode: PlayableEpisode; position: n
    */
   const settle = useTransition('standard');
 
-  const tint = episode.accentColor ? deriveTint(episode.accentColor, 'dark') : null;
   const length = t.duration(episode.durationSec);
 
   return (
@@ -120,7 +119,11 @@ function QueueRow({ episode, position }: { episode: PlayableEpisode; position: n
         type="button"
         onClick={() => void actions.play(episode)}
         className="type-caption shrink-0 cursor-pointer rounded-[var(--radius-sm)] border-none bg-transparent px-3 py-2 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
-        style={tint ? { color: tint.text } : undefined}
+        /* The show's colour, resolved against the theme rather than fixed to
+           the dark one. Spread whole because the marker attribute and the
+           values have to arrive together; absent when the show has no colour,
+           which leaves the class above as the fallback. */
+        {...tintTextProps(episode.accentColor)}
       >
         Play now
       </button>

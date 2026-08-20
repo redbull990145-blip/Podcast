@@ -15,9 +15,16 @@
  * must never corrupt the record.
  */
 
-import { episodes, playbackProgress, podcasts, queueItems } from '@cue/db';
+import {
+  categories,
+  episodes,
+  playbackProgress,
+  podcastCategories,
+  podcasts,
+  queueItems,
+} from '@cue/db';
 import { generateKey, reconcileProgress, type ProgressRecord } from '@cue/core';
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth/plugin.ts';
@@ -202,6 +209,147 @@ export function playbackRoutes(app: FastifyInstance): void {
         durationSec: row.durationSec ?? row.episode.durationSec,
         updatedAt: row.updatedAt.toISOString(),
       })),
+    });
+  });
+
+  /**
+   * Recently played: what was on, most recent first.
+   *
+   * The sibling of `/me/continue`, and deliberately not the same endpoint with
+   * a flag. Continue answers *what should I finish* and therefore has to
+   * exclude anything already finished; this answers *what have I been
+   * listening to*, where a finished episode is the most interesting kind of
+   * row there is. Two questions, two shapes, and merging them would mean every
+   * caller passing a boolean to say which one it meant.
+   *
+   * One row per episode, because that is what the progress table stores — an
+   * episode played twice moved its position and its timestamp rather than
+   * appending a second row. So this is a list of *episodes recently played*,
+   * not a play log, and it cannot answer "how many times".
+   */
+  app.get('/me/history', async (request) => {
+    const user = requireUser(request);
+    const limit = z.coerce.number().int().min(1).max(50).default(10).parse(
+      (request.query as { limit?: unknown }).limit ?? 10,
+    );
+
+    const rows = await app.db
+      .select({
+        episode: episodes,
+        podcast: podcasts,
+        positionSec: playbackProgress.positionSec,
+        durationSec: playbackProgress.durationSec,
+        completed: playbackProgress.completed,
+        updatedAt: playbackProgress.updatedAt,
+      })
+      .from(playbackProgress)
+      .innerJoin(episodes, eq(episodes.id, playbackProgress.episodeId))
+      .innerJoin(podcasts, eq(podcasts.id, episodes.podcastId))
+      .where(eq(playbackProgress.userId, user.id))
+      .orderBy(desc(playbackProgress.updatedAt))
+      .limit(limit);
+
+    return ok({
+      items: rows.map((row) => ({
+        episode: serializeEpisode(row.episode),
+        podcastTitle: row.podcast.title,
+        podcastArtworkUrl: row.podcast.artworkUrl,
+        accentColor: row.podcast.accentColor,
+        positionSec: row.positionSec,
+        durationSec: row.durationSec ?? row.episode.durationSec,
+        completed: row.completed,
+        updatedAt: row.updatedAt.toISOString(),
+      })),
+    });
+  });
+
+  /**
+   * What this listener has actually done, in four numbers and a shortlist.
+   *
+   * **`positionSec` is a high-water mark, not a stopwatch.** The progress table
+   * stores the furthest point reached in each episode, because that is what
+   * resuming needs; nothing anywhere counts seconds of audio actually played.
+   * So "time listened" here is the sum of those marks — it over-counts anyone
+   * who skips forward and under-counts anyone who replays. It is the honest
+   * available figure and it is close enough to be worth showing, but it is not
+   * a play log and must never be presented as one.
+   *
+   * Three queries rather than one with several `GROUP BY`s stapled together:
+   * the totals, the leading show, and the leading categories are different
+   * shapes, and a single query producing all three would either repeat the
+   * scan anyway or return a cross-product somebody has to unpick in JS.
+   */
+  app.get('/me/stats', async (request) => {
+    const user = requireUser(request);
+    const scope = eq(playbackProgress.userId, user.id);
+
+    const [totals] = await app.db
+      .select({
+        listenedSec: sql<number>`coalesce(sum(${playbackProgress.positionSec}), 0)::int`,
+        episodesStarted: sql<number>`count(*)::int`,
+        episodesFinished: sql<number>`count(*) filter (where ${playbackProgress.completed})::int`,
+        showCount: sql<number>`count(distinct ${episodes.podcastId})::int`,
+      })
+      .from(playbackProgress)
+      .innerJoin(episodes, eq(episodes.id, playbackProgress.episodeId))
+      .where(scope);
+
+    // The show with the most time against it — "who you have been listening
+    // to", which is a more human answer than any total.
+    const [topShow] = await app.db
+      .select({
+        id: podcasts.id,
+        title: podcasts.title,
+        author: podcasts.author,
+        artworkUrl: podcasts.artworkUrl,
+        listenedSec: sql<number>`sum(${playbackProgress.positionSec})::int`,
+      })
+      .from(playbackProgress)
+      .innerJoin(episodes, eq(episodes.id, playbackProgress.episodeId))
+      .innerJoin(podcasts, eq(podcasts.id, episodes.podcastId))
+      .where(scope)
+      .groupBy(podcasts.id, podcasts.title, podcasts.author, podcasts.artworkUrl)
+      .orderBy(sql`sum(${playbackProgress.positionSec}) DESC`)
+      .limit(1);
+
+    /*
+      Categories, by time rather than by episode count.
+
+      A show tagged with three categories contributes its time to all three, so
+      these deliberately do not sum to the total and are not rendered as a
+      share of one. Forcing them to add up would mean inventing a rule for
+      splitting a single episode across its tags, and any such rule is a guess
+      presented as arithmetic.
+    */
+    const topCategories = await app.db
+      .select({
+        name: categories.name,
+        listenedSec: sql<number>`sum(${playbackProgress.positionSec})::int`,
+      })
+      .from(playbackProgress)
+      .innerJoin(episodes, eq(episodes.id, playbackProgress.episodeId))
+      .innerJoin(podcastCategories, eq(podcastCategories.podcastId, episodes.podcastId))
+      .innerJoin(categories, eq(categories.id, podcastCategories.categoryId))
+      .where(scope)
+      .groupBy(categories.name)
+      .orderBy(sql`sum(${playbackProgress.positionSec}) DESC`)
+      .limit(3);
+
+    return ok({
+      listenedSec: totals?.listenedSec ?? 0,
+      episodesStarted: totals?.episodesStarted ?? 0,
+      episodesFinished: totals?.episodesFinished ?? 0,
+      showCount: totals?.showCount ?? 0,
+      topShow: topShow
+        ? {
+            id: topShow.id,
+            title: topShow.title,
+            author: topShow.author,
+            artworkUrl: topShow.artworkUrl,
+            listenedSec: topShow.listenedSec,
+          }
+        : null,
+      topCategories,
     });
   });
 

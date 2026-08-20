@@ -20,6 +20,30 @@ export type Page<T> = {
 };
 
 /**
+ * A page you can *jump* to, rather than one you can only continue from.
+ *
+ * Distinct from `Page<T>` because it costs more and buys something different.
+ * Keyset pagination is cheap at any depth and is the right shape for a list you
+ * scroll; it also cannot answer "take me to page 40", because the cursor for
+ * page 40 only exists once you have read pages 1 to 39. A numbered pager needs
+ * an offset and a total, and a total means a `COUNT(*)` — so this is offered
+ * only where somebody is genuinely navigating a long archive by hand.
+ *
+ * `pageCount` is served rather than derived so the client cannot disagree with
+ * the server about how many pages there are when `total` is not a clean
+ * multiple of `pageSize`.
+ */
+export type NumberedPage<T> = {
+  items: T[];
+  /** 1-based, and clamped by the server to something that exists. */
+  page: number;
+  pageSize: number;
+  /** Total matching rows, not rows on this page. */
+  total: number;
+  pageCount: number;
+};
+
+/**
  * Machine-readable failure codes. Clients switch on `code`; `message` is for
  * humans and may change without notice.
  */

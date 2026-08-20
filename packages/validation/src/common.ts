@@ -22,6 +22,25 @@ export const paginationQuery = z.object({
 export type PaginationQuery = z.infer<typeof paginationQuery>;
 
 /**
+ * A numbered page request, for an archive somebody is navigating by hand.
+ *
+ * `page` rather than `offset`, because the client is a pager and pages are what
+ * it counts in — asking a component that renders "3 of 40" to multiply by the
+ * page size before every request is handing it an off-by-one to make.
+ *
+ * Capped at 10,000 pages, which is not a product limit so much as a refusal to
+ * turn a query string into an unbounded `OFFSET`. At the default page size that
+ * is a hundred thousand episodes; the largest feed in existence is a long way
+ * short of it, and a scraper asking for page 900,000,000 gets a validation
+ * error instead of a sequential scan.
+ */
+export const numberedPageQuery = z.object({
+  page: z.coerce.number().int().min(1).max(10_000).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+export type NumberedPageQuery = z.infer<typeof numberedPageQuery>;
+
+/**
  * The catalogue listing, optionally narrowed to one category.
  *
  * A slug rather than an id: the id is a database detail that would put a

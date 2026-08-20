@@ -105,6 +105,56 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* ------------------------------------------------------- artwork tint -- */
+
+/*
+ * Resolve a show's colour against whichever theme is on.
+ *
+ * `tintVars()` in @cue/design puts *both* fitted variants on the element, and
+ * these three rules choose between them. The split has to happen here rather
+ * than at the call site because half of the call sites are server components,
+ * which cannot know the theme — it is applied by a blocking script after the
+ * HTML is written — and it cannot use `light-dark()`, which resolves against
+ * the operating system's `color-scheme` and would therefore ignore an in-app
+ * choice completely.
+ *
+ * These declare *variables*, not `color` or `background`. Setting the property
+ * directly would put a `[data-tint]` rule (specificity 0,1,0) in a tie with
+ * every Tailwind `text-…` utility (also 0,1,0), leaving the outcome to
+ * stylesheet order — which is not something a component author should have to
+ * reason about. Handing back a resolved variable leaves each element to spend
+ * it however it likes.
+ *
+ * The three selectors are deliberately the same three `tokens.css` uses for
+ * every other token: explicit dark (and onyx, which is a dark) falls through to
+ * the default, explicit light overrides it, and an unset preference follows the
+ * system. Anything else and artwork colour would drift out of step with the
+ * palette around it.
+ *
+ * Known limit: a `[data-tint]` element inside a subtree that has re-declared
+ * the palette — the expanded player, a tinted podcast page — follows the
+ * *document* theme rather than the palette it is sitting in. Nothing does that
+ * today. If something needs to, the fix is to scope a whole scheme with
+ * `tintedScheme()` the way those surfaces already do, rather than to nest
+ * another switch here.
+ */
+[data-tint] {
+  --tint-wash: var(--tint-wash-dark);
+  --tint-text: var(--tint-text-dark);
+}
+
+[data-theme='light'] [data-tint] {
+  --tint-wash: var(--tint-wash-light);
+  --tint-text: var(--tint-text-light);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) [data-tint] {
+    --tint-wash: var(--tint-wash-light);
+    --tint-text: var(--tint-text-light);
+  }
+}
+
 /* ------------------------------------------------------------ typography -- */
 
 .type-display {

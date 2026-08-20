@@ -52,6 +52,19 @@ const CATALOGUE: Array<{
   { title: 'Two Idiots Talking', author: 'Sam Roy', category: 'Comedy', daysAgo: 2 },
   { title: 'Founder Diaries', author: 'Priya Nair', category: 'Business', daysAgo: 3 },
   { title: 'Margin Call', author: 'Dana Okoro', category: 'Business', daysAgo: 4 },
+  /*
+    A third business show, and the oldest thing in the catalogue.
+
+    Needed because a show the listener has played is no longer a candidate at
+    all, so a test that establishes interest in a category by *listening to
+    every show in it* would leave that category with nothing left to rank. Two
+    per category was only ever enough while heard shows stayed in the running.
+
+    Deliberately last by recency, so freshness pulls against it: if it still
+    outranks a comedy show published nine days later, the category signal is
+    what put it there rather than the catalogue score.
+  */
+  { title: 'Balance Sheet', author: 'Ivo Marek', category: 'Business', daysAgo: 10 },
   // Deliberately untagged and unattributed. A feed like this is common in the
   // wild and must not be able to take the endpoint down with it.
   { title: 'An Untagged Show', author: null, category: null, daysAgo: 5 },
@@ -106,7 +119,15 @@ async function follow(title: string): Promise<void> {
   expect(response.statusCode).toBe(200);
 }
 
-async function rail(limit = 10): Promise<Array<{ title: string; categories: string[] }>> {
+async function rail(
+  limit = 10,
+): Promise<
+  Array<{
+    title: string;
+    categories: string[];
+    reason: { kind: string; subject: string | null };
+  }>
+> {
   const response = await app.inject({
     method: 'GET',
     url: `/me/recommendations?limit=${limit}`,
@@ -350,5 +371,125 @@ describe('recommendations', () => {
 
   it('honours the limit', async () => {
     expect(await rail(3)).toHaveLength(3);
+  });
+
+  /**
+   * The regression that only showed up in a running app.
+   *
+   * Finishing two episodes of a show is the strongest possible signal about
+   * its category *and* its host, so the same listening that marks a show as
+   * already-discovered also piles score onto it. With a tuned deduction the
+   * show somebody had just finished came back as their top recommendation,
+   * captioned "More from" its own host — the least useful suggestion the
+   * system is capable of making.
+   *
+   * It is now excluded outright rather than demoted, and at *any* depth. The
+   * demotion version left it reappearing once the unheard shows ran out, on the
+   * reasoning that a short rail is worse than a repetitive one — which is true
+   * of a rail padded with popular shows and false of one padded with the show
+   * you are in the middle of. A recommendation is an introduction; there is no
+   * page depth at which introducing somebody to a show they have played is
+   * useful.
+   */
+  it('does not recommend a show the listener has played, at any depth', async () => {
+    await listen('Daily Motivation', { completed: true });
+    await listen('Daily Motivation', { completed: true, episode: 1 });
+
+    expect(titlesOf(await rail(4))).not.toContain('Daily Motivation');
+    expect(titlesOf(await rail(10))).not.toContain('Daily Motivation');
+  });
+
+  /**
+   * One episode is enough to know a show exists.
+   *
+   * The old rule needed two before it did anything, which meant the single most
+   * likely thing to be recommended to somebody was whatever they had started
+   * that afternoon: one play is enough to load the profile with that show's
+   * category, host and keywords, and nowhere near enough to disqualify it.
+   */
+  it('drops a show after a single play, not two', async () => {
+    await listen('Morning Momentum', { fraction: 0.1, completed: false });
+
+    expect(titlesOf(await rail(10))).not.toContain('Morning Momentum');
+  });
+
+  /**
+   * Excluding is only safe if the rail still fills.
+   *
+   * A filter that empties the shelf is a worse failure than the repetition it
+   * replaced, and the catalogue behind a young account is small.
+   */
+  it('still fills the rail once several shows are excluded', async () => {
+    await listen('Daily Motivation', { completed: true });
+    await listen('Margin Call', { completed: true });
+    await follow('The Long Laugh');
+
+    const titles = titlesOf(await rail(4));
+
+    expect(titles).toHaveLength(4);
+    expect(titles).not.toContain('Daily Motivation');
+    expect(titles).not.toContain('Margin Call');
+    expect(titles).not.toContain('The Long Laugh');
+  });
+
+  /**
+   * The caption under every card.
+   *
+   * A rail of covers with no explanation is indistinguishable from a rail of
+   * random covers, so the reason is part of the contract rather than something
+   * the client reconstructs. These check the two halves that can go wrong: that
+   * a real connection is named, and that an absent one is admitted to.
+   */
+  it('tells a new listener the rail is not personalised', async () => {
+    const items = await rail(4);
+    expect(items.every((item) => item.reason.kind === 'popular')).toBe(true);
+  });
+
+  it('names the category it learned', async () => {
+    await listen('Daily Motivation', { completed: true });
+    await listen('Daily Motivation', { completed: true, episode: 1 });
+
+    // Ana Vale is a stranger to this listener, so the shelf is the only
+    // connection there is and the caption has to be the category. Asserting on
+    // a named show rather than on whatever sorted first matters here: half the
+    // self-improvement shelf shares an author with what was played, and those
+    // are captioned by creator on purpose.
+    const [match] = (await rail(10)).filter((item) => item.title === 'Morning Momentum');
+
+    expect(match).toBeDefined();
+    expect(match!.reason).toEqual({ kind: 'category', subject: 'Self Improvement' });
+  });
+
+  /**
+   * Following one show by a creator is a statement about the creator, and the
+   * caption should say so rather than falling back to their category — which
+   * is the weaker claim of the two here.
+   */
+  it('names the creator when the creator is the connection', async () => {
+    // 'Coach Reed' makes both Daily Motivation and Mindset Mastery, and only
+    // the second is a candidate once the first is followed.
+    await follow('Daily Motivation');
+
+    const [match] = (await rail(10)).filter((item) => item.title === 'Mindset Mastery');
+
+    expect(match).toBeDefined();
+    expect(match!.reason.kind).toBe('creator');
+    expect(match!.reason.subject).toBe('Coach Reed');
+  });
+
+  /**
+   * The failure this guards against is captioned personalisation: a show that
+   * won on catalogue quality alone being labelled "More in Comedy" for someone
+   * who has never played a comedy episode.
+   */
+  it('never invents a connection for a show that has none', async () => {
+    await listen('Daily Motivation', { completed: true });
+    await listen('Daily Motivation', { completed: true, episode: 1 });
+
+    for (const item of await rail(10)) {
+      if (item.reason.kind === 'category') {
+        expect(item.categories).toContain(item.reason.subject);
+      }
+    }
   });
 });

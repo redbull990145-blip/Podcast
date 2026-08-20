@@ -25,6 +25,8 @@ export const en = {
   /* The subscription list in the sidebar rail. Not a destination — it is the
      shows themselves, listed. */
   'nav.yourShows': 'Your shows',
+  'nav.collapseRail': 'Collapse the sidebar',
+  'nav.expandRail': 'Expand the sidebar',
 
   // ---------------------------------------------------------------- theme --
   'theme.toDark': 'Switch to the dark theme',
@@ -35,6 +37,13 @@ export const en = {
   'theme.dark': 'Dark',
   'theme.light': 'Light',
   'theme.toLight': 'Switch to the light theme',
+  'theme.system': 'System',
+  'theme.systemHint': 'Follow this device',
+  'theme.lightHint': 'Warm paper',
+  'theme.ember': 'Ember',
+  'theme.emberHint': 'Warm dark',
+  'theme.onyx': 'Onyx',
+  'theme.onyxHint': 'Neutral black',
 
   // --------------------------------------------------------------- common --
   'common.loading': 'Loading…',
@@ -62,11 +71,19 @@ export const en = {
   'home.morning': 'Good morning, {name}.',
   'home.afternoon': 'Good afternoon, {name}.',
   'home.evening': 'Good evening, {name}.',
+  /* The strip under the greeting. A sentence, not a scoreboard — see
+     `ListeningStats` for why Home gets this and Settings gets the charts. */
+  'home.statsListened': '{duration} listened',
+  'home.statsFinished': '{count, plural, one {# episode finished} other {# episodes finished}}',
+  'home.statsShows': '{count, plural, one {# show} other {# shows}}',
+  'home.statsMostly': 'mostly',
   'search.browse': 'Browse by category',
   'search.categoryCount': '{count, plural, one {# category} other {# categories}}',
   'search.inCatalogue': '{count, plural, one {# show on Cue} other {# shows on Cue}}',
   'search.allCategories': 'All categories',
   'search.alsoRising': 'Also rising',
+  'search.forYou': 'More like what you listen to',
+  'search.forYouNote': 'Shows close to the ones you have been playing.',
   'home.alsoInProgress': 'Also in progress',
   'home.startOver': 'Start over',
   'home.latest': 'Latest episodes',
@@ -76,15 +93,25 @@ export const en = {
   // so would be quietly lying about the ordering.
   'home.latestNote': 'The newest from each show',
   'home.catalogue': 'Everything on Cue',
-  'home.catalogueNote': 'Most recently published first',
   /* The same grid as the catalogue, ordered by what someone actually listens
      to. The note matters more than usual here: a personalised order that does
      not say it is personalised reads as an arbitrary one. */
   'home.recommended': 'Recommended for you',
   'home.recommendedNote': 'Shaped by what you’ve been listening to',
-  'home.moreTitle': 'Looking for something else?',
-  'home.moreBody':
-    'Cue can play any public podcast feed. Search the directory and add whatever you find.',
+  /* The note when there is nothing to personalise from yet. It has to be
+     honest that this is the catalogue's order, not the reader's. */
+  'home.recommendedGeneric': 'What people are listening to on Cue',
+  'home.recommendedLearning':
+    'Play {count} or so episodes and this section starts following your taste — the categories you return to, the people you listen to.',
+  'home.recommendedBrowse': 'Find something to start with.',
+  /* The accent overline on each recommendation card. A rail of covers with no
+     explanation is indistinguishable from a rail of random covers — which was
+     the original complaint — so every card says which signal put it there. */
+  'home.becauseCategory': 'More in {subject}',
+  'home.becauseCreator': 'More from {subject}',
+  'home.becausePopular': 'Popular right now',
+  'home.recentlyPlayed': 'Recently played',
+  'home.finished': 'Finished',
 
   // -------------------------------------------------------------- library --
   'library.title': 'Library',
@@ -128,6 +155,12 @@ export const en = {
   'podcast.empty': 'No episodes yet',
   'podcast.emptyBody': 'The publisher hasn’t put anything in this feed.',
   'podcast.episodes': 'Episodes',
+  'podcast.noEpisodes': 'No episodes have been published yet.',
+  'podcast.pagination': 'Episode pages',
+  'podcast.pageOf': 'Page {page} of {count}',
+  'podcast.previousPage': 'Previous page',
+  'podcast.nextPage': 'Next page',
+  'podcast.goToPage': 'Go to page {page}',
   'podcast.loadingEpisodes': 'Loading episodes…',
   'podcast.follow': 'Follow',
   'podcast.following': 'Following',
@@ -171,6 +204,10 @@ export const en = {
   'player.mute': 'Mute',
   'player.unmute': 'Unmute',
   'player.openQueue': 'Open the queue',
+  'player.dismiss': 'Close the player',
+  'player.speedOpen': 'Playback speed: {rate}×. Choose a speed.',
+  'player.speedPresets': 'Speed presets',
+  'player.speedFine': 'Fine adjustment',
 
   // ---------------------------------------------------------------- queue --
   'queue.title': 'Queue',

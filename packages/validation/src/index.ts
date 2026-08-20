@@ -18,6 +18,7 @@ export {
   feedUrl,
   feedUrlInput,
   languageTag,
+  numberedPageQuery,
   paginationQuery,
   searchQuery,
   uuidParam,

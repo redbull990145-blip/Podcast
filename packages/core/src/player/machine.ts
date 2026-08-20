@@ -194,6 +194,39 @@ export class PlayerMachine {
     this.reportProgress();
   }
 
+  /**
+   * Put the player away.
+   *
+   * The one thing a persistent bar has always been missing: there was no way
+   * to make it go away. Once anything had played, a strip sat across the foot
+   * of every screen for the rest of the session — occupying real estate on a
+   * phone, and covering the last row of every list — with no control on it
+   * that meant "I am done".
+   *
+   * Progress is flushed *before* the episode is dropped, and that ordering is
+   * the whole point: `reportProgress` reads `state.current`, so clearing first
+   * would silently discard the position of the episode being closed. Dismissing
+   * the player is one of the strongest signals that somebody is walking away,
+   * which makes it one of the worst possible moments to lose their place.
+   *
+   * The queue survives. Closing the bar says "not now", not "throw away what I
+   * lined up" — and a dismiss that also emptied the queue would be an
+   * irreversible action behind a small grey cross.
+   */
+  dismiss(): void {
+    this.engine.pause();
+    this.reportProgress();
+
+    this.set({
+      current: null,
+      status: 'idle',
+      positionSec: 0,
+      durationSec: null,
+      error: null,
+      sleepAtMs: null,
+    });
+  }
+
   async toggle(): Promise<void> {
     if (this.state.status === 'playing') {
       this.pause();

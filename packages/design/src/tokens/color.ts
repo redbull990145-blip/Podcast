@@ -227,5 +227,124 @@ export const light: ColorScheme = {
   skeleton: paper[100],
 };
 
-export const colorSchemes = { dark, light } as const;
+/**
+ * Onyx. The other dark theme.
+ *
+ * `dark` leans amber-brown on purpose — it is the warm-paper direction, and
+ * cover art sits better on it than on anything cool. But warmth is a taste, and
+ * on an OLED panel in a dark room a brown ground is visibly *lit* in a way some
+ * people read as a screen that failed to turn all the way off. This is the same
+ * design with the warmth taken out: a neutral ramp, an eighth of a step from
+ * black, everything else identical.
+ *
+ * Deliberately not `#000000`. Pure black is where a dark theme stops being a
+ * surface: elevation disappears, because nothing can sit *below* black, so
+ * every card, sheet and row edge has to be drawn with a border instead of a
+ * value — and on OLED the pixels genuinely switch off, which turns scrolling
+ * into visible smearing. `#0C0C0E` keeps the ground a ground.
+ *
+ * The accent, the status colours and the text roles are shared with `dark`
+ * rather than re-picked. They are already the lightest things in the palette
+ * and this ground is *darker* than the one they were verified against, so
+ * every pair they belong to gets more contrast, not less — and a second set of
+ * near-whites would be two constants that have to be edited together forever.
+ */
+export const onyx: ColorScheme = {
+  bg: '#0C0C0E',
+  surface: '#151517',
+  surfaceRaised: '#1B1B1E',
+  surfaceOverlay: '#1B1B1E',
+  surfaceHover: 'rgba(255, 255, 255, 0.06)',
+  surfacePressed: 'rgba(255, 255, 255, 0.10)',
+
+  border: '#26262A',
+  borderStrong: 'rgba(235, 235, 240, 0.4)',
+
+  textPrimary: '#F2F2F4',
+  textSecondary: '#C2C2C8',
+  textTertiary: '#8A8A93',
+  textOnAccent: '#0C0C0E',
+
+  ink: '#F2F2F4',
+  textOnInk: '#0C0C0E',
+
+  accent: ember[400],
+  accentText: ember[300],
+  accentMuted: 'rgba(240, 114, 74, 0.18)',
+
+  danger: status.dangerDark,
+  success: status.successDark,
+  warning: status.warningDark,
+
+  scrim: 'rgba(0, 0, 0, 0.7)',
+  skeleton: '#1B1B1E',
+};
+
+/**
+ * The stage: the expanded player, and nothing else.
+ *
+ * Not a theme — a *place*. Everything behind this palette is the artwork
+ * itself: the cover blurred past recognition, a wash taken from its dominant
+ * colour, and a black gradient over the lot. That ground is different for every
+ * episode and cannot be predicted, which is exactly why the foreground must not
+ * be derived from anything.
+ *
+ * So it is white. Not `dark`'s `#F1EAD9`, which is a warm cream that picks up
+ * whatever hue is behind it and reads as *tinted by the cover* — the specific
+ * complaint that produced this scheme — and not the theme's own tokens, which
+ * put near-black text on a near-black backdrop for anybody running the light
+ * theme. One fixed set of neutral whites, in both themes, under every cover.
+ *
+ * The accent is white too. Elsewhere the ember accent means *this is what is
+ * playing*; on a screen whose entire subject is the thing that is playing, that
+ * distinction has nothing left to distinguish, and a saturated progress bar in
+ * front of a cover it was sampled from is two colours arguing.
+ *
+ * Opaque values rather than translucent whites. Alpha over a photograph tracks
+ * whatever is underneath it, so a caption sitting over the bright corner of one
+ * cover and the dark corner of another is two different colours — which is the
+ * problem this exists to solve, reintroduced one layer down.
+ */
+export const stage: ColorScheme = {
+  bg: '#0A0A0A',
+  surface: '#141414',
+  surfaceRaised: '#1C1C1C',
+  surfaceOverlay: '#1C1C1C',
+  surfaceHover: 'rgba(255, 255, 255, 0.12)',
+  surfacePressed: 'rgba(255, 255, 255, 0.2)',
+
+  border: 'rgba(255, 255, 255, 0.16)',
+  borderStrong: 'rgba(255, 255, 255, 0.45)',
+
+  textPrimary: '#FFFFFF',
+  textSecondary: '#E2E2E2',
+  textTertiary: '#B4B4B4',
+  textOnAccent: '#0A0A0A',
+
+  ink: '#FFFFFF',
+  textOnInk: '#0A0A0A',
+
+  accent: '#FFFFFF',
+  accentText: '#FFFFFF',
+  accentMuted: 'rgba(255, 255, 255, 0.18)',
+
+  // Lighter than the themes' own status colours: these land on a photograph
+  // rather than on a known surface, and the error line under the transport is
+  // the one piece of text on this screen that must never be missed.
+  danger: '#FF9A9A',
+  success: '#8CE0A6',
+  warning: '#F2C27A',
+
+  scrim: 'rgba(0, 0, 0, 0.66)',
+  skeleton: 'rgba(255, 255, 255, 0.1)',
+};
+
+/**
+ * The schemes a listener can actually choose between.
+ *
+ * `stage` is absent because it is not a choice — it belongs to one screen and
+ * applies under every theme. Everything in here is offered in Settings, and
+ * everything in here is held to AA by `contrast.test.ts`.
+ */
+export const colorSchemes = { dark, onyx, light } as const;
 export type ThemeName = keyof typeof colorSchemes;

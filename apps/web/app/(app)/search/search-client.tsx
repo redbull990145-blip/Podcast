@@ -3,7 +3,8 @@
 import { queryKeys, staleTime } from '@cue/api-client';
 import { deriveCover } from '@cue/design';
 import { useTranslator } from '@/components/i18n/locale-provider';
-import type { Category, PodcastSearchResult } from '@cue/types';
+import type { Category, PodcastSearchResult, RecommendationReason } from '@cue/types';
+import type { Translator } from '@cue/i18n';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Route } from 'next';
 import Link from 'next/link';
@@ -41,7 +42,11 @@ const LANGUAGES = [
 /** How many categories get a tile before the rest become a list. */
 const FEATURED_CATEGORIES = 4;
 /** How many trending shows are ranked, before the rest become covers. */
-const RANKED = 6;
+const RANKED = 8;
+/** How many of the rest get a cover. Three across, two rows. */
+const COVERS = 6;
+/** How many personalised shows lead the resting state. One row of six. */
+const FOR_YOU = 6;
 
 /**
  * How long typing has to stop before a request goes out.
@@ -201,6 +206,21 @@ export function SearchClient({
         <CategoryResults slug={category} />
       ) : (
         <>
+          {/*
+            What this listener would probably like, before what everyone likes.
+
+            The resting state of Search used to open with trending — a global
+            chart, identical for every account, which is the right thing to show
+            somebody the app knows nothing about and the wrong thing to show
+            somebody it does. Recommendations sit above it because the ranking
+            behind them is the only thing on this screen fitted to the person
+            reading it.
+
+            It removes itself when the ranker has nothing to go on, rather than
+            filling with popular shows under a personal heading — see `ForYou`.
+          */}
+          <ForYou />
+
           <CategoryBrowse />
 
           {/* Two lists of the same data, side by side, doing different jobs:
@@ -208,7 +228,20 @@ export function SearchClient({
               for someone recognising a show they have heard of. Splitting one
               request between them costs nothing and beats a single column of
               twenty identical rows. */}
-          <div className="mt-12 grid gap-10 lg:grid-cols-[1fr_1.2fr] lg:gap-14">
+          {/*
+            Two equal columns, not a 1 : 1.2 split favouring the covers.
+
+            The resting state of this page was doing two different things at
+            two different volumes: a quiet column of ranked text beside a wider
+            column of 220px artwork. Podcast covers are the loudest objects in
+            the product — saturated, type-heavy, competing with each other —
+            and giving them the larger half meant the screen someone lands on
+            before they have searched for anything was mostly a wall of other
+            people's branding, with the actual editorial ranking whispering
+            beside it. Equal halves and smaller covers put the two lists at the
+            same weight, which is what makes them read as one screen.
+          */}
+          <div className="mt-12 grid gap-10 lg:grid-cols-2 lg:gap-14">
             <TrendingRanked
               results={trending.data?.results ?? []}
               pending={trending.isPending}
@@ -220,6 +253,104 @@ export function SearchClient({
       )}
     </div>
   );
+}
+
+/**
+ * More like what you have been listening to.
+ *
+ * The complaint this answers: Search offered a global trending chart and a
+ * category grid, and nothing in between — so the way to find a fourth good
+ * technology show was to read a list of the week's most popular podcasts in
+ * general and hope. The ranker that fills Home's rail already answers exactly
+ * this question, from this listener's own categories and hosts; it was just
+ * never reachable from the screen people go to when they want more.
+ *
+ * **Absent until it can be honest.** The endpoint says whether the ordering is
+ * actually personalised, and when it is not — a new account, or one that has
+ * only pressed play once — this renders nothing at all. Filling the space with
+ * popular shows under a heading claiming they match your taste is the specific
+ * thing that makes recommendations feel like advertising: the section would be
+ * *most* confident exactly when it knows least. Trending is directly below and
+ * is the honest version of that offer.
+ *
+ * Six across rather than three. Home's rail is a considered suggestion at
+ * editorial size; this is a shelf to browse, on the screen whose whole job is
+ * browsing, so it trades size for reach.
+ */
+function ForYou() {
+  const t = useTranslator();
+  const { isSignedIn } = useSession();
+
+  const { data } = useQuery({
+    queryKey: queryKeys.library.recommendations(),
+    queryFn: () => api.getRecommendations({ limit: FOR_YOU }),
+    enabled: isSignedIn,
+    staleTime: staleTime.recommendations,
+    // The rest of the page is the fallback. A rail failing to load is not worth
+    // a retry storm against an endpoint that is already having a bad time.
+    retry: false,
+  });
+
+  if (!data?.personalized || data.items.length === 0) return null;
+
+  return (
+    <section aria-labelledby="for-you-heading" className="mb-12">
+      <SectionHeader
+        id="for-you-heading"
+        label={t.t('search.forYou')}
+        note={t.t('search.forYouNote')}
+      />
+
+      <ul className="m-0 grid list-none grid-cols-2 gap-x-4 gap-y-7 p-0 sm:grid-cols-3 lg:grid-cols-6">
+        {data.items.map((podcast) => (
+          <li key={podcast.id}>
+            <Link
+              href={`/podcast/${podcast.id}` as Route}
+              className="group block no-underline"
+            >
+              <div className="transition-transform duration-[var(--duration-fast)] ease-standard group-hover:-translate-y-0.5 motion-reduce:transition-none motion-reduce:group-hover:translate-y-0">
+                <Artwork
+                  src={podcast.artworkUrl}
+                  alt={podcast.title}
+                  size={180}
+                  responsive
+                  sizes="(min-width: 1024px) 16vw, (min-width: 640px) 30vw, 46vw"
+                />
+              </div>
+
+              {/* The reason, in the accent, exactly as Home writes it. Two
+                  surfaces disagreeing about why a show was chosen would make
+                  both of them look arbitrary. */}
+              <p className="type-overline clamp-1 mt-3 mb-1 text-[var(--color-accent-text)]">
+                {reasonLabel(podcast.reason, t)}
+              </p>
+
+              <p className="type-body-strong clamp-2 m-0 text-[var(--color-text-primary)]">
+                {podcast.title}
+              </p>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * The reason a show is in the shelf, as a sentence.
+ *
+ * The server sends the fact — which signal won, and what it was — because it
+ * does not know the reader's language. Assembled here, and identically on Home,
+ * from the same three keys.
+ */
+function reasonLabel(reason: RecommendationReason, t: Translator): string {
+  if (reason.kind === 'category' && reason.subject) {
+    return t.t('home.becauseCategory', { subject: reason.subject });
+  }
+  if (reason.kind === 'creator' && reason.subject) {
+    return t.t('home.becauseCreator', { subject: reason.subject });
+  }
+  return t.t('home.becausePopular');
 }
 
 /**
@@ -566,7 +697,7 @@ function RankedRow({ result, rank }: { result: PodcastSearchResult; rank: number
  */
 function TrendingCovers({ results }: { results: PodcastSearchResult[] }) {
   const t = useTranslator();
-  const covers = results.slice(RANKED, RANKED + 4);
+  const covers = results.slice(RANKED, RANKED + COVERS);
 
   if (covers.length === 0) return null;
 
@@ -579,7 +710,7 @@ function TrendingCovers({ results }: { results: PodcastSearchResult[] }) {
         {t.t('search.alsoRising')}
       </h2>
 
-      <ul className="m-0 grid list-none grid-cols-2 gap-x-4 gap-y-5 p-0">
+      <ul className="m-0 grid list-none grid-cols-3 gap-x-4 gap-y-5 p-0">
         {covers.map((result) => (
           <li key={result.feedUrl}>
             <CoverCard result={result} />
@@ -603,9 +734,9 @@ function CoverCard({ result }: { result: PodcastSearchResult }) {
       <Artwork
         src={result.artworkUrl}
         alt=""
-        size={220}
+        size={160}
         responsive
-        sizes="(min-width: 1024px) 220px, 40vw"
+        sizes="(min-width: 1024px) 160px, 28vw"
       />
       <span className="type-body-strong clamp-1 mt-2.5 block text-[var(--color-text-primary)]">
         {result.title}

@@ -9,6 +9,7 @@ import {
   LatestEpisodes,
   LatestEpisodesSkeleton,
 } from '@/components/home/latest-episodes';
+import { RecentlyPlayed } from '@/components/home/recently-played';
 import { Recommended } from '@/components/home/recommended';
 import { api, ApiClientError } from '@/lib/api';
 import { getTranslator } from '@/lib/i18n';
@@ -28,13 +29,21 @@ import { getTranslator } from '@/lib/i18n';
  * The page answers four questions, in the order people actually ask them:
  *
  *  1. *Where was I?* — Continue listening, for anyone with something running.
- *  2. *What can I play right now?* — the newest episode from each active show.
- *  3. *What should I play next?* — the catalogue, ordered for the reader when
- *     there is enough listening behind them to order it by.
- *  4. *What if none of this is it?* — the directory, via search.
+ *  2. *What should I start?* — three recommendations, each saying why it is
+ *     there.
+ *  3. *What just landed?* — the newest episode from each active show.
+ *  4. *What was that thing I heard?* — recently played.
  *
- * It used to answer only the third, which is the one almost nobody arrives
- * asking.
+ * It used to end with the whole catalogue in a five-column grid, under a
+ * heading, followed by a panel pointing at search. Both are gone. A catalogue
+ * is a *browsing* surface and browsing is what Search is: putting the same grid
+ * on Home meant the page's largest and least considered section was the one
+ * that had already been done better one click away, and it pushed the sections
+ * that are actually about this listener above the fold only on a tall window.
+ *
+ * The order is forward-looking first and backward-looking last, which is also
+ * why the rule above Recently played is the only one on the page: it is where
+ * Home stops offering and starts recording.
  */
 export const revalidate = 300;
 
@@ -45,8 +54,9 @@ export default async function HomePage() {
   let failure: string | null = null;
 
   try {
-    // Matches `RAIL` in `Recommended`, which may replace this list in the same
-    // grid. Two different lengths would shift the page as it personalises.
+    // Feeds two sections now that the catalogue grid is gone: Latest episodes
+    // reads a newest episode per show, and the recommendation fallback takes
+    // the front of it for anyone the ranker cannot speak to yet.
     const page = await api.getPodcasts({ limit: 18 });
     podcasts = page.items;
   } catch (error) {
@@ -63,10 +73,10 @@ export default async function HomePage() {
       <Masthead />
 
       {/*
-        Above the catalogue, and client-rendered while the page around it is
-        static. What is in progress is per-listener and changes by the minute,
-        so it cannot share the page's 5-minute cache — and it must not stop the
-        rest of Home from being served instantly to everyone.
+        Client-rendered while the page around it is static. What is in progress
+        is per-listener and changes by the minute, so it cannot share the page's
+        5-minute cache — and it must not stop the rest of Home from being served
+        instantly to everyone.
       */}
       <ContinueListening />
 
@@ -76,59 +86,39 @@ export default async function HomePage() {
       {hasCatalogue ? (
         <>
           {/*
+            Three shows, chosen and captioned.
+
+            Server-rendered covers go in as the fallback rather than being
+            rendered here: personalisation is per-listener and this page is
+            cached for everybody, so the ordering has to be decided on the
+            client. Passing the list down means the section is full on first
+            paint either way, and a signed-out reader gets the front of the
+            catalogue under an honest label instead of a hole.
+          */}
+          <Recommended fallback={podcasts} />
+
+          {/*
             Streamed. The episodes behind this section come from one request
-            per show, and the catalogue below already has everything it needs —
-            so making the grid wait on them would trade a fast page for a
-            slightly fuller one. The fallback claims the space so nothing
-            further down moves when they land.
+            per show, so making the whole page wait on them would trade a fast
+            first paint for a slightly fuller one. The fallback claims the space
+            so nothing below moves when they land.
           */}
           <Suspense fallback={<LatestEpisodesSkeleton />}>
             <LatestEpisodes podcasts={podcasts} />
           </Suspense>
 
           {/*
-            The catalogue, re-ordered for whoever is reading it.
+            Where the page turns around.
 
-            Server-rendered shows go in as the fallback rather than being
-            rendered here: personalisation is per-listener and this page is
-            cached for everybody, so the ordering has to be decided on the
-            client. Passing the list down means the grid is full on first paint
-            either way — see `Recommended` for why this is one section and not
-            a rail stacked on top of a catalogue.
+            Everything above is forward-looking — finish this, start that,
+            here is what just landed. This is the record, and it is last
+            because looking something up is a thing you arrive intending to do,
+            not something you need offered.
           */}
-          <Recommended fallback={podcasts} />
-
-          <DirectoryPrompt t={t} />
+          <RecentlyPlayed />
         </>
       ) : null}
     </div>
-  );
-}
-
-/**
- * The way out of a page that has run out.
- *
- * The catalogue is only what people have already added, so on a young install
- * it ends after a dozen covers with nothing after it — a scroll that stops
- * dead. This says what the grid cannot: that the thing you are looking for is
- * probably not missing, it is just in the directory rather than here yet.
- */
-function DirectoryPrompt({ t }: { t: Translator }) {
-  return (
-    <aside className="border-t border-[var(--color-border)] pt-8">
-      <h2 className="type-title3 m-0 text-[var(--color-text-primary)]">
-        {t.t('home.moreTitle')}
-      </h2>
-      <p className="type-callout mt-1.5 mb-0 max-w-[52ch] text-[var(--color-text-secondary)]">
-        {t.t('home.moreBody')}
-      </p>
-      <Link
-        href={'/search' as Route}
-        className="mt-4 inline-flex min-h-11 items-center rounded-full border border-[var(--color-border-strong)] px-5 type-body-strong text-[var(--color-text-primary)] no-underline transition-colors hover:bg-[var(--color-surface-hover)]"
-      >
-        {t.t('search.title')}
-      </Link>
-    </aside>
   );
 }
 
