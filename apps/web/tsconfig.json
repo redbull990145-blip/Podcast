@@ -16,5 +16,9 @@
     "paths": { "@/*": ["./*"] }
   },
   "include": ["**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  // `.open-next` and `.wrangler` are build output and local Cloudflare state.
+  // They have to be named here because the `include` above is a bare `**/*.ts`
+  // glob, which would otherwise pull generated sources into the type-check and
+  // report errors in code nobody wrote.
+  "exclude": ["node_modules", ".open-next", ".wrangler"]
 }

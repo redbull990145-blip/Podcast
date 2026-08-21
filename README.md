@@ -107,22 +107,34 @@ See `.env.example` for where each value comes from.
 
 The two halves deploy to two places, because they are two different shapes of
 program: the web app is a build artefact served from a CDN, and the API is a
-long-lived process that holds connections. Vercel hosts the first well and
+long-lived process that holds connections. Cloudflare hosts the first well and
 cannot host the second at all — a Fastify `app.listen()` is not a serverless
 function.
 
 | | Where | Config |
 | --- | --- | --- |
-| `apps/web` | Vercel | Root Directory **`apps/web`** |
+| `apps/web` | Cloudflare Workers | `apps/web/wrangler.jsonc` |
 | `apps/api` | Render | `render.yaml` (Blueprint) |
 
-**Vercel** needs two settings, and the second is not optional: **Root Directory**
-`apps/web`, and **"Include source files outside of the Root Directory"** turned
-**on**. The app imports `@cue/api-client`, `@cue/design`, `@cue/motion` and
-`@cue/types`, and extends a tsconfig from `packages/config` — none of which
-exist inside `apps/web` alone. Leaving Root Directory at the repo root instead
-makes Vercel build `@cue/api`, which is how this repo spent a day failing to
-deploy on a TypeScript error in code that was correct.
+**Cloudflare** deploys from CI, not from a git integration — the `deploy-web`
+job in `.github/workflows/ci.yml`, gated on the test suite so a red build cannot
+ship. Next does not run on the Workers runtime unmodified, so
+`@opennextjs/cloudflare` compiles it into a worker first; `npm run deploy
+--workspace @cue/web` runs both halves.
+
+Two things must exist before the first deploy, because the deploy cannot create
+them itself:
+
+```bash
+npx wrangler r2 bucket create cue-web-cache
+```
+
+…and three values in the repository's GitHub Actions settings: secrets
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, plus the variable
+`NEXT_PUBLIC_API_URL`. The Durable Object backing the revalidation queue needs
+no setup — the `migrations` block in `wrangler.jsonc` creates it on first
+deploy. What each Cloudflare resource is *for* is written down in that file
+rather than here.
 
 **Render** builds from the repo root (`rootDir: .`), so the whole workspace is
 present and nothing special is needed. Fill in the values `render.yaml` declares
@@ -131,11 +143,13 @@ with `sync: false`.
 The two must agree on each other's addresses, and getting this wrong fails
 *silently* — as a CORS error in the browser console, not as a failed deploy:
 
-- `NEXT_PUBLIC_API_URL` (Vercel) → the Render URL. Baked in at build time, so
-  set it **before** the build and redeploy after changing it.
-- `CORS_ORIGINS` (Render) → the Vercel production domain. Preview deployments
-  get a fresh hostname each time and are not on this list, so they cannot reach
-  the API unless you add them.
+- `NEXT_PUBLIC_API_URL` (GitHub Actions variable) → the Render URL. Baked in at
+  build time, so it is set on the build rather than on the worker, and changing
+  it means a redeploy rather than a restart.
+- `CORS_ORIGINS` (Render) → the web app's production domain. The `*.workers.dev`
+  URL a deploy also publishes is a *different* origin and is not on this list,
+  so testing against it fails every API call until you add it — which is
+  exactly what you want to do while migrating, before any DNS is moved.
 - `BETTER_AUTH_URL` (Render) → the API's own public URL.
 
 Because the two are different registrable domains, the session cookie is

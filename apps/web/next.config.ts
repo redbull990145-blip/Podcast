@@ -55,22 +55,63 @@ const config: NextConfig = {
      * list is unbounded by nature. Next still optimises and resizes; it just
      * cannot allowlist hosts it has never heard of.
      *
+     * On Cloudflare the optimiser behind `/_next/image` is not Next's own —
+     * that one does not run under the Workers runtime at all. It is the
+     * `IMAGES` binding declared in wrangler.jsonc, which the adapter
+     * substitutes in. The substitution is behaviour-preserving in the two ways
+     * that matter here: the fetch still happens on the server, and this list is
+     * still enforced against the requested URL.
+     *
+     * Both halves are load-bearing, and the second is a security boundary
+     * rather than a nicety — see the caveat at the end of this comment.
+     *
      * `http` is listed as well as `https`, and it has to be: plenty of feeds
      * still advertise plain-http artwork — the BBC's `ichef.bbci.co.uk` among
      * them — and without this entry `next/image` throws an unconfigured-host
      * error that takes the whole route down. Search was crashing outright on
      * any result whose cover was http.
      *
-     * This does not put insecure content on the page. Next fetches the image
-     * server-side and serves the optimised copy from our own origin over
-     * https, so the browser never makes the plain-http request itself.
+     * This does not put insecure content on the page. The image is fetched
+     * server-side and the optimised copy is served from our own origin over
+     * https, so the browser never makes the plain-http request itself. This is
+     * the guarantee that would be lost by switching to `unoptimized` or to a
+     * client-side loader: the browser would request the plain-http URL
+     * directly, the mixed-content rules would block it, and every show whose
+     * publisher still advertises http artwork would render a broken image.
+     *
+     * The caveat, because `**` is doing something load-bearing and alarming:
+     * this makes `/_next/image` an open image proxy. Anyone can hand it any URL
+     * and get the response back from our domain. That is inherent to serving a
+     * catalogue whose artwork hosts are not knowable in advance — the same was
+     * true on Vercel — but it is worth knowing it is a deliberate trade rather
+     * than an oversight, and worth revisiting if artwork ever moves into R2
+     * under our own control, at which point this list becomes finite.
+     *
+     * It is also why the adapter version floor matters: `remotePatterns` was
+     * not enforced by the Cloudflare adapter's image route before v1.3.0
+     * (GHSA-rvpw-p7vw-wj3m), so on an older adapter this list would be decorative
+     * and the proxy would be unbounded in ways even this comment does not cover.
      */
     remotePatterns: [
       { protocol: 'https', hostname: '**' },
       { protocol: 'http', hostname: '**' },
     ],
-    // Artwork is square and displayed at a handful of fixed sizes.
+    /**
+     * Artwork is square and displayed at a handful of fixed sizes.
+     *
+     * This list is also the cost dial for the `IMAGES` binding: Cloudflare
+     * bills one "unique transformation" per source image *per size and format*,
+     * with 5,000 free each month. Seven entries means one cover browsed at
+     * every size can cost seven of them, so trimming this list is the first
+     * lever to pull if the bill ever becomes real.
+     */
     imageSizes: [48, 64, 96, 128, 192, 256, 384],
+
+    /**
+     * Ignored on Cloudflare — the Images binding does not implement it — and
+     * kept for the Vercel build, which remains the rollback target. Cache
+     * lifetime for optimised images there is Cloudflare's own, not this.
+     */
     minimumCacheTTL: 60 * 60 * 24 * 7,
   },
 

@@ -33,6 +33,7 @@
   --elevation-xl: 0 40px 80px -40px rgba(10, 9, 7, 0.55), 0 12px 24px -12px rgba(10, 9, 7, 0.4);
   --elevation-artwork: 0 20px 40px -20px rgba(10, 9, 7, 0.45);
   --measure-sidebar: 260px;
+  --measure-sidebarCollapsed: 72px;
   --measure-prose: 720px;
   --measure-content: 1440px;
   --measure-wide: 1680px;

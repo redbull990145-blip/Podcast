@@ -10,6 +10,15 @@ build/
 out/
 *.tsbuildinfo
 
+# cloudflare
+#
+# `.open-next/` is the worker the adapter compiles `.next/` into, and
+# `.wrangler/` is local dev state (the simulated R2 bucket and Durable Object
+# storage). Both are derived, both are large, and `.open-next/` in particular
+# embeds whatever NEXT_PUBLIC_* values the build was run with.
+.open-next/
+.wrangler/
+
 # turbo
 .turbo/
 

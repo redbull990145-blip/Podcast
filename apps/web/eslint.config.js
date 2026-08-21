@@ -3,7 +3,18 @@ import base from '@cue/config/eslint/base';
 
 export default [
   ...base,
-  { ignores: ['.next/**', 'next-env.d.ts', 'app/tokens.css'] },
+  // `.open-next/**` is the compiled worker and `.wrangler/**` is local
+  // Cloudflare state; both are generated, and linting either reports thousands
+  // of findings in code nobody can edit.
+  {
+    ignores: [
+      '.next/**',
+      '.open-next/**',
+      '.wrangler/**',
+      'next-env.d.ts',
+      'app/tokens.css',
+    ],
+  },
   {
     // The service worker is plain JS served straight from `public/`, so it is
     // never compiled and never sees the app's globals. It runs in a worker

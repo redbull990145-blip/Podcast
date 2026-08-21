@@ -1,0 +1,109 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cue-web",
+
+  /**
+   * Not a source file. `opennextjs-cloudflare build` runs `next build` and then
+   * transforms its output into these two paths, so neither exists until that
+   * command has run — `wrangler deploy` on a clean checkout will fail until it
+   * does. The `deploy`/`preview` scripts in package.json chain the two for
+   * exactly that reason; do not call wrangler directly.
+   */
+  "main": ".open-next/worker.js",
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS",
+  },
+
+  /**
+   * `nodejs_compat` is not optional: Next's server code touches Node built-ins
+   * (streams, buffers, async_hooks) that the Workers runtime does not expose by
+   * default, and without the flag the worker fails at import time rather than
+   * on a specific route.
+   *
+   * `global_fetch_strictly_public` makes `fetch()` inside the worker behave the
+   * way it does everywhere else — requests to our own hostname go out to the
+   * public internet and come back through the CDN, instead of being short
+   * -circuited internally. Next's own data fetching assumes the public
+   * behaviour, and the adapter documents this flag as required.
+   */
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+
+  /**
+   * The worker needs to be able to call itself: a background ISR revalidation
+   * is a fresh request for the page being revalidated, issued by the queue
+   * below rather than by a browser. Binding the service to its own name is how
+   * that request gets routed without going back out over the public internet.
+   */
+  "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "cue-web" }],
+
+  /**
+   * TEMPORARILY DEFERRED — no R2 bucket bound yet.
+   *
+   * Where rendered pages would live between requests. Cloudflare has no
+   * equivalent of Vercel's built-in data cache, so the incremental cache
+   * needs somewhere explicit to write, and R2 is the adapter's recommended
+   * backend (KV is eventually consistent and explicitly advised against for
+   * this).
+   *
+   * R2 needs a one-time opt-in on the Cloudflare dashboard before the first
+   * bucket can be created, and that opt-in currently prompts for billing
+   * details even though the bucket itself stays inside the free allowance.
+   * Deferred rather than blocking on that.
+   *
+   * This costs nothing running: `export const revalidate = 300` on the home,
+   * podcast and episode pages is already inert today — see the open task on
+   * apps/web/lib/api.ts's fetch defaulting to `no-store`, which makes those
+   * routes fully dynamic regardless of the `revalidate` export. Nothing that
+   * currently works stops working by deploying without this.
+   *
+   * To turn on once R2 is enabled:
+   *   1. npx wrangler r2 bucket create cue-web-cache
+   *   2. Re-add the `r2_buckets` block below:
+   *        "r2_buckets": [
+   *          { "binding": "NEXT_INC_CACHE_R2_BUCKET", "bucket_name": "cue-web-cache" }
+   *        ],
+   *   3. In open-next.config.ts, re-add the `incrementalCache: r2IncrementalCache` line.
+   */
+
+  /**
+   * The revalidation queue that time-based ISR would use once R2 is wired
+   * back in above. Declared now rather than later because it costs nothing to
+   * declare — Durable Objects with the SQLite storage backend are included on
+   * the Workers free plan, no card prompt — and because a Durable Object
+   * migration is additive and awkward to retrofit once other migrations have
+   * been layered on top of `wrangler.jsonc`'s history.
+   *
+   * `new_sqlite_classes` rather than `new_classes` is load-bearing for cost:
+   * the SQLite-backed storage backend is the free-plan one. The key-value
+   * backend requires a paid plan, and switching a class between backends after
+   * the fact is not a migration you can do in place.
+   *
+   * The build prints a warning that these do not work in local development.
+   * That is expected and safe to ignore — they are not used during the build.
+   */
+  "durable_objects": {
+    "bindings": [{ "name": "NEXT_CACHE_DO_QUEUE", "class_name": "DOQueueHandler" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DOQueueHandler"] }],
+
+  /**
+   * Stands in for Next's own image optimiser, which does not run under the
+   * Workers runtime. The adapter routes `/_next/image` through this binding
+   * instead, preserving the two properties `next.config.ts` depends on: the
+   * source image is fetched server-side (so plain-http artwork never reaches
+   * the browser as mixed content) and `images.remotePatterns` is enforced
+   * against the requested URL.
+   *
+   * Billing: the first 5,000 unique transformations each month are free, then
+   * $0.50 per 1,000. A "unique transformation" is one source image at one size
+   * and format, counted once per month — so the cost scales with how much of
+   * the catalogue gets browsed, not with traffic to the same few covers. If
+   * that ceiling starts costing real money, the lever is `imageSizes` below it:
+   * fewer sizes means proportionally fewer unique transformations.
+   */
+  "images": { "binding": "IMAGES" },
+
+  "observability": { "enabled": true },
+}
