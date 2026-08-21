@@ -5,7 +5,7 @@ import type { LibraryPodcast } from '@cue/types';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useSession, useSignOut } from '@/lib/session';
 import { Artwork } from '@/components/media/artwork';
 import { Player } from '@/components/player/player';
@@ -17,7 +17,7 @@ import {
   hydrateQueue,
   NOW_PLAYING_SYNCED,
   setSyncState,
-  usePlayerState,
+  usePlayerSelector,
 } from '@/lib/player/store';
 import { setRailCollapsed, useRailCollapsed } from '@/lib/rail';
 import { NavIcon } from './nav-icon';
@@ -166,9 +166,18 @@ function SidebarNav() {
   const t = useTranslator();
   /* How many episodes are waiting, shown against Queue. It is the one number
      in the app that changes because of something you did on another screen,
-     which is exactly the kind of fact a persistent rail is for. */
-  const queued = usePlayerState().queue.length;
+     which is exactly the kind of fact a persistent rail is for.
+
+     Selected rather than whole-state: the store re-emits several times a second
+     while anything plays, and a count badge has no reason to hear about any of
+     it. */
+  const queued = usePlayerSelector((s) => s.queue.length);
   const collapsed = useRailCollapsed();
+  // One travelling ground per region: the four destinations, and the account
+  // row that is a different kind of control. Exactly one of them can hold the
+  // active route, so exactly one pill is ever visible.
+  const nav = useActivePill<HTMLUListElement>();
+  const footer = useActivePill<HTMLDivElement>();
 
   return (
     <aside
@@ -216,9 +225,10 @@ function SidebarNav() {
       </div>
 
       <nav>
-        <ul className="flex list-none flex-col gap-0.5 p-0">
+        <ul ref={nav.containerRef} className="relative flex list-none flex-col gap-0.5 p-0">
+          <NavPill box={nav.box} />
           {navItems.map((item) => (
-            <li key={item.href}>
+            <li key={item.href} className="relative z-10">
               <RailLink
                 item={item}
                 active={isActive(pathname, item.href)}
@@ -243,11 +253,16 @@ function SidebarNav() {
           different kind of control, and pinning it to the floor without one
           reads as an item that fell off the list. */}
       <div className="mt-auto border-t border-[var(--color-border)] pt-4">
-        <RailLink
-          item={settingsItem}
-          active={isActive(pathname, settingsItem.href)}
-          collapsed={collapsed}
-        />
+        <div ref={footer.containerRef} className="relative">
+          <NavPill box={footer.box} />
+          <div className="relative z-10">
+            <RailLink
+              item={settingsItem}
+              active={isActive(pathname, settingsItem.href)}
+              collapsed={collapsed}
+            />
+          </div>
+        </div>
         <AccountStrip collapsed={collapsed} />
       </div>
     </aside>
@@ -306,6 +321,103 @@ function RailToggle({ collapsed }: { collapsed: boolean }) {
 }
 
 /**
+ * The ground the active destination sits on, as one element that travels.
+ *
+ * A measured transform rather than a layout animation, for two reasons. The
+ * app runs Motion under `LazyMotion domAnimation` deliberately — no layout
+ * projection, roughly 31KB of bundle kept off the wire — so `layoutId` shared
+ * elements are not available without undoing that decision. And they are not
+ * missed: the pill's geometry is two rectangles' difference, measured from the
+ * DOM after render and re-measured whenever the container changes size (the
+ * rail folding, a font finishing loading, the window moving), which is all a
+ * layout id ever did anyway.
+ *
+ * Coordinates come from `getBoundingClientRect` differences rather than
+ * `offsetLeft`, because under Arabic the flex row mirrors and physical
+ * rectangles stay honest where offset arithmetic needs direction argued into it.
+ *
+ * The transition uses the spring pair rule: `--spring-responsive` is a
+ * tabulated `linear()` curve normalised to its own settle time, so it is
+ * emitted together with `--spring-responsive-duration` and the two travel
+ * together or not at all.
+ */
+function useActivePill<T extends HTMLElement>() {
+  const containerRef = useRef<T | null>(null);
+  const [box, setBox] = useState<
+    { x: number; y: number; width: number; height: number } | null
+  >(null);
+
+  const measure = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const target = container.querySelector<HTMLElement>('[data-nav-active="true"]');
+    if (!target) {
+      setBox(null);
+      return;
+    }
+    const c = container.getBoundingClientRect();
+    const t = target.getBoundingClientRect();
+    const next = { x: t.left - c.left, y: t.top - c.top, width: t.width, height: t.height };
+    setBox((prev) =>
+      prev &&
+      prev.x === next.x &&
+      prev.y === next.y &&
+      prev.width === next.width &&
+      prev.height === next.height
+        ? prev
+        : next,
+    );
+  }, []);
+
+  // After every render: a route change flips `data-nav-active` during render,
+  // and this is the first moment the new answer is measurable.
+  useLayoutEffect(measure);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    // The rail folds without a route change, fonts arrive late, badges appear:
+    // anything that moves the active rectangle moves it under this observer.
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [measure]);
+
+  return { containerRef, box };
+}
+
+/** The travelling pill itself. Renders nothing measurable until first read. */
+function NavPill({
+  box,
+  className,
+}: {
+  box: { x: number; y: number; width: number; height: number } | null;
+  /** Overrides the corner treatment — the tab bar's ground is a full pill. */
+  className?: string;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={[
+        'pointer-events-none absolute left-0 top-0 z-0 bg-[var(--color-accent-muted)]',
+        className ?? 'rounded-[var(--radius-md)]',
+      ].join(' ')}
+      style={{
+        transform: box ? `translate3d(${box.x}px, ${box.y}px, 0)` : undefined,
+        width: box?.width,
+        height: box?.height,
+        opacity: box ? 1 : 0,
+        transition: [
+          'transform var(--spring-responsive-duration) var(--spring-responsive)',
+          'width var(--spring-responsive-duration) var(--spring-responsive)',
+          'height var(--spring-responsive-duration) var(--spring-responsive)',
+        ].join(', '),
+      }}
+    />
+  );
+}
+
+/**
  * One destination in the rail.
  *
  * The current page used to be marked in the accent and nothing else, on the
@@ -316,9 +428,10 @@ function RailToggle({ collapsed }: { collapsed: boolean }) {
  * the only difference between "where I am" and "where I could go" was a slight
  * warmth on one word. People could not find themselves in it.
  *
- * So the active row now gets a ground as well as a colour. Two signals rather
- * than one, which is also what makes it survive being looked at quickly, in
- * bright light, or by someone who does not separate those two hues.
+ * So the active row still gets a ground as well as a colour — but the ground
+ * is no longer each row's own background. It is one element (`NavPill`) that
+ * travels between rows, so moving destinations reads as one thing sliding to
+ * where you are rather than five blocks taking turns switching on.
  *
  * The fill is `accent-muted` rather than the neutral hover wash. Both work as a
  * *ground*; only one of them is a colour. In the light theme especially, a
@@ -352,11 +465,12 @@ function RailLink({
       // it would sit a duplicate of the visible label under the cursor on every
       // row of an expanded rail.
       title={collapsed ? label : undefined}
+      data-nav-active={active ? 'true' : undefined}
       className={[
-        'flex items-center rounded-[var(--radius-md)] py-2 no-underline transition-colors',
+        'relative flex items-center rounded-[var(--radius-md)] py-2 no-underline transition-colors',
         collapsed ? 'justify-center px-0' : 'gap-3 px-3',
         active
-          ? 'bg-[var(--color-accent-muted)] text-[var(--color-accent-text)]'
+          ? 'text-[var(--color-accent-text)]'
           : 'text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]',
       ].join(' ')}
     >
@@ -607,6 +721,11 @@ function initialOf(name: string): string {
 function TabBar() {
   const pathname = usePathname();
   const t = useTranslator();
+  // Same travelling ground the rail has, measured on the icon pill rather than
+  // the whole cell — a filled 64px block would make the bar the loudest thing
+  // on screen, and a pill that hops between five cells reads as a highlight,
+  // not as five buttons taking turns.
+  const tab = useActivePill<HTMLUListElement>();
 
   return (
     <nav
@@ -614,7 +733,8 @@ function TabBar() {
       data-chrome-tint=""
       aria-label={t.t('nav.main')}
     >
-      <ul className="m-0 flex list-none justify-around p-0">
+      <ul ref={tab.containerRef} className="relative m-0 flex list-none justify-around p-0">
+        <NavPill box={tab.box} className="rounded-full" />
         {/* Settings is appended rather than being part of `navItems`: it is
             not somewhere you go to find something to listen to, but it is the
             only route to account control while the sidebar is hidden. */}
@@ -622,7 +742,7 @@ function TabBar() {
           const active = isActive(pathname, item.href);
 
           return (
-            <li key={item.href} className="flex-1">
+            <li key={item.href} className="relative z-10 flex-1">
               <Link
                 href={item.href as never}
                 aria-current={active ? 'page' : undefined}
@@ -637,19 +757,13 @@ function TabBar() {
                 ].join(' ')}
               >
                 {/*
-                  The ground goes behind the icon, not behind the whole cell.
-
-                  A filled 64px block in a five-across bar is a button, and five
-                  of them make the tab bar the loudest object on the screen. A
-                  pill around the glyph is the same two signals the rail uses —
-                  colour *and* a ground — at a size that marks a position
-                  instead of demanding one.
+                  The ground goes behind the icon, not behind the whole cell —
+                  and it is drawn by the travelling pill above, so the span
+                  only carries the geometry the pill measures.
                 */}
                 <span
-                  className={[
-                    'flex h-7 w-12 items-center justify-center rounded-full transition-colors',
-                    active ? 'bg-[var(--color-accent-muted)]' : 'bg-transparent',
-                  ].join(' ')}
+                  data-nav-active={active ? 'true' : undefined}
+                  className="flex h-7 w-12 items-center justify-center rounded-full"
                 >
                   <NavIcon path={item.icon} filled={active} />
                 </span>

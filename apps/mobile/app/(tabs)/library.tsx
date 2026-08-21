@@ -13,6 +13,7 @@ import { Artwork } from '@/components/artwork';
 import { Button } from '@/components/button';
 import { Icon } from '@/components/icon';
 import { OfflineNotice } from '@/components/offline-notice';
+import { PressableScale } from '@/components/pressable-scale';
 import { ScreenMessage } from '@/components/screen-message';
 import { api } from '@/lib/api';
 import { useOnline } from '@/lib/connectivity';
@@ -75,44 +76,47 @@ export default function LibraryScreen() {
         {/* Playlists live beside the library for the same reason downloads do:
             they are your things rather than a fourth place to look for
             something to listen to. */}
-        <Pressable
+        <PressableScale
           onPress={() => router.push('/playlists')}
           accessibilityRole="button"
           accessibilityLabel={t.t('playlists.title')}
           hitSlop={space[3]}
+          scale={0.9}
           style={styles.settings}
         >
           <Icon path={icon.queue} size={22} color={theme.textSecondary} />
-        </Pressable>
+        </PressableScale>
 
         {/* Downloads belongs beside the library rather than in the tab bar:
             it is the same idea — your things — and a fourth tab that is empty
             until someone saves an episode is chrome advertising a feature they
             have not reached. It appears only once there is something in it. */}
         {savedCount > 0 ? (
-          <Pressable
+          <PressableScale
             onPress={() => router.push('/downloads')}
             accessibilityRole="button"
             accessibilityLabel={t.t('downloads.title')}
             hitSlop={space[3]}
+            scale={0.9}
             style={styles.settings}
           >
             <Icon path={icon.downloaded} size={22} color={theme.textSecondary} />
-          </Pressable>
+          </PressableScale>
         ) : null}
 
         {/* Settings lives here rather than in the tab bar: it is not a place you
             go to find something to listen to, and Library is the screen whose
             contents depend on being signed in. */}
-        <Pressable
+        <PressableScale
           onPress={() => router.push('/settings')}
           accessibilityRole="button"
           accessibilityLabel={t.t('nav.settings')}
           hitSlop={space[3]}
+          scale={0.9}
           style={styles.settings}
         >
           <Icon path={icon.settings} size={22} color={theme.textSecondary} />
-        </Pressable>
+        </PressableScale>
       </View>
     </View>
   );

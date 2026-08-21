@@ -12,6 +12,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Artwork } from '@/components/artwork';
 import { Icon } from '@/components/icon';
+import { PressableScale } from '@/components/pressable-scale';
 import { ScreenMessage } from '@/components/screen-message';
 import { Scrubber } from '@/components/scrubber';
 import { playerActions, usePlayerState } from '@/lib/player/store';
@@ -60,15 +61,16 @@ export default function PlayerScreen() {
       ]}
     >
       <View style={styles.topBar}>
-        <Pressable
+        <PressableScale
           onPress={() => router.back()}
           accessibilityRole="button"
           accessibilityLabel="Close the player"
           hitSlop={space[3]}
+          scale={0.9}
           style={styles.dismiss}
         >
           <Icon path={icon.chevronDown} size={26} color={theme.textSecondary} />
-        </Pressable>
+        </PressableScale>
 
         {/* What is playing, and from where.
 
@@ -258,15 +260,16 @@ function TransportButton({
   const theme = useTheme();
 
   return (
-    <Pressable
+    <PressableScale
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
       hitSlop={space[2]}
+      scale={0.9}
       style={styles.transportButton}
     >
       <Icon path={path} size={28} color={theme.textPrimary} />
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -282,14 +285,20 @@ function Chip({
   const theme = useTheme();
 
   return (
+    // A wash rather than a squash: these are text surfaces, and the selection
+    // state already lives in their fill — the press only has to acknowledge.
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected }}
-      style={[
+      style={({ pressed }) => [
         styles.chip,
         {
-          backgroundColor: selected ? theme.accentMuted : 'transparent',
+          backgroundColor: selected
+            ? theme.accentMuted
+            : pressed
+              ? theme.surfaceHover
+              : 'transparent',
           borderColor: selected ? theme.accent : theme.border,
         },
       ]}

@@ -9,7 +9,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import type { Route } from 'next';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { Artwork } from '@/components/media/artwork';
 import { PodcastTile } from '@/components/podcast/podcast-tile';
 import { SectionHeader } from '@/components/ui/section-header';
@@ -47,6 +47,15 @@ const RANKED = 8;
 const COVERS = 6;
 /** How many personalised shows lead the resting state. One row of six. */
 const FOR_YOU = 6;
+
+/**
+ * The one empty list.
+ *
+ * `?? []` mints a fresh array every render, and memo compares props by
+ * identity — new emptiness each time defeats the point. The trending sections
+ * hold this one until the query has real results to pass instead.
+ */
+const NO_RESULTS: PodcastSearchResult[] = [];
 
 /**
  * How long typing has to stop before a request goes out.
@@ -258,11 +267,11 @@ export function SearchClient({
           */}
           <div className="mt-12 grid gap-10 lg:grid-cols-2 lg:gap-14">
             <TrendingRanked
-              results={trending.data?.results ?? []}
+              results={trending.data?.results ?? NO_RESULTS}
               pending={trending.isPending}
               error={trending.error}
             />
-            <TrendingCovers results={trending.data?.results ?? []} />
+            <TrendingCovers results={trending.data?.results ?? NO_RESULTS} />
           </div>
         </>
       )}
@@ -292,7 +301,9 @@ export function SearchClient({
  * editorial size; this is a shelf to browse, on the screen whose whole job is
  * browsing, so it trades size for reach.
  */
-function ForYou() {
+// Memoized: it takes no props and answers through its own query, so nothing
+// typed in the field above is any of its business.
+const ForYou = memo(function ForYou() {
   const t = useTranslator();
   const { isSignedIn } = useSession();
 
@@ -349,7 +360,7 @@ function ForYou() {
       </ul>
     </section>
   );
-}
+});
 
 /**
  * The reason a show is in the shelf, as a sentence.
@@ -462,7 +473,9 @@ function SearchField({
  * The tiles are ordered by how many shows are in them, so the shape of the
  * screen follows the shape of the catalogue rather than an alphabet.
  */
-function CategoryBrowse() {
+// Memoized, like ForYou: no props, one cached query, and typing is not one of
+// the things that changes what a category grid shows.
+const CategoryBrowse = memo(function CategoryBrowse() {
   const t = useTranslator();
 
   const { data, isPending } = useQuery({
@@ -517,7 +530,7 @@ function CategoryBrowse() {
       ) : null}
     </section>
   );
-}
+});
 
 /**
  * One category, as a coloured tile.
@@ -639,7 +652,9 @@ function CategoryResults({ slug }: { slug: string }) {
  * The number is the content. A trending list without positions is just a list,
  * and the whole reason anyone reads one is to see what is above what.
  */
-function TrendingRanked({
+// Memoized: its props are the cache's own array plus two primitives, so only
+// an actual answer re-renders the ranking — not a keystroke in the field.
+const TrendingRanked = memo(function TrendingRanked({
   results,
   pending,
   error,
@@ -673,9 +688,22 @@ function TrendingRanked({
       </ul>
     </section>
   );
-}
+});
 
-function RankedRow({ result, rank }: { result: PodcastSearchResult; rank: number }) {
+/**
+ * One ranked row.
+ *
+ * Memoized because typing re-renders this page far more often than the
+ * trending query answers, and a row whose result has not changed has no
+ * reason to take part in any of that.
+ */
+const RankedRow = memo(function RankedRow({
+  result,
+  rank,
+}: {
+  result: PodcastSearchResult;
+  rank: number;
+}) {
   const open = useOpenResult(result);
 
   return (
@@ -683,7 +711,7 @@ function RankedRow({ result, rank }: { result: PodcastSearchResult; rank: number
       type="button"
       onClick={() => open.mutate()}
       disabled={open.isPending}
-      className="flex w-full cursor-pointer items-baseline gap-4 border-0 border-b border-[var(--color-border)] bg-transparent px-0 py-3.5 text-start transition-opacity disabled:cursor-wait disabled:opacity-60"
+      className="flex w-full cursor-pointer items-baseline gap-4 rounded-[var(--radius-md)] border-0 border-b border-[var(--color-border)] bg-transparent px-0 py-3.5 text-start transition-transform duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] active:scale-[0.98] motion-reduce:active:scale-100 disabled:cursor-wait disabled:opacity-60"
     >
       {/* Padded to two digits so the titles line up in a column rather than
           stepping right when the list reaches ten. */}
@@ -701,7 +729,7 @@ function RankedRow({ result, rank }: { result: PodcastSearchResult; rank: number
       </span>
     </button>
   );
-}
+});
 
 /**
  * The same list, as covers.
@@ -710,7 +738,13 @@ function RankedRow({ result, rank }: { result: PodcastSearchResult; rank: number
  * recognise — which, for a directory nobody has curated for them, is most
  * people. It starts where the ranked list stops, so nothing is shown twice.
  */
-function TrendingCovers({ results }: { results: PodcastSearchResult[] }) {
+// Memoized for the same reason as the ranked list beside it: typing in the
+// field is not one of the things that moves a cover.
+const TrendingCovers = memo(function TrendingCovers({
+  results,
+}: {
+  results: PodcastSearchResult[];
+}) {
   const t = useTranslator();
   const covers = results.slice(RANKED, RANKED + COVERS);
 
@@ -734,9 +768,19 @@ function TrendingCovers({ results }: { results: PodcastSearchResult[] }) {
       </ul>
     </section>
   );
-}
+});
 
-function CoverCard({ result }: { result: PodcastSearchResult }) {
+/**
+ * One cover.
+ *
+ * Memoized for the same reason as RankedRow: the field redraws the page per
+ * keystroke; a cover only moves when the trending query answers.
+ */
+const CoverCard = memo(function CoverCard({
+  result,
+}: {
+  result: PodcastSearchResult;
+}) {
   const open = useOpenResult(result);
 
   return (
@@ -744,7 +788,7 @@ function CoverCard({ result }: { result: PodcastSearchResult }) {
       type="button"
       onClick={() => open.mutate()}
       disabled={open.isPending}
-      className="w-full cursor-pointer border-0 bg-transparent p-0 text-start transition-opacity disabled:cursor-wait disabled:opacity-60"
+      className="w-full cursor-pointer rounded-[var(--radius-md)] border-0 bg-transparent p-0 text-start transition-transform duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] active:scale-[0.97] motion-reduce:active:scale-100 disabled:cursor-wait disabled:opacity-60"
     >
       <Artwork
         src={result.artworkUrl}
@@ -763,7 +807,7 @@ function CoverCard({ result }: { result: PodcastSearchResult }) {
       ) : null}
     </button>
   );
-}
+});
 
 /**
  * Read a directory feed and go to the show it turns into.
@@ -803,8 +847,15 @@ async function ingestFeed(
  * were the same gesture: you could not open one to see what it was without
  * putting it in your library. Now the row opens it and the button on the end
  * follows it.
+ *
+ * Memoized: every keystroke before the debounce settles re-renders this page,
+ * and a hit already on screen does not change between them.
  */
-function ResultRow({ result }: { result: PodcastSearchResult }) {
+const ResultRow = memo(function ResultRow({
+  result,
+}: {
+  result: PodcastSearchResult;
+}) {
   const t = useTranslator();
   const queryClient = useQueryClient();
   const { isSignedIn } = useSession();
@@ -844,7 +895,7 @@ function ResultRow({ result }: { result: PodcastSearchResult }) {
           onClick={() => open.mutate()}
           disabled={busy}
           aria-busy={open.isPending || undefined}
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-4 border-0 bg-transparent py-4 text-start transition-opacity disabled:cursor-wait disabled:opacity-60"
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-4 rounded-[var(--radius-md)] border-0 bg-transparent py-4 text-start transition-transform duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] active:scale-[0.98] motion-reduce:active:scale-100 disabled:cursor-wait disabled:opacity-60"
         >
           <Artwork src={result.artworkUrl} alt={result.title} size={56} />
 
@@ -867,7 +918,7 @@ function ResultRow({ result }: { result: PodcastSearchResult }) {
             type="button"
             onClick={() => follow.mutate()}
             disabled={busy || follow.isSuccess}
-            className="shrink-0 cursor-pointer rounded-full border border-[var(--color-border-strong)] bg-transparent px-4 py-2 type-caption text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:cursor-default disabled:opacity-60"
+            className="shrink-0 cursor-pointer rounded-full border border-[var(--color-border-strong)] bg-transparent px-4 py-2 type-caption text-[var(--color-text-primary)] transition-transform duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] active:scale-[0.97] motion-reduce:active:scale-100 disabled:cursor-default disabled:opacity-60"
           >
             {follow.isSuccess
               ? t.t('search.added')
@@ -878,7 +929,7 @@ function ResultRow({ result }: { result: PodcastSearchResult }) {
         ) : (
           <Link
             href={'/signin' as Route}
-            className="shrink-0 rounded-full border border-[var(--color-border-strong)] px-4 py-2 type-caption text-[var(--color-text-primary)] no-underline transition-colors hover:bg-[var(--color-surface-hover)]"
+            className="shrink-0 rounded-full border border-[var(--color-border-strong)] px-4 py-2 type-caption text-[var(--color-text-primary)] no-underline transition-transform duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] active:scale-[0.97] motion-reduce:active:scale-100"
           >
             {t.t('search.add')}
           </Link>
@@ -892,7 +943,7 @@ function ResultRow({ result }: { result: PodcastSearchResult }) {
       ) : null}
     </div>
   );
-}
+});
 
 /**
  * A state that is neither a result nor a fault.

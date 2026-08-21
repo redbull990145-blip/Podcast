@@ -70,9 +70,9 @@ export function LanguagePicker() {
             lang={locale}
             dir={locale === 'ar' ? 'rtl' : 'ltr'}
             onClick={() => choose(locale)}
-            className="type-callout min-h-11 cursor-pointer rounded-[var(--radius-md)] border px-4 transition-colors"
+            className="type-callout min-h-11 cursor-pointer rounded-[var(--radius-md)] border px-4 transition-[transform,background-color,border-color,color] duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] active:scale-[0.97] motion-reduce:active:scale-100"
             style={{
-              backgroundColor: active ? 'var(--color-accent-muted)' : 'transparent',
+              backgroundColor: active ? 'var(--color-accent-muted)' : undefined,
               borderColor: active ? 'var(--color-accent)' : 'var(--color-border)',
               color: active ? 'var(--color-accent-text)' : 'var(--color-text-secondary)',
             }}

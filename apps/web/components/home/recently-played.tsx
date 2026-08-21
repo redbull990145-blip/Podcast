@@ -113,9 +113,12 @@ function HistoryRow({ entry }: { entry: HistoryEntry }) {
 
   return (
     <div className="flex items-center gap-3.5 border-b border-[var(--color-border)] py-3">
+      {/* A flex container's underline never reaches its items, so the
+          hover affordance lives on the title itself rather than on the
+          link that wraps the row. */}
       <Link
         href={`/episode/${entry.episode.id}` as Route}
-        className="flex min-w-0 flex-1 items-center gap-3.5 no-underline"
+        className="group flex min-w-0 flex-1 items-center gap-3.5 no-underline"
       >
         <Artwork
           src={entry.episode.artworkUrl ?? entry.podcastArtworkUrl}
@@ -127,7 +130,7 @@ function HistoryRow({ entry }: { entry: HistoryEntry }) {
         />
 
         <span className="min-w-0 flex-1">
-          <span className="type-body-strong clamp-1 block text-[var(--color-text-primary)]">
+          <span className="type-body-strong clamp-1 block text-[var(--color-text-primary)] underline decoration-transparent underline-offset-4 transition-colors group-hover:decoration-current">
             {entry.episode.title}
           </span>
           <span className="type-caption clamp-1 mt-0.5 block text-[var(--color-text-tertiary)]">
@@ -143,7 +146,7 @@ function HistoryRow({ entry }: { entry: HistoryEntry }) {
         type="button"
         onClick={() => void play(playableFromQueueEntry(entry))}
         aria-label={t.t('home.resume', { title: entry.episode.title })}
-        className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full border border-[var(--color-border-strong)] bg-transparent text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)]"
+        className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full border border-[var(--color-border-strong)] bg-transparent text-[var(--color-text-primary)] transition-[transform,background-color] duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] active:scale-[0.97] motion-reduce:active:scale-100"
       >
         <svg width="9" height="10" viewBox="0 0 10 12" fill="currentColor" aria-hidden="true">
           <path d="M0 0 10 6 0 12Z" />

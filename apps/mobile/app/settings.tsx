@@ -14,6 +14,7 @@ import { ApiKeyField } from '@/components/api-key-field';
 import { Button } from '@/components/button';
 import { LanguagePicker } from '@/components/language-picker';
 import { Icon } from '@/components/icon';
+import { PressableScale } from '@/components/pressable-scale';
 import { readPreferences, updatePreferences } from '@/lib/player/store';
 import { useTranslator } from '@/lib/i18n';
 import { useSession, useSignOut } from '@/lib/session';
@@ -50,15 +51,16 @@ export default function SettingsScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable
+        <PressableScale
           onPress={() => router.back()}
           accessibilityRole="button"
           accessibilityLabel={t.t('nav.settings')}
           hitSlop={space[3]}
+          scale={0.9}
           style={styles.dismiss}
         >
           <Icon path={icon.chevronDown} size={26} color={theme.textSecondary} />
-        </Pressable>
+        </PressableScale>
 
         <Text style={[type('title2'), { color: theme.textPrimary }]}>{t.t('settings.title')}</Text>
       </View>

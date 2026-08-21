@@ -9,7 +9,7 @@ import type { Route } from 'next';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { CoverStack } from '@/components/playlist/cover-stack';
 import { Button } from '@/components/ui/button';
@@ -74,6 +74,21 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.playlists.all });
     },
   });
+
+  // Stable identities for the drag list below — see the call site. `mutate`
+  // is the stable half of a mutation object; the result object itself is not.
+  const handleReorder = useCallback(
+    (next: PlaylistEntry[]) => {
+      setOrder(next);
+      reorder.mutate(next.map((item) => item.episode.id));
+    },
+    [reorder.mutate],
+  );
+
+  const handleRemove = useCallback(
+    (episodeId: string) => remove.mutate(episodeId),
+    [remove.mutate],
+  );
 
   const destroy = useMutation({
     mutationFn: () => api.deletePlaylist(playlistId),
@@ -159,11 +174,11 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
       ) : (
         <PlaylistList
           order={order}
-          onReorder={(next) => {
-            setOrder(next);
-            reorder.mutate(next.map((item) => item.episode.id));
-          }}
-          onRemove={(episodeId) => remove.mutate(episodeId)}
+          // Stable identities: the list memoises its rows, and a fresh closure
+          // per render would silently un-memoise every one of them on every
+          // keystroke elsewhere in the component.
+          onReorder={handleReorder}
+          onRemove={handleRemove}
         />
       )}
     </div>

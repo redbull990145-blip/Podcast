@@ -5,7 +5,7 @@ import type { Episode } from '@cue/types';
 import * as m from 'motion/react-m';
 import { useRouter } from 'next/navigation';
 import { usePressScale, useTransition } from '@/lib/motion';
-import { usePlayerActions, usePlayerState } from '@/lib/player/store';
+import { usePlayerActions, usePlayerSelector } from '@/lib/player/store';
 import { useSession } from '@/lib/session';
 
 /**
@@ -43,17 +43,28 @@ export function PlayButton({
    */
   requiresAccount?: boolean;
 }) {
-  const state = usePlayerState();
   const actions = usePlayerActions();
   const router = useRouter();
   const { isSignedIn } = useSession();
   const press = usePressScale(0.9);
   const transition = useTransition('snappy');
 
+  /**
+   * Slices rather than the whole snapshot.
+   *
+   * The player emits on every position tick — several times a second while
+   * anything plays — and `usePlayerState` would hand each of those to every
+   * row on screen. All this button wants to know is "is it me, and is it
+   * playing", so it subscribes to those two booleans directly: a selector that
+   * answers in a primitive only wakes the row whose answer actually changed,
+   * and the rest of the list stays quiet while one episode plays.
+   */
+  const isCurrent = usePlayerSelector((s) => s.current?.id === episode.id);
+  const playing = usePlayerSelector((s) => s.status === 'playing');
+
   const locked = requiresAccount && !isSignedIn;
 
-  const isCurrent = state.current?.id === episode.id;
-  const isPlaying = isCurrent && state.status === 'playing';
+  const isPlaying = isCurrent && playing;
 
   const playable = playableFromEpisode(episode, {
     title: podcastTitle,

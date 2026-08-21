@@ -1,5 +1,5 @@
 import { formatTimestamp } from '@cue/core';
-import { spring, springRest } from '@cue/motion';
+import { duration, easing, spring, springRest } from '@cue/motion';
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -7,6 +7,7 @@ import Animated, {
   Easing,
   runOnJS,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withSpring,
   withTiming,
@@ -48,6 +49,7 @@ export function Scrubber({
   onSeek: (seconds: number) => void;
 }) {
   const theme = useTheme();
+  const reduced = useReducedMotion();
   const [width, setWidth] = useState(0);
 
   /** 0–1 along the track. */
@@ -107,6 +109,24 @@ export function Scrubber({
 
   const seekable = (durationSec ?? 0) > 0;
 
+  /**
+   * The knob's grow-on-touch, gated for reduced motion: a quick tween instead
+   * of a spring, so the answer ("you have the handle") arrives without the
+   * bounce. Only the knob — the 500ms position tween above is a clock, and a
+   * clock is motion-safe by nature.
+   */
+  const growKnob = (to: 0 | 1) => {
+    'worklet';
+    if (!reduced) {
+      knobScale.value = withSpring(to, { ...spring.snappy, ...springRest });
+      return;
+    }
+    knobScale.value = withTiming(to, {
+      duration: duration.fast,
+      easing: Easing.bezier(...easing.enter),
+    });
+  };
+
   const pan = Gesture.Pan()
     .enabled(seekable)
     // Claims the gesture immediately: a scrubber inside a scroll view that
@@ -117,7 +137,7 @@ export function Scrubber({
       if (width <= 0) return;
       dragging.value = true;
       pushedSec.value = -1;
-      knobScale.value = withSpring(1, { ...spring.snappy, ...springRest });
+      growKnob(1);
       fraction.value = Math.min(1, Math.max(0, event.x / width));
       publishScrub(fraction.value);
     })
@@ -127,7 +147,7 @@ export function Scrubber({
       publishScrub(fraction.value);
     })
     .onFinalize(() => {
-      knobScale.value = withSpring(0, { ...spring.snappy, ...springRest });
+      growKnob(0);
       if (total.value > 0) runOnJS(onSeek)(fraction.value * total.value);
       dragging.value = false;
       // Cleared last: until the seek lands, `positionSec` still holds the old

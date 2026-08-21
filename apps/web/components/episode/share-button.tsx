@@ -1,12 +1,13 @@
 'use client';
 
+import { duration } from '@cue/motion';
 import { episodeShareUrl, formatTimestamp, shouldShareTime } from '@cue/core';
 import { AnimatePresence } from 'motion/react';
 import * as m from 'motion/react-m';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslator } from '@/components/i18n/locale-provider';
-import { useTransition } from '@/lib/motion';
-import { usePlayerState } from '@/lib/player/store';
+import { usePressScale, useTransition } from '@/lib/motion';
+import { usePlayerSelector } from '@/lib/player/store';
 
 /**
  * Share this episode, from where you are in it.
@@ -21,14 +22,32 @@ import { usePlayerState } from '@/lib/player/store';
  */
 export function ShareButton({ episodeId }: { episodeId: string }) {
   const t = useTranslator();
-  const state = usePlayerState();
-  const press = useTransition('responsive');
+  const press = usePressScale(0.97);
+  const pressTransition = useTransition('responsive');
+  // The toast's travel is a snappy spring; its fade is always the fast tween.
+  const snapTransition = useTransition('snappy');
 
   const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const isCurrent = state.current?.id === episodeId;
-  const position = isCurrent ? Math.floor(state.positionSec) : null;
-  const withTime = position !== null && shouldShareTime(position, state.durationSec);
+  // Selected primitives. The timestamp label is genuinely live — it moves once
+  // a second while this episode plays — but the whole snapshot re-emits four
+  // times a second, and only the whole-second boundary ever changes a pixel.
+  const isCurrent = usePlayerSelector((s) => s.current?.id === episodeId);
+  const wholeSec = usePlayerSelector((s) => Math.floor(s.positionSec));
+  const durationSec = usePlayerSelector((s) => s.durationSec);
+  const currentTitle = usePlayerSelector((s) => s.current?.title ?? null);
+
+  // An orphaned timer from an earlier copy would kill the next toast two
+  // seconds into its life; clearing on the way out keeps unmount honest too.
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  const position = isCurrent ? wholeSec : null;
+  const withTime = position !== null && shouldShareTime(position, durationSec);
 
   const share = async () => {
     // The origin is read at click time rather than at build time: this app is
@@ -38,7 +57,7 @@ export function ShareButton({ episodeId }: { episodeId: string }) {
       origin: window.location.origin,
       episodeId,
       positionSec: position,
-      durationSec: state.durationSec,
+      durationSec,
     });
 
     /**
@@ -51,7 +70,7 @@ export function ShareButton({ episodeId }: { episodeId: string }) {
      */
     if (typeof navigator.share === 'function') {
       try {
-        await navigator.share({ url, title: state.current?.title ?? undefined });
+        await navigator.share({ url, title: currentTitle ?? undefined });
         return;
       } catch {
         return;
@@ -61,7 +80,8 @@ export function ShareButton({ episodeId }: { episodeId: string }) {
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
       // Clipboard access can be refused outright — an insecure origin, a
       // permissions policy. Prompting with the URL is the honest fallback.
@@ -74,8 +94,8 @@ export function ShareButton({ episodeId }: { episodeId: string }) {
       <m.button
         type="button"
         onClick={() => void share()}
-        whileTap={{ scale: 0.97 }}
-        transition={press}
+        whileTap={{ scale: press }}
+        transition={pressTransition}
         className="type-body flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-border-strong)] bg-transparent px-5 text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)]"
       >
         <svg
@@ -105,7 +125,10 @@ export function ShareButton({ episodeId }: { episodeId: string }) {
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
-            transition={press}
+            // Springs move things; tweens fade things. A status fade riding a
+            // spring overshoots past 1, gets clamped by the compositor, and
+            // lingers at the exit instead of finishing.
+            transition={{ ...snapTransition, opacity: { duration: duration.fast / 1000 } }}
             role="status"
             className="type-caption absolute top-[calc(100%+6px)] start-0 whitespace-nowrap rounded-[var(--radius-sm)] bg-[var(--color-surface-overlay)] px-2 py-1 text-[var(--color-text-secondary)]"
           >

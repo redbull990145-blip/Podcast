@@ -166,7 +166,7 @@ export default function SignInScreen() {
         <Pressable
           onPress={() => setMode(mode === 'signin' ? 'signup' : 'signin')}
           accessibilityRole="button"
-          style={styles.switch}
+          style={({ pressed }) => [styles.switch, { opacity: pressed ? 0.7 : 1 }]}
         >
           <Text style={[type('callout'), { color: theme.accentText }]}>
             {mode === 'signin'

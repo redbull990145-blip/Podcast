@@ -9,7 +9,7 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { Icon } from '@/components/icon';
-import { playerActions, usePlayerState } from '@/lib/player/store';
+import { playerActions, usePlayerSelector } from '@/lib/player/store';
 import { radius, useTheme } from '@/theme';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -24,11 +24,13 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 export function PlayButton({ episode, size = 40 }: { episode: PlayableEpisode; size?: number }) {
   const theme = useTheme();
   const reduced = useReducedMotion();
-  const state = usePlayerState();
   const pressed = useSharedValue(0);
 
-  const isCurrent = state.current?.id === episode.id;
-  const isPlaying = isCurrent && state.status === 'playing';
+  // Two primitives rather than the whole state: the engine reports twice a
+  // second, and this button does not care about position ticks.
+  const isCurrent = usePlayerSelector((s) => s.current?.id === episode.id);
+  const statusPlaying = usePlayerSelector((s) => s.status === 'playing');
+  const isPlaying = isCurrent && statusPlaying;
 
   // Reduced motion keeps the squash and makes it shallower; it does not remove
   // it. On a touch screen this is the only thing that answers "did that land?"

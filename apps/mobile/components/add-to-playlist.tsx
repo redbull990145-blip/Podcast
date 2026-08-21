@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/components/icon';
+import { PressableScale } from '@/components/pressable-scale';
 import { api } from '@/lib/api';
 import { useTranslator } from '@/lib/i18n';
 import { useSession } from '@/lib/session';
@@ -40,15 +41,16 @@ export function AddToPlaylist({ episodeId }: { episodeId: string }) {
 
   return (
     <>
-      <Pressable
+      <PressableScale
         onPress={() => setOpen(true)}
         accessibilityRole="button"
         accessibilityLabel={t.t('playlists.addTo')}
         hitSlop={space[2]}
+        scale={0.97}
         style={styles.trigger}
       >
         <Icon path={icon.library} size={20} color={theme.textTertiary} />
-      </Pressable>
+      </PressableScale>
 
       {/* Mounted only while open: a Modal that is always in the tree keeps its
           queries alive on every episode row in a list. */}

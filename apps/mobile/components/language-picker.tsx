@@ -33,10 +33,14 @@ export function LanguagePicker() {
               accessibilityRole="radio"
               accessibilityState={{ selected: active }}
               accessibilityLabel={LOCALE_NAMES[locale]}
-              style={[
+              style={({ pressed }) => [
                 styles.chip,
                 {
-                  backgroundColor: active ? theme.accentMuted : 'transparent',
+                  backgroundColor: active
+                    ? theme.accentMuted
+                    : pressed
+                      ? theme.surfaceHover
+                      : 'transparent',
                   borderColor: active ? theme.accent : theme.border,
                 },
               ]}

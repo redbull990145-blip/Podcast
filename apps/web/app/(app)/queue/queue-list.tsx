@@ -4,6 +4,7 @@ import type { PlayableEpisode } from '@cue/core';
 import { tintTextProps } from '@cue/design';
 import { duration } from '@cue/motion';
 import { AnimatePresence, Reorder, useDragControls } from 'motion/react';
+import { memo, useCallback } from 'react';
 import type { Route } from 'next';
 import Link from 'next/link';
 import { useTranslator } from '@/components/i18n/locale-provider';
@@ -28,13 +29,21 @@ import { usePlayerActions } from '@/lib/player/store';
 export default function QueueList({ queue }: { queue: PlayableEpisode[] }) {
   const actions = usePlayerActions();
 
+  /**
+   * Stable across renders, and it has to be: `Reorder.Group` calls this on
+   * every swap mid-drag. `usePlayerActions` hands back a module-level
+   * constant, so the empty dependency list is honest — nothing captured here
+   * can change identity.
+   */
+  const onReorder = useCallback((next: PlayableEpisode[]) => {
+    actions.reorderQueue(next.map((item) => item.id));
+  }, []);
+
   return (
     <Reorder.Group
       axis="y"
       values={queue}
-      onReorder={(next: PlayableEpisode[]) => {
-        actions.reorderQueue(next.map((item) => item.id));
-      }}
+      onReorder={onReorder}
       className="m-0 list-none p-0"
     >
       <AnimatePresence initial={false}>
@@ -46,7 +55,19 @@ export default function QueueList({ queue }: { queue: PlayableEpisode[] }) {
   );
 }
 
-function QueueRow({ episode, position }: { episode: PlayableEpisode; position: number }) {
+/**
+ * Memoized per row. A reorder only reshuffles array positions — the episode
+ * objects themselves keep their references across swaps — so every row that
+ * is not in hand skips its render entirely instead of paying for a drag it
+ * has nothing to do with.
+ */
+const QueueRow = memo(function QueueRow({
+  episode,
+  position,
+}: {
+  episode: PlayableEpisode;
+  position: number;
+}) {
   const t = useTranslator();
   const actions = usePlayerActions();
   const controls = useDragControls();
@@ -75,8 +96,11 @@ function QueueRow({ episode, position }: { episode: PlayableEpisode; position: n
       className="flex items-center gap-3 border-b border-[var(--color-border)] py-3 last:border-b-0"
       whileDrag={{
         // Lifted off the page while it is in hand — the one place in the app a
-        // shadow is right, because the thing genuinely is floating.
-        boxShadow: 'var(--elevation-3)',
+        // shadow is right, because the thing genuinely is floating. This used
+        // to point at `--elevation-3`, a token tokens.css never defined, so
+        // the lift silently rendered as nothing. `--elevation-lg` exists; the
+        // row finally leaves the page.
+        boxShadow: 'var(--elevation-lg)',
         backgroundColor: 'var(--color-surface-raised)',
         cursor: 'grabbing',
       }}
@@ -132,7 +156,7 @@ function QueueRow({ episode, position }: { episode: PlayableEpisode; position: n
         type="button"
         onClick={() => actions.removeFromQueue(episode.id)}
         aria-label={t.t('queue.removeTitle', { title: episode.title })}
-        className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full border-none bg-transparent text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+        className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full border-none bg-transparent text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition-transform duration-[var(--duration-instant)] ease-standard active:scale-[0.94] motion-reduce:active:scale-100"
       >
         <svg
           width="16"
@@ -149,4 +173,4 @@ function QueueRow({ episode, position }: { episode: PlayableEpisode; position: n
       </button>
     </Reorder.Item>
   );
-}
+});

@@ -256,7 +256,7 @@ function ResumeHero({ entry }: { entry: ContinueEntry }) {
               <h3 className="type-hero m-0 max-w-[38ch]">
                 <Link
                   href={`/episode/${entry.episode.id}` as Route}
-                  className="clamp-3 text-[var(--color-text-primary)] no-underline"
+                  className="clamp-3 text-[var(--color-text-primary)] underline decoration-transparent underline-offset-4 transition-colors hover:decoration-current"
                 >
                   {entry.episode.title}
                 </Link>
@@ -285,7 +285,7 @@ function ResumeHero({ entry }: { entry: ContinueEntry }) {
             <button
               type="button"
               onClick={() => void play(playable)}
-              className="flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-2 rounded-full border-0 bg-[var(--color-ink)] px-6 type-body-strong text-[var(--color-text-on-ink)] transition-opacity hover:opacity-90 sm:flex-none"
+              className="flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-2 rounded-full border-0 bg-[var(--color-ink)] px-6 type-body-strong text-[var(--color-text-on-ink)] transition-[transform,opacity] duration-[var(--duration-instant)] ease-standard hover:opacity-90 active:scale-[0.97] motion-reduce:active:scale-100 sm:flex-none"
             >
               <PlayGlyph />
               {t.t('home.continue')}
@@ -301,7 +301,7 @@ function ResumeHero({ entry }: { entry: ContinueEntry }) {
             <button
               type="button"
               onClick={() => void playAt(playable, 0)}
-              className="flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-[var(--color-border-strong)] bg-transparent px-5 type-body-strong text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)]"
+              className="flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-[var(--color-border-strong)] bg-transparent px-5 type-body-strong text-[var(--color-text-primary)] transition-[transform,background-color] duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] active:scale-[0.97] motion-reduce:active:scale-100"
             >
               {t.t('home.startOver')}
             </button>
@@ -338,7 +338,7 @@ function ProgressCard({ entry }: { entry: ContinueEntry }) {
           <h3 className="type-title3 m-0">
             <Link
               href={`/episode/${entry.episode.id}` as Route}
-              className="clamp-2 text-[var(--color-text-primary)] no-underline"
+              className="clamp-2 text-[var(--color-text-primary)] underline decoration-transparent underline-offset-4 transition-colors hover:decoration-current"
             >
               {entry.episode.title}
             </Link>
@@ -357,7 +357,7 @@ function ProgressCard({ entry }: { entry: ContinueEntry }) {
           type="button"
           onClick={() => void play(playableFromQueueEntry(entry))}
           aria-label={t.t('home.resume', { title: entry.episode.title })}
-          className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-[var(--color-ink)] text-[var(--color-text-on-ink)] transition-opacity hover:opacity-90"
+          className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-[var(--color-ink)] text-[var(--color-text-on-ink)] transition-[transform,opacity] duration-[var(--duration-instant)] ease-standard hover:opacity-90 active:scale-[0.97] motion-reduce:active:scale-100"
         >
           <PlayGlyph />
         </button>

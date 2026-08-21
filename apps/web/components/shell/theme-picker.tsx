@@ -62,7 +62,7 @@ export function ThemePicker() {
             onClick={() => applyTheme(option.value)}
             className={[
               'flex cursor-pointer flex-col gap-2.5 rounded-[var(--radius-lg)] border p-3 text-start',
-              'transition-colors',
+              'transition-[transform,background-color,border-color] duration-[var(--duration-instant)] ease-standard active:scale-[0.98] motion-reduce:active:scale-100',
               active
                 ? 'border-[var(--color-accent)] bg-[var(--color-accent-muted)]'
                 : 'border-[var(--color-border)] bg-transparent hover:bg-[var(--color-surface-hover)]',

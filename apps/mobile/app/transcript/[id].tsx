@@ -17,10 +17,11 @@ import { useReducedMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/components/icon';
 import { MiniPlayer } from '@/components/mini-player';
+import { PressableScale } from '@/components/pressable-scale';
 import { ScreenMessage } from '@/components/screen-message';
 import { api } from '@/lib/api';
 import { playerActions, readPosition, usePlayerState } from '@/lib/player/store';
-import { radius, space, type, useTheme } from '@/theme';
+import { MINI_PLAYER_HEIGHT, radius, space, type, useTheme } from '@/theme';
 
 /**
  * How often the playhead is read while following along.
@@ -224,17 +225,18 @@ export default function TranscriptScreen() {
 
   const header = (
     <View style={[styles.header, { paddingTop: insets.top + space[2] }]}>
-      <Pressable
+      <PressableScale
         onPress={() => router.back()}
         accessibilityRole="button"
         accessibilityLabel="Back"
         hitSlop={space[3]}
+        scale={0.9}
         style={styles.back}
       >
         <View style={styles.backIcon}>
           <Icon path={icon.chevronDown} size={26} color={theme.textSecondary} />
         </View>
-      </Pressable>
+      </PressableScale>
 
       <View style={styles.headerText}>
         <Text style={[type('overline'), { color: theme.textTertiary }]}>TRANSCRIPT</Text>
@@ -349,10 +351,11 @@ export default function TranscriptScreen() {
       {/* Resume following. Only offered when there is something to resume to —
           it is playing, this is the episode, and the reader has scrolled off. */}
       {timed && playing && !following && !searching ? (
-        <Pressable
+        <PressableScale
           onPress={() => setFollowing(true)}
           accessibilityRole="button"
           accessibilityLabel="Follow the audio"
+          scale={0.95}
           style={[
             styles.follow,
             {
@@ -362,7 +365,7 @@ export default function TranscriptScreen() {
           ]}
         >
           <Text style={[type('caption'), { color: theme.textOnAccent }]}>Follow</Text>
-        </Pressable>
+        </PressableScale>
       ) : null}
 
       {/* Reading along and being unable to pause without leaving the screen is
@@ -373,8 +376,12 @@ export default function TranscriptScreen() {
   );
 }
 
-/** Height the mini player occupies, for keeping content clear of it. */
-const MINI_PLAYER_CLEARANCE = 64;
+/**
+ * Height the mini player occupies, plus its gap, for keeping content clear of
+ * it. Derived from the shared constant rather than restating it — a number
+ * duplicated here would drift the first time either one moved.
+ */
+const MINI_PLAYER_CLEARANCE = MINI_PLAYER_HEIGHT + 2;
 
 function Line({
   segment,

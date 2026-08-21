@@ -14,10 +14,17 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Artwork } from '@/components/artwork';
 import { Icon } from '@/components/icon';
+import { PressableScale } from '@/components/pressable-scale';
 import { playerActions, usePlayerState } from '@/lib/player/store';
 import { TAB_BAR_HEIGHT, space, type, useTheme } from '@/theme';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+/**
+ * How often the engine reports position, in ms. Each report starts exactly one
+ * straight-line tween that finishes where the next report will find it.
+ */
+const POSITION_INTERVAL_MS = 500;
 
 /**
  * The mini player.
@@ -77,13 +84,30 @@ export function MiniPlayer({ bottomOffset = TAB_BAR_HEIGHT }: { bottomOffset?: n
       : withSpring(1, { ...spring.expressive, ...springRest });
   }, [hasEpisode, reduced, entrance]);
 
-  /** Progress along the episode, as a hairline under the bar. */
-  const progress = useAnimatedStyle(() => {
+  /**
+   * Progress along the episode, as a hairline under the bar.
+   *
+   * The engine reports every 500ms and the raw value steps twice a second —
+   * visible as a stutter on a bar this long. Each report instead starts one
+   * linear tween to where the playhead will be when the next report lands.
+   * Linear, like the scrubber: it is a clock, and a clock that eases is a
+   * clock that is wrong in the middle.
+   */
+  const fraction = useSharedValue(0);
+
+  useEffect(() => {
     const total = state.durationSec;
-    const fraction =
+    const target =
       total && total > 0 ? Math.min(1, Math.max(0, state.positionSec / total)) : 0;
-    return { width: `${fraction * 100}%` };
-  });
+    fraction.value = withTiming(target, {
+      duration: POSITION_INTERVAL_MS,
+      easing: Easing.linear,
+    });
+  }, [state.positionSec, state.durationSec, fraction]);
+
+  const progress = useAnimatedStyle(() => ({
+    width: `${fraction.value * 100}%`,
+  }));
 
   if (!hasEpisode) return null;
 
@@ -128,11 +152,16 @@ export function MiniPlayer({ bottomOffset = TAB_BAR_HEIGHT }: { bottomOffset?: n
           </Text>
         </View>
 
-        <Pressable
+        {/* The transport answers the finger like every other small control —
+            a shallow snappy squash. A dead play button inside an alive bar
+            reads as a decoration, not a control. */}
+        <PressableScale
           onPress={() => playerActions.toggle()}
           accessibilityRole="button"
           accessibilityLabel={isPlaying ? 'Pause' : 'Play'}
           hitSlop={space[3]}
+          scale={0.92}
+          springToken="snappy"
           style={styles.transport}
         >
           <Icon
@@ -141,7 +170,7 @@ export function MiniPlayer({ bottomOffset = TAB_BAR_HEIGHT }: { bottomOffset?: n
             color={theme.textPrimary}
             filled
           />
-        </Pressable>
+        </PressableScale>
       </AnimatedPressable>
 
       <View style={[styles.track, { backgroundColor: theme.border }]}>

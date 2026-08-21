@@ -72,6 +72,15 @@ export function Artwork({
     src ? 'loading' : 'failed',
   );
 
+  // A new URL is a new image; the last verdict belongs to the last picture.
+  // Adjusting state during render (React's endorsed pattern) resets before
+  // anything paints, so a swapped src never inherits loaded/failed.
+  const [prevSrc, setPrevSrc] = useState(src);
+  if (prevSrc !== src) {
+    setPrevSrc(src);
+    setState('loading');
+  }
+
   const radius = radiusForArtwork(size);
 
   // `aspect-ratio` rather than a padding-box hack: it reserves the height

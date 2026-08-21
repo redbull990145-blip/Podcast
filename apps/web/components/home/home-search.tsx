@@ -116,7 +116,7 @@ export function HomeSearch() {
       {query ? (
         <button
           type="submit"
-          className="absolute end-1.5 flex min-h-8 cursor-pointer items-center rounded-full border-0 bg-[var(--color-ink)] px-3.5 type-caption text-[var(--color-text-on-ink)] transition-opacity hover:opacity-90"
+          className="absolute end-1.5 flex min-h-8 cursor-pointer items-center rounded-full border-0 bg-[var(--color-ink)] px-3.5 type-caption text-[var(--color-text-on-ink)] transition-[transform,opacity] duration-[var(--duration-instant)] ease-standard hover:opacity-90 active:scale-[0.97] motion-reduce:active:scale-100"
         >
           {t.t('search.title')}
         </button>

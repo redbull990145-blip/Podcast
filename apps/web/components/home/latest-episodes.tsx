@@ -125,7 +125,7 @@ async function LatestPick({ episode, podcast }: Pick) {
       <Link
         href={`/podcast/${podcast.id}` as Route}
         aria-label={podcast.title}
-        className="block w-[72px] shrink-0 no-underline md:mb-3.5 md:w-full"
+        className="block w-[72px] shrink-0 no-underline transition-opacity hover:opacity-90 md:mb-3.5 md:w-full"
       >
         <Artwork
           src={episode.artworkUrl ?? podcast.artworkUrl}
@@ -139,7 +139,7 @@ async function LatestPick({ episode, podcast }: Pick) {
       <div className="min-w-0 flex-1">
         <Link
           href={`/podcast/${podcast.id}` as Route}
-          className="type-overline clamp-1 block text-[var(--color-accent-text)] no-underline"
+          className="type-overline clamp-1 block text-[var(--color-accent-text)] underline decoration-transparent underline-offset-4 transition-colors hover:decoration-current"
         >
           {podcast.title}
         </Link>

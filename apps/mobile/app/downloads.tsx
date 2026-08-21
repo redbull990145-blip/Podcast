@@ -8,12 +8,13 @@ import {
 } from '@cue/core';
 import { icon } from '@cue/design';
 import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Artwork } from '@/components/artwork';
 import { DownloadRing, DownloadTrack } from '@/components/download-ring';
 import { Icon } from '@/components/icon';
 import { PlayButton } from '@/components/play-button';
+import { PressableScale } from '@/components/pressable-scale';
 import { ScreenMessage } from '@/components/screen-message';
 import { downloadActions, useDownloadIndex } from '@/lib/downloads/store';
 import { useTranslator } from '@/lib/i18n';
@@ -44,15 +45,16 @@ export default function DownloadsScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable
+        <PressableScale
           onPress={() => router.back()}
           accessibilityRole="button"
           accessibilityLabel={t.t('episode.back')}
           hitSlop={space[3]}
+          scale={0.94}
           style={styles.dismiss}
         >
           <Icon path={icon.chevronDown} size={26} color={theme.textSecondary} />
-        </Pressable>
+        </PressableScale>
 
         <View style={styles.headerText}>
           <Text style={[type('title2'), { color: theme.textPrimary }]}>
@@ -143,18 +145,19 @@ function DownloadRow({ record }: { record: DownloadRecord }) {
       ) : record.status === 'complete' ? (
         <PlayButton episode={episode} />
       ) : (
-        <Pressable
+        <PressableScale
           onPress={() => downloadActions.retry(episode)}
           accessibilityRole="button"
           accessibilityLabel={t.t('downloads.retry')}
           hitSlop={space[2]}
+          scale={0.94}
           style={styles.action}
         >
           <Icon path={icon.download} size={20} color={theme.textSecondary} />
-        </Pressable>
+        </PressableScale>
       )}
 
-      <Pressable
+      <PressableScale
         onPress={() => downloadActions.remove(record.episodeId)}
         accessibilityRole="button"
         accessibilityLabel={
@@ -163,10 +166,11 @@ function DownloadRow({ record }: { record: DownloadRecord }) {
             : t.t('downloads.removeTitle', { title: record.title })
         }
         hitSlop={space[2]}
+        scale={0.94}
         style={styles.action}
       >
         <Icon path={moving ? icon.close : icon.trash} size={20} color={theme.textTertiary} />
-      </Pressable>
+      </PressableScale>
     </View>
   );
 }

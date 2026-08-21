@@ -5,7 +5,7 @@ import type { Episode } from '@cue/types';
 import * as m from 'motion/react-m';
 import { useSearchParams } from 'next/navigation';
 import { useTranslator } from '@/components/i18n/locale-provider';
-import { useTransition } from '@/lib/motion';
+import { usePressScale, useTransition } from '@/lib/motion';
 import { usePlayerActions } from '@/lib/player/store';
 
 /**
@@ -36,7 +36,11 @@ export function SharedTimestamp({
   const t = useTranslator();
   const params = useSearchParams();
   const actions = usePlayerActions();
-  const press = useTransition('responsive');
+  // Through the shared policy rather than a literal: if the reduced-motion cap
+  // ever tightens, this callout follows the system instead of freezing at
+  // whatever number was written here.
+  const press = usePressScale(0.97);
+  const transition = useTransition('responsive');
 
   const seconds = parseShareTime(params.get('t'));
   if (seconds === null) return null;
@@ -62,9 +66,9 @@ export function SharedTimestamp({
       <m.button
         type="button"
         onClick={() => void actions.playAt(playable, seconds)}
-        whileTap={{ scale: 0.97 }}
-        transition={press}
-        className="type-body-strong min-h-11 cursor-pointer rounded-[var(--radius-md)] border-none px-4 text-[var(--color-text-on-accent)]"
+        whileTap={{ scale: press }}
+        transition={transition}
+        className="type-body-strong min-h-11 cursor-pointer rounded-[var(--radius-md)] border-none px-4 text-[var(--color-text-on-accent)] transition-opacity hover:opacity-90"
         style={{ backgroundColor: tint ?? 'var(--color-accent)' }}
       >
         {t.t('share.playFrom', { time })}

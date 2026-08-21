@@ -6,11 +6,12 @@ import { FlashList } from '@shopify/flash-list';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Artwork } from '@/components/artwork';
 import { EpisodeRow } from '@/components/episode-row';
 import { Icon } from '@/components/icon';
+import { PressableScale } from '@/components/pressable-scale';
 import { ScreenMessage } from '@/components/screen-message';
 import { SubscribeButton } from '@/components/subscribe-button';
 import { api } from '@/lib/api';
@@ -73,18 +74,19 @@ export default function PodcastScreen() {
   );
 
   const back = (
-    <Pressable
+    <PressableScale
       onPress={() => router.back()}
       accessibilityRole="button"
       accessibilityLabel="Back"
       hitSlop={space[3]}
+      scale={0.9}
       style={styles.back}
     >
       {/* The chevron rotated a quarter turn — one path, two directions. */}
       <View style={styles.backIcon}>
         <Icon path={icon.chevronDown} size={26} color={theme.textSecondary} />
       </View>
-    </Pressable>
+    </PressableScale>
   );
 
   if (error) {

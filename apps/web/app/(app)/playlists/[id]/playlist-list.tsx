@@ -7,6 +7,7 @@ import type { PlaylistEntry } from '@cue/types';
 import { AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import type { Route } from 'next';
 import Link from 'next/link';
+import { memo } from 'react';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { Artwork } from '@/components/media/artwork';
 import { useTransition } from '@/lib/motion';
@@ -42,7 +43,10 @@ export default function PlaylistList({
             key={entry.episode.id}
             entry={entry}
             position={index + 1}
-            onRemove={() => onRemove(entry.episode.id)}
+            // The id, not a closure: a fresh arrow per render would hand every
+            // memoised row new props and quietly switch the memo off.
+            episodeId={entry.episode.id}
+            onRemove={onRemove}
           />
         ))}
       </AnimatePresence>
@@ -50,14 +54,20 @@ export default function PlaylistList({
   );
 }
 
-function PlaylistRow({
+/**
+ * Memoised because a drag re-renders this list on every swap — rows whose
+ * episode object did not change have no reason to re-render with it.
+ */
+const PlaylistRow = memo(function PlaylistRow({
   entry,
   position,
+  episodeId,
   onRemove,
 }: {
   entry: PlaylistEntry;
   position: number;
-  onRemove: () => void;
+  episodeId: string;
+  onRemove: (episodeId: string) => void;
 }) {
   const t = useTranslator();
   const actions = usePlayerActions();
@@ -86,7 +96,10 @@ function PlaylistRow({
       transition={{ ...settle, opacity: { duration: duration.fast / 1000 } }}
       className="flex items-center gap-3 border-b border-[var(--color-border)] py-3 last:border-b-0"
       whileDrag={{
-        boxShadow: 'var(--elevation-3)',
+        // Lifted off the page while in hand. The token scale is named
+        // (sm/md/lg/xl/artwork) — `--elevation-3` never existed, so this lift
+        // silently rendered nothing until it was pointed at the real token.
+        boxShadow: 'var(--elevation-lg)',
         backgroundColor: 'var(--color-surface-raised)',
         cursor: 'grabbing',
       }}
@@ -132,7 +145,7 @@ function PlaylistRow({
       <button
         type="button"
         onClick={() => void actions.play(playable)}
-        className="type-caption shrink-0 cursor-pointer rounded-[var(--radius-sm)] border-none bg-transparent px-3 py-2 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+        className="type-caption shrink-0 cursor-pointer rounded-[var(--radius-sm)] border-none bg-transparent px-3 py-2 text-[var(--color-text-secondary)] transition-[transform,background-color,color] duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] active:scale-[0.96] motion-reduce:active:scale-100"
         {...tintTextProps(entry.accentColor)}
       >
         {t.t('episode.play')}
@@ -140,9 +153,9 @@ function PlaylistRow({
 
       <button
         type="button"
-        onClick={onRemove}
+        onClick={() => onRemove(episodeId)}
         aria-label={t.t('playlists.removeTitle', { title: entry.episode.title })}
-        className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full border-none bg-transparent text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+        className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full border-none bg-transparent text-[var(--color-text-tertiary)] transition-[transform,background-color,color] duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] active:scale-[0.94] motion-reduce:active:scale-100"
       >
         <svg
           width="16"
@@ -159,4 +172,4 @@ function PlaylistRow({
       </button>
     </Reorder.Item>
   );
-}
+});

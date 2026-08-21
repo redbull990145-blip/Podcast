@@ -163,7 +163,7 @@ export function SettingsClient() {
               type="button"
               onClick={() => signOut.mutate()}
               disabled={signOut.isPending}
-              className="type-callout min-h-11 cursor-pointer rounded-[var(--radius-md)] border border-[var(--color-border-strong)] bg-transparent px-5 text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
+              className="type-callout min-h-11 cursor-pointer rounded-[var(--radius-md)] border border-[var(--color-border-strong)] bg-transparent px-5 text-[var(--color-text-primary)] transition-[transform,background-color] duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] active:scale-[0.97] motion-reduce:active:scale-100 disabled:opacity-50"
             >
               {signOut.isPending ? t.t('settings.signingOut') : t.t('common.signOut')}
             </button>
@@ -174,7 +174,7 @@ export function SettingsClient() {
             // `self-start` because the section is a stretching flex column; a
             // full-bleed Sign in button shouts on a screen that is otherwise
             // quiet.
-            className="type-callout inline-flex min-h-11 w-fit items-center self-start rounded-[var(--radius-md)] border-none bg-[var(--color-accent)] px-5 text-[var(--color-text-on-accent)] no-underline"
+            className="type-callout inline-flex min-h-11 w-fit items-center self-start rounded-[var(--radius-md)] border-none bg-[var(--color-accent)] px-5 text-[var(--color-text-on-accent)] no-underline transition-opacity duration-[var(--duration-instant)] ease-standard hover:opacity-90 active:opacity-80"
           >
             {t.t('common.signIn')}
           </Link>
@@ -258,8 +258,11 @@ function NowPlayingTintToggle() {
         className={[
           'block h-5 w-5 rounded-full',
           // Travel is a transform, not a margin or an inset: it keeps the knob
-          // on the compositor so the toggle cannot cost a layout pass.
-          'transition-transform duration-[var(--duration-fast)] ease-standard',
+          // on the compositor so the toggle cannot cost a layout pass. The
+          // settle is the snappy spring pair rather than a plain tween — the
+          // knob is a moving object, and the tabulated `linear()` curve gives
+          // it the same physics the JS-driven controls use.
+          '[transition-timing-function:var(--spring-snappy)] duration-[var(--spring-snappy-duration)] transition-transform',
           enabled
             ? 'translate-x-[22px] bg-[var(--color-text-on-accent)]'
             : 'translate-x-[3px] bg-[var(--color-text-tertiary)]',
@@ -300,10 +303,10 @@ function Choices<T extends number>({
             role="radio"
             aria-checked={active}
             onClick={() => onSelect(option.value)}
-            className="type-callout min-h-11 min-w-11 cursor-pointer rounded-[var(--radius-md)] border px-4 transition-colors"
+            className="type-callout min-h-11 min-w-11 cursor-pointer rounded-[var(--radius-md)] border px-4 transition-[transform,background-color,border-color,color] duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] active:scale-[0.97] motion-reduce:active:scale-100"
             style={{
               borderColor: active ? 'var(--color-accent)' : 'var(--color-border)',
-              backgroundColor: active ? 'var(--color-accent-muted)' : 'transparent',
+              backgroundColor: active ? 'var(--color-accent-muted)' : undefined,
               color: active ? 'var(--color-accent-text)' : 'var(--color-text-secondary)',
             }}
           >

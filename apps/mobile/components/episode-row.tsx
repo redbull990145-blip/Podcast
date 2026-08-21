@@ -7,7 +7,7 @@ import { Artwork } from '@/components/artwork';
 import { DownloadButton } from '@/components/download-button';
 import { PlayButton } from '@/components/play-button';
 import { QueueButton } from '@/components/queue-button';
-import { usePlayerState } from '@/lib/player/store';
+import { usePlayerSelector } from '@/lib/player/store';
 import { space, type, useTheme } from '@/theme';
 
 /**
@@ -30,9 +30,11 @@ export function EpisodeRow({
 }) {
   const t = useTranslator();
   const theme = useTheme();
-  const state = usePlayerState();
 
-  const isCurrent = state.current?.id === episode.id;
+  // The engine reports position at 2Hz and each report re-emits the whole
+  // player state, so a row subscribed to all of it re-renders twice a second
+  // for as long as anything plays — to learn nothing but the boolean below.
+  const isCurrent = usePlayerSelector((s) => s.current?.id === episode.id);
   const artwork = episode.artworkUrl ?? fallbackArtwork;
 
   const playable = playableFromEpisode(episode, {

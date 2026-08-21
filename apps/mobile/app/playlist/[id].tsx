@@ -11,6 +11,7 @@ import { Button } from '@/components/button';
 import { CoverStack } from '@/components/cover-stack';
 import { Icon } from '@/components/icon';
 import { PlayButton } from '@/components/play-button';
+import { PressableScale } from '@/components/pressable-scale';
 import { ScreenMessage } from '@/components/screen-message';
 import { api } from '@/lib/api';
 import { useTranslator } from '@/lib/i18n';
@@ -65,17 +66,18 @@ export default function PlaylistScreen() {
   });
 
   const back = (
-    <Pressable
+    <PressableScale
       onPress={() => router.back()}
       accessibilityRole="button"
       accessibilityLabel={t.t('episode.back')}
       hitSlop={space[3]}
+      scale={0.9}
       style={styles.back}
     >
       <View style={styles.backIcon}>
         <Icon path={icon.chevronDown} size={26} color={theme.textSecondary} />
       </View>
-    </Pressable>
+    </PressableScale>
   );
 
   if (error) {
@@ -273,7 +275,10 @@ function PlaylistRow({
           accessibilityRole="button"
           accessibilityLabel={t.t('playlists.removeTitle', { title: entry.episode.title })}
           hitSlop={space[2]}
-          style={styles.control}
+          style={({ pressed }) => [
+            styles.control,
+            pressed && { backgroundColor: theme.surfaceHover },
+          ]}
         >
           <Icon path={icon.close} size={18} color={theme.textTertiary} />
         </Pressable>
@@ -303,7 +308,11 @@ function MoveButton({
       accessibilityLabel={label}
       accessibilityState={{ disabled }}
       hitSlop={space[1]}
-      style={[styles.control, { opacity: disabled ? 0.25 : 1 }]}
+      style={({ pressed }) => [
+        styles.control,
+        { opacity: disabled ? 0.25 : 1 },
+        pressed && { backgroundColor: theme.surfaceHover },
+      ]}
     >
       {/* One chevron path, flipped — the same geometry the rest of the app
           uses for "down". */}

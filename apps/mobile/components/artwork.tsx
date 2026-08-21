@@ -1,4 +1,5 @@
 import { radiusForArtwork } from '@cue/design';
+import { duration } from '@cue/motion';
 import { Image } from 'expo-image';
 import { StyleSheet, View } from 'react-native';
 import { useTheme } from '@/theme';
@@ -55,7 +56,7 @@ export function Artwork({
       // expo-image caches to disk, so artwork survives a restart and scrolling
       // back up costs nothing.
       cachePolicy="memory-disk"
-      transition={200}
+      transition={duration.base}
       accessibilityIgnoresInvertColors
       {...(label ? { accessible: true, accessibilityLabel: label } : {})}
     />

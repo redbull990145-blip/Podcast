@@ -10,7 +10,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Icon } from '@/components/icon';
 import { useTranslator } from '@/lib/i18n';
-import { usePlayerState } from '@/lib/player/store';
+import { usePlayerSelector } from '@/lib/player/store';
 import { shareEpisode } from '@/lib/share';
 import { space, useTheme } from '@/theme';
 
@@ -27,8 +27,14 @@ export function ShareButton({ episodeId, title }: { episodeId: string; title: st
   const t = useTranslator();
   const theme = useTheme();
   const reduced = useReducedMotion();
-  const state = usePlayerState();
   const pressed = useSharedValue(0);
+
+  // The label really does name the live moment — "Share from 24:31" while this
+  // episode plays — so it keeps a whole-second position selector and re-renders
+  // at 1Hz rather than subscribing to the engine's 2Hz firehose for everything.
+  const isCurrent = usePlayerSelector((s) => s.current?.id === episodeId);
+  const wholeSec = usePlayerSelector((s) => Math.floor(s.positionSec));
+  const durationSec = usePlayerSelector((s) => s.durationSec);
 
   const depth = pressScale(0.92, reduced);
 
@@ -36,9 +42,8 @@ export function ShareButton({ episodeId, title }: { episodeId: string; title: st
     transform: [{ scale: 1 - pressed.value * (1 - depth) }],
   }));
 
-  const isCurrent = state.current?.id === episodeId;
-  const position = isCurrent ? Math.floor(state.positionSec) : null;
-  const withTime = position !== null && shouldShareTime(position, state.durationSec);
+  const position = isCurrent ? wholeSec : null;
+  const withTime = position !== null && shouldShareTime(position, durationSec);
 
   return (
     <AnimatedPressable
@@ -47,7 +52,7 @@ export function ShareButton({ episodeId, title }: { episodeId: string; title: st
           episodeId,
           title,
           positionSec: position,
-          durationSec: state.durationSec,
+          durationSec,
         });
       }}
       onPressIn={() => {

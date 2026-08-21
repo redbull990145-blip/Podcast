@@ -6,6 +6,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Artwork } from '@/components/artwork';
 import { Icon } from '@/components/icon';
+import { PressableScale } from '@/components/pressable-scale';
 import { ScreenMessage } from '@/components/screen-message';
 import { playerActions, usePlayerState } from '@/lib/player/store';
 import { radius, space, type, useTheme } from '@/theme';
@@ -35,15 +36,16 @@ export default function QueueScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable
+        <PressableScale
           onPress={() => router.back()}
           accessibilityRole="button"
           accessibilityLabel="Close the queue"
           hitSlop={space[3]}
+          scale={0.9}
           style={styles.dismiss}
         >
           <Icon path={icon.chevronDown} size={26} color={theme.textSecondary} />
-        </Pressable>
+        </PressableScale>
 
         <View style={styles.headerText}>
           <Text style={[type('title2'), { color: theme.textPrimary }]}>Queue</Text>
@@ -173,7 +175,10 @@ function QueueRow({
           accessibilityRole="button"
           accessibilityLabel={`Remove ${episode.title} from the queue`}
           hitSlop={space[2]}
-          style={styles.control}
+          style={({ pressed }) => [
+            styles.control,
+            pressed && { backgroundColor: theme.surfaceHover },
+          ]}
         >
           <Text style={[type('body'), { color: theme.textTertiary }]}>✕</Text>
         </Pressable>
@@ -203,7 +208,11 @@ function MoveButton({
       accessibilityLabel={label}
       accessibilityState={{ disabled }}
       hitSlop={space[2]}
-      style={[styles.control, { opacity: disabled ? 0.25 : 1 }]}
+      style={({ pressed }) => [
+        styles.control,
+        { opacity: disabled ? 0.25 : 1 },
+        pressed && { backgroundColor: theme.surfaceHover },
+      ]}
     >
       {/* One chevron path, flipped — the same geometry the rest of the app
           uses for "down". */}

@@ -7,6 +7,7 @@ import {
   RATE_STEP,
   type PlaybackRate,
 } from '@cue/core';
+import { duration } from '@cue/motion';
 import * as m from 'motion/react-m';
 import { AnimatePresence } from 'motion/react';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
@@ -183,6 +184,7 @@ function SpeedPanel({
   onClose: () => void;
 }) {
   const t = useTranslator();
+  const settle = useTransition('snappy');
   const [position, setPosition] = useState<React.CSSProperties | null>(null);
 
   /*
@@ -263,7 +265,17 @@ function SpeedPanel({
       initial={{ opacity: 0, y: 6, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 6, scale: 0.97 }}
-      transition={{ duration: 0.16, ease: [0.32, 0.72, 0, 1] }}
+      /*
+        Snappy, with the fade pulled out of it. A small panel appearing where
+        the eye already is should settle near-instantly — anything slower reads
+        as lag on a control people open and close repeatedly — and opacity rides
+        a plain tween because springs move things and tweens fade things: the
+        spring would overshoot past 1, the compositor clamps, and the entry
+        flickers. Routing both through `useTransition` also means reduced-motion
+        users get the policy's short tween instead of this panel scaling and
+        sliding regardless of their setting.
+      */
+      transition={{ ...settle, opacity: { duration: duration.fast / 1000 } }}
       className={[
         'z-50 rounded-[var(--radius-lg)] p-3',
         'border border-[var(--color-border)] bg-[var(--color-surface-overlay)]',
@@ -393,6 +405,7 @@ export function SpeedScale({
               className={[
                 'flex h-9 cursor-pointer items-center justify-center rounded-[var(--radius-md)]',
                 'type-caption border transition-colors',
+                'transition-transform duration-[var(--duration-instant)] ease-standard active:scale-[0.96] motion-reduce:active:scale-100',
                 active
                   ? 'border-[var(--color-accent)] bg-[var(--color-accent-muted)] text-[var(--color-accent-text)]'
                   : 'border-transparent bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]',

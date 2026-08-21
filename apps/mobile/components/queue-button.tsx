@@ -9,7 +9,7 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { Icon } from '@/components/icon';
-import { playerActions, usePlayerState } from '@/lib/player/store';
+import { playerActions, usePlayerSelector } from '@/lib/player/store';
 import { space, useTheme } from '@/theme';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -23,10 +23,10 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 export function QueueButton({ episode }: { episode: PlayableEpisode }) {
   const theme = useTheme();
   const reduced = useReducedMotion();
-  const state = usePlayerState();
   const pressed = useSharedValue(0);
 
-  const queued = state.queue.some((item) => item.id === episode.id);
+  const queued = usePlayerSelector((s) => s.queue.some((item) => item.id === episode.id));
+  const isCurrent = usePlayerSelector((s) => s.current?.id === episode.id);
 
   const depth = pressScale(0.92, reduced);
 
@@ -37,7 +37,7 @@ export function QueueButton({ episode }: { episode: PlayableEpisode }) {
   // Queueing what is already playing is meaningless, so the control goes away
   // rather than sitting there doing nothing. After the hooks, never before —
   // an early return above them changes the hook count between renders.
-  if (state.current?.id === episode.id) return null;
+  if (isCurrent) return null;
 
   return (
     <AnimatedPressable

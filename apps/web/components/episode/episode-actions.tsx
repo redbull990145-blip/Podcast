@@ -6,7 +6,7 @@ import * as m from 'motion/react-m';
 import { ShareButton } from '@/components/episode/share-button';
 import { AddToPlaylist } from '@/components/playlist/add-to-playlist';
 import { usePressScale, useTransition } from '@/lib/motion';
-import { usePlayerActions, usePlayerState } from '@/lib/player/store';
+import { usePlayerActions, usePlayerSelector } from '@/lib/player/store';
 
 /**
  * Play and queue, on the episode's own page.
@@ -28,7 +28,6 @@ export function EpisodeActions({
   accentColor?: string | null;
   tint?: string | undefined;
 }) {
-  const state = usePlayerState();
   const actions = usePlayerActions();
 
   // Read once, up here: the queue button below is conditionally rendered, so
@@ -37,9 +36,10 @@ export function EpisodeActions({
   const press = usePressScale(0.97);
   const transition = useTransition('responsive');
 
-  const isCurrent = state.current?.id === episode.id;
-  const isPlaying = isCurrent && state.status === 'playing';
-  const queued = state.queue.some((item) => item.id === episode.id);
+  const isCurrent = usePlayerSelector((s) => s.current?.id === episode.id);
+  const playing = usePlayerSelector((s) => s.status === 'playing');
+  const queued = usePlayerSelector((s) => s.queue.some((item) => item.id === episode.id));
+  const isPlaying = isCurrent && playing;
 
   const playable = playableFromEpisode(episode, {
     title: podcastTitle,

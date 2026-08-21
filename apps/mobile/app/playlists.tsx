@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '@/components/button';
 import { CoverStack } from '@/components/cover-stack';
 import { Icon } from '@/components/icon';
+import { PressableScale } from '@/components/pressable-scale';
 import { ScreenMessage } from '@/components/screen-message';
 import { api } from '@/lib/api';
 import { useTranslator } from '@/lib/i18n';
@@ -41,15 +42,16 @@ export default function PlaylistsScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: theme.bg, paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Pressable
+        <PressableScale
           onPress={() => router.back()}
           accessibilityRole="button"
           accessibilityLabel={t.t('episode.back')}
           hitSlop={space[3]}
+          scale={0.9}
           style={styles.dismiss}
         >
           <Icon path={icon.chevronDown} size={26} color={theme.textSecondary} />
-        </Pressable>
+        </PressableScale>
 
         <Text style={[type('title2'), { color: theme.textPrimary }]}>
           {t.t('playlists.title')}

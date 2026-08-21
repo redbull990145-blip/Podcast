@@ -1,6 +1,7 @@
 'use client';
 
 import { queryKeys } from '@cue/api-client';
+import { duration } from '@cue/motion';
 import { PLAYLIST_TITLE_MAX } from '@cue/validation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence } from 'motion/react';
@@ -79,6 +80,9 @@ function Sheet({ episodeId }: { episodeId: string }) {
   const t = useTranslator();
   const queryClient = useQueryClient();
   const enter = useTransition('responsive');
+  // The tick's draw-on. Asked for unconditionally at the top — a hook after
+  // the early returns would reorder on the first signed-out render.
+  const tick = useTransition('snappy');
 
   const playlists = useQuery({
     queryKey: queryKeys.playlists.list(),
@@ -126,11 +130,17 @@ function Sheet({ episodeId }: { episodeId: string }) {
       initial={{ opacity: 0, y: -4 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -4 }}
-      transition={enter}
+      // Springs move things; tweens fade things — the package's own rule, and
+      // this popover was breaking it. Opacity riding the responsive spring
+      // overshoots past 1, the compositor clamps, and the entry flickers. The
+      // spring keeps the travel; the fade gets a plain tween.
+      transition={{ ...enter, opacity: { duration: duration.fast / 1000 } }}
       role="group"
       aria-label={t.t('playlists.addTo')}
       className="absolute top-[calc(100%+8px)] start-0 z-30 w-[280px] rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-overlay)] p-2"
-      style={{ boxShadow: 'var(--elevation-3)' }}
+      // lg, not a number that was never a token — `--elevation-3` resolved to
+      // nothing, so the sheet floated with no shadow at all.
+      style={{ boxShadow: 'var(--elevation-lg)' }}
     >
       {playlists.isPending ? (
         <p className="type-caption m-0 px-3 py-2 text-[var(--color-text-tertiary)]">
@@ -147,7 +157,7 @@ function Sheet({ episodeId }: { episodeId: string }) {
                   type="button"
                   onClick={() => toggle.mutate({ playlistId: playlist.id, add: !inIt })}
                   aria-pressed={inIt}
-                  className="flex w-full min-h-11 cursor-pointer items-center gap-3 rounded-[var(--radius-sm)] border-none bg-transparent px-3 text-start transition-colors hover:bg-[var(--color-surface-hover)]"
+                  className="flex w-full min-h-11 cursor-pointer items-center gap-3 rounded-[var(--radius-sm)] border-none bg-transparent px-3 text-start transition-colors hover:bg-[var(--color-surface-hover)] transition-transform duration-[var(--duration-instant)] ease-standard active:scale-[0.98] motion-reduce:active:scale-100"
                 >
                   <span
                     aria-hidden="true"
@@ -165,7 +175,16 @@ function Sheet({ episodeId }: { episodeId: string }) {
                         strokeLinejoin="round"
                         className="text-[var(--color-accent-text)]"
                       >
-                        <path d="M5 12.5 9.5 17 19 7.5" />
+                        {/* Drawn on, not popped in. A tick that simply appears
+                            reads as a label changing; one that draws reads as a
+                            mark being made — and `snappy` exists for exactly
+                            this, near-instant without being a cut. */}
+                        <m.path
+                          d="M5 12.5 9.5 17 19 7.5"
+                          initial={{ pathLength: 0 }}
+                          animate={{ pathLength: 1 }}
+                          transition={tick}
+                        />
                       </svg>
                     ) : null}
                   </span>

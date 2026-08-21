@@ -1,4 +1,3 @@
-import { duration } from '@cue/motion';
 import { useEffect } from 'react';
 import type { ColorValue } from 'react-native';
 import Animated, {
@@ -49,15 +48,18 @@ export function DownloadRing({
       // Rotation is travel, and travel is what reduced motion takes away. A
       // slow breath still says "working" without moving anything across the
       // screen — and opacity is the one channel the policy always keeps.
+      // 1.2s easeInOut mirrors the web LoadingRing's reduced branch.
       fade.value = withRepeat(
-        withTiming(0.35, { duration: duration.slow, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0.35, { duration: 1200, easing: Easing.inOut(Easing.ease) }),
         -1,
         true,
       );
       return;
     }
 
-    spin.value = withRepeat(withTiming(360, { duration: 1000, easing: Easing.linear }), -1, false);
+    // 0.9s linear turn, matching the web LoadingRing (controls.tsx) so both
+    // platforms read as the same spinner.
+    spin.value = withRepeat(withTiming(360, { duration: 900, easing: Easing.linear }), -1, false);
   }, [indeterminate, reduced, spin, fade]);
 
   const animated = useAnimatedStyle(() => ({

@@ -4,7 +4,7 @@ import { playableFromEpisode } from '@cue/core';
 import type { Episode } from '@cue/types';
 import * as m from 'motion/react-m';
 import { usePressScale, useTransition } from '@/lib/motion';
-import { usePlayerActions, usePlayerState } from '@/lib/player/store';
+import { usePlayerActions, usePlayerSelector } from '@/lib/player/store';
 
 /**
  * Queue an episode, or take it back out.
@@ -25,20 +25,18 @@ export function QueueButton({
   podcastArtworkUrl: string | null;
   accentColor?: string | null;
 }) {
-  const state = usePlayerState();
   const actions = usePlayerActions();
 
   // Above the early return below, where they have to be: this component
   // renders nothing for the playing episode, so a hook read further down would
   // change the hook count the moment playback moved to this row.
+  const isCurrent = usePlayerSelector((s) => s.current?.id === episode.id);
+  const queued = usePlayerSelector((s) => s.queue.some((item) => item.id === episode.id));
   const press = usePressScale(0.9);
   const transition = useTransition('snappy');
 
-  const queued = state.queue.some((item) => item.id === episode.id);
   // Queueing what is already playing is meaningless, so the control goes away
   // rather than sitting there doing nothing.
-  const isCurrent = state.current?.id === episode.id;
-
   if (isCurrent) return null;
 
   return (

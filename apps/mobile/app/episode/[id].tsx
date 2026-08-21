@@ -13,6 +13,7 @@ import { Button } from '@/components/button';
 import { DownloadButton } from '@/components/download-button';
 import { Icon } from '@/components/icon';
 import { PlayButton } from '@/components/play-button';
+import { PressableScale } from '@/components/pressable-scale';
 import { QueueButton } from '@/components/queue-button';
 import { ScreenMessage } from '@/components/screen-message';
 import { ShareButton } from '@/components/share-button';
@@ -62,17 +63,18 @@ export default function EpisodeScreen() {
   );
 
   const back = (
-    <Pressable
+    <PressableScale
       onPress={() => router.back()}
       accessibilityRole="button"
       accessibilityLabel={t.t('episode.back')}
       hitSlop={space[3]}
+      scale={0.9}
       style={styles.back}
     >
       <View style={styles.backIcon}>
         <Icon path={icon.chevronDown} size={26} color={theme.textSecondary} />
       </View>
-    </Pressable>
+    </PressableScale>
   );
 
   if (error) {
@@ -147,7 +149,13 @@ export default function EpisodeScreen() {
 
         {podcast ? (
           <Link href={`/podcast/${podcast.id}`} asChild>
-            <Pressable accessibilityRole="link" style={styles.showLink}>
+            <Pressable
+              accessibilityRole="link"
+              style={({ pressed }) => [
+                styles.showLink,
+                { backgroundColor: pressed ? theme.surfaceHover : 'transparent' },
+              ]}
+            >
               <Text
                 style={[type('callout'), { color: tint?.text ?? theme.textSecondary }]}
                 numberOfLines={1}

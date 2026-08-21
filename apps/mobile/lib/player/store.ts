@@ -12,7 +12,7 @@ import {
 } from '@cue/core';
 import { requestNotificationPermissionsAsync } from 'expo-audio';
 import * as SecureStore from 'expo-secure-store';
-import { useSyncExternalStore } from 'react';
+import { useCallback, useRef, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 import { api } from '@/lib/api';
 import { isOnline } from '@/lib/connectivity';
@@ -312,6 +312,57 @@ export function usePlayerState(): PlayerState {
     (onChange) => getPlayer().subscribe(onChange),
     () => getPlayer().getState(),
   );
+}
+
+/**
+ * Subscribe React to a *slice* of the machine.
+ *
+ * The engine reports every 500ms, and every report re-emits the whole state —
+ * so a list row's play button subscribed through `usePlayerState` re-renders
+ * twice a second for the length of the episode to learn nothing it cared
+ * about. This is the same subscription with a gate: the component updates only
+ * when its selected value actually changes.
+ *
+ * The contract that makes that safe: **return a primitive or a stable
+ * reference**. Comparison is `Object.is`, so a selector that builds a fresh
+ * object per call never settles and renders forever. Compose separate calls
+ * for separate values instead of returning one object-shaped result:
+ *
+ *   const isCurrent = usePlayerSelector((s) => s.current?.id === episode.id);
+ *
+ */
+export function usePlayerSelector<T>(selector: (state: PlayerState) => T): T {
+  // Held in a ref so callers can pass an inline arrow without resubscribing —
+  // the subscription below is created once per component, not once per render.
+  const selectorRef = useRef(selector);
+  selectorRef.current = selector;
+
+  // Memoised against both the state identity *and* the selector identity: an
+  // inline arrow closes over props, and when those change between renders the
+  // cached answer computed from the old closure would outlive its own inputs.
+  const lastRef = useRef<{
+    state: PlayerState;
+    selector: (state: PlayerState) => T;
+    value: T;
+  } | null>(null);
+
+  const subscribe = useCallback(
+    (onChange: () => void) => getPlayer().subscribe(onChange),
+    [],
+  );
+
+  const getSnapshot = useCallback(() => {
+    const state = getPlayer().getState();
+    const last = lastRef.current;
+    if (last && last.state === state && last.selector === selectorRef.current) {
+      return last.value;
+    }
+    const value = selectorRef.current(state);
+    lastRef.current = { state, selector: selectorRef.current, value };
+    return value;
+  }, []);
+
+  return useSyncExternalStore(subscribe, getSnapshot);
 }
 
 /** Commands, stable across renders. */

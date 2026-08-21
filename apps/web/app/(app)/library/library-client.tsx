@@ -7,7 +7,7 @@ import { TINT_ATTR, tintVars } from '@cue/design';
 import type { LibraryPodcast } from '@cue/types';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { Artwork } from '@/components/media/artwork';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
@@ -119,7 +119,12 @@ export function LibraryClient() {
   );
 }
 
-function ShowRow({ show }: { show: LibraryPodcast }) {
+/**
+ * Memoised: up to a hundred of these render, and any shell-level state change
+ * (session settling, connectivity flipping) would otherwise re-run every row's
+ * tint resolution for identical output.
+ */
+const ShowRow = memo(function ShowRow({ show }: { show: LibraryPodcast }) {
   const t = useTranslator();
   /*
     Both fits of the show's colour, resolved by the stylesheet.
@@ -149,7 +154,7 @@ function ShowRow({ show }: { show: LibraryPodcast }) {
           show rather than of the UI. */}
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 rounded-[var(--radius-lg)] opacity-0 transition-opacity duration-[var(--duration-base)] ease-standard group-hover:opacity-100"
+        className="pointer-events-none absolute inset-0 rounded-[var(--radius-lg)] opacity-0 transition-opacity duration-[var(--duration-base)] ease-standard group-hover:opacity-100 group-active:opacity-100"
         style={{ background: tint ? 'var(--tint-wash)' : 'var(--color-surface-hover)' }}
       />
 
@@ -198,7 +203,7 @@ function ShowRow({ show }: { show: LibraryPodcast }) {
       ) : null}
     </Link>
   );
-}
+});
 
 function Placeholder() {
   return (

@@ -3,7 +3,7 @@
 import { colorVarStyle, tintedScheme } from '@cue/design';
 import { useEffect } from 'react';
 import { useNowPlayingTint } from '@/lib/now-playing-tint';
-import { usePlayerState } from '@/lib/player/store';
+import { usePlayerSelector } from '@/lib/player/store';
 import { isLightNow, useThemeChoice } from '@/lib/theme';
 
 /**
@@ -34,10 +34,12 @@ import { isLightNow, useThemeChoice } from '@/lib/theme';
  */
 export function NowPlayingTint() {
   const enabled = useNowPlayingTint();
-  const state = usePlayerState();
+  // Selected, not whole-state: this component renders nothing and cares about
+  // one string, while the store re-emits on every position tick. Subscribing
+  // to the snapshot would re-run this component four times a second during
+  // playback to arrive at the same `null`.
+  const color = usePlayerSelector((s) => s.current?.accentColor ?? null);
   const isLight = isLightNow(useThemeChoice());
-
-  const color = state.current?.accentColor ?? null;
 
   useEffect(() => {
     const root = document.documentElement;

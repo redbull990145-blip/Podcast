@@ -11,7 +11,7 @@ import {
   type PlayerState,
   type ProgressRecord,
 } from '@cue/core';
-import { useSyncExternalStore } from 'react';
+import { useCallback, useRef, useSyncExternalStore } from 'react';
 import { api } from '@/lib/api';
 import { readPreferences, writePreferences } from './preferences';
 import { WebAudioEngine } from './web-engine';
@@ -325,9 +325,70 @@ export function usePlayerState(): PlayerState {
   );
 }
 
-/** Commands, stable across renders. */
-export function usePlayerActions() {
-  return {
+/**
+ * Subscribe React to a *slice* of the machine.
+ *
+ * `usePlayerState` hands back the whole snapshot, and the machine re-emits on
+ * every position tick — several times a second while anything plays. A row's
+ * play button that only wants to know "is it me, and is it playing" has no
+ * business learning that; every visible row re-rendering four times a second
+ * to produce identical pixels is the kind of tax you pay for nothing. This is
+ * the same subscription with a gate: the component updates only when the
+ * selected value actually changes.
+ *
+ * The contract that makes that safe: **return a primitive or a stable
+ * reference**. The store compares with `Object.is`, so a selector that builds
+ * a fresh object or array per call never settles and renders forever:
+ *
+ *   const playing = usePlayerSelector((s) => s.current?.id === id && s.status === 'playing');
+ *
+ * Select what you need as separate calls rather than one object-shaped call —
+ * three booleans are three cheap comparisons; one fresh `{ a, b, c }` is an
+ * infinite render loop.
+ */
+export function usePlayerSelector<T>(selector: (state: PlayerState) => T): T {
+  // Held in a ref so callers can pass an inline arrow without resubscribing
+  // every render — the subscription below is created once and lives for the
+  // component's lifetime.
+  const selectorRef = useRef(selector);
+  selectorRef.current = selector;
+
+  // Memoised against the state identity *and* the selector identity: an inline
+  // arrow closes over props, and when those change between renders the cached
+  // answer computed from the old closure would outlive its own inputs.
+  const lastRef = useRef<{
+    state: PlayerState;
+    selector: (state: PlayerState) => T;
+    value: T;
+  } | null>(null);
+
+  const subscribe = useCallback(
+    (onChange: () => void) => getPlayer().subscribe(onChange),
+    [],
+  );
+
+  const getSnapshot = useCallback(() => {
+    const state = getPlayer().getState();
+    const last = lastRef.current;
+    if (last && last.state === state && last.selector === selectorRef.current) {
+      return last.value;
+    }
+    const value = selectorRef.current(state);
+    lastRef.current = { state, selector: selectorRef.current, value };
+    return value;
+  }, []);
+
+  return useSyncExternalStore(subscribe, getSnapshot, () => selectorRef.current(SERVER_STATE));
+}
+
+/**
+ * Commands.
+ *
+ * One object at module scope rather than a fresh literal per hook call: every
+ * consumer can put it straight into a dependency array or pass it to a memoised
+ * child without it going stale, because it never changes identity at all.
+ */
+const playerActions = {
     play: async (episode: PlayableEpisode) => {
       const player = getPlayer();
       // Resume where this listener left off, reconciled server-side. There is
@@ -410,7 +471,11 @@ export function usePlayerActions() {
     removeFromQueue: (episodeId: string) => getPlayer().removeFromQueue(episodeId),
     reorderQueue: (episodeIds: string[]) => getPlayer().reorderQueue(episodeIds),
     clearQueue: () => getPlayer().clearQueue(),
-  };
+};
+
+/** Commands, stable across renders. See `playerActions` above. */
+export function usePlayerActions() {
+  return playerActions;
 }
 
 /**
