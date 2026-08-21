@@ -18,6 +18,12 @@ import { useTranslator } from '@/components/i18n/locale-provider';
 import { api } from '@/lib/api';
 import { usePrefersReducedMotion, useTransition } from '@/lib/motion';
 import { usePlayerActions, usePlayerState, readPosition } from '@/lib/player/store';
+import {
+  driftMs,
+  OFFSET_STEP_MS,
+  setCaptionOffsetMs,
+  useCaptionOffsetMs,
+} from '@/lib/player/caption-sync';
 import { GenerateCaptions } from './generate-captions';
 
 /**
@@ -71,8 +77,8 @@ const DOTS = 3;
  * highlight has to be *drawn* before the sound it belongs to reaches the ear,
  * or it reads as late. See `CAPTION_LEAD_MS`.
  */
-function captionClockMs(): number {
-  return readPosition() * 1000 + CAPTION_LEAD_MS;
+function captionClockMs(offsetMs = 0): number {
+  return readPosition() * 1000 + CAPTION_LEAD_MS + offsetMs;
 }
 
 export function Captions({ episodeId, className }: { episodeId: string; className?: string }) {
@@ -83,6 +89,18 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
   const glide = useTransition('gentle');
 
   const [activeIndex, setActiveIndex] = useState(-1);
+
+  /**
+   * The listener's correction for this episode's ad load — see `caption-sync`.
+   *
+   * Read into a ref as well as used directly, because the frame loop must see
+   * the current value without being torn down and rebuilt every time somebody
+   * presses the nudge control. Rebuilding it mid-sweep drops a frame on the one
+   * interaction where the whole point is watching the highlight move.
+   */
+  const offsetMs = useCaptionOffsetMs(episodeId);
+  const offsetRef = useRef(offsetMs);
+  offsetRef.current = offsetMs;
 
   /**
    * Always asked for, never gated on the episode declaring a transcript URL.
@@ -264,7 +282,7 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
       gapRef.current = { dots, startMs: liveGap.startMs, endMs: liveGap.endMs };
     }
 
-    paint(captionClockMs());
+    paint(captionClockMs(offsetRef.current));
   }, [activeIndex, activeWords, liveGap, paint]);
 
   /**
@@ -281,7 +299,7 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
 
     let frame = 0;
     const tick = () => {
-      const positionMs = captionClockMs();
+      const positionMs = captionClockMs(offsetRef.current);
 
       const next = activeSegmentIndex(segments, positionMs);
       if (next !== lastRef.current) {
@@ -306,12 +324,15 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
    */
   useEffect(() => {
     if (!syncing || playing) return;
-    const positionMs = captionClockMs();
+    const positionMs = captionClockMs(offsetRef.current);
     const next = activeSegmentIndex(segments, positionMs);
     lastRef.current = next;
     setActiveIndex(next);
     paint(positionMs);
-  }, [syncing, playing, segments, state.positionSec, paint]);
+    // `offsetMs` is a dependency even though the value is read through the ref:
+    // nudging the sync while paused has to move the highlight immediately, and
+    // paused is exactly when somebody is most likely to be adjusting it.
+  }, [syncing, playing, segments, state.positionSec, offsetMs, paint]);
 
   // ------------------------------------------------------- the scroll ------
 
@@ -384,6 +405,14 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
    * retargeted rather than restarted, the correction reads as a change of
    * course rather than as a jump.
    */
+  /**
+   * Where the spring was last sent.
+   *
+   * Kept so a second measurement that agrees with the first can be *skipped*
+   * rather than restarting the animation — see the effect below.
+   */
+  const targetRef = useRef<number | null>(null);
+
   const scrollToActive = useCallback(
     (index: number, animated: boolean) => {
       const list = listRef.current;
@@ -396,14 +425,49 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
       const clamped = Math.max(0, Math.min(target, list.scrollHeight - list.clientHeight));
 
       if (!animated) {
+        targetRef.current = clamped;
         offset.jump(clamped);
         return;
       }
 
-      // Start from where the list actually is. If a reader scrolled and the
-      // resume timer has just fired, the motion value and the DOM disagree.
-      if (Math.abs(offset.get() - list.scrollTop) > 1) offset.jump(list.scrollTop);
+      /**
+       * A jump, not a glide, when the playhead has genuinely moved.
+       *
+       * Gliding is right for the ordinary case — one line to the next, a few
+       * hundred pixels — and wrong for a seek, which can be an hour of
+       * transcript away. Springing across that flings the column through
+       * several thousand lines of somebody else's conversation at a speed
+       * nobody can read, for as long as it takes to arrive.
+       *
+       * The same reasoning as `JUMP_SEC` in the playback clock, one layer up:
+       * past a certain size a movement is a discontinuity, and a cut is the
+       * honest way to draw one.
+       */
+      if (Math.abs(clamped - offset.get()) > list.clientHeight * 2) {
+        targetRef.current = clamped;
+        offset.jump(clamped);
+        return;
+      }
+
+      /*
+        Re-anchored only when the reader has actually taken over.
+
+        This used to re-sync whenever the motion value and `scrollTop`
+        disagreed by more than a pixel, which sounds harmless and was the main
+        source of stutter: `scrollTop` is quantised by the browser while the
+        motion value is not, so mid-glide the two routinely differ by about a
+        pixel — and `jump` resets velocity to zero. The spring was being
+        stopped dead and restarted several times on the way to every line,
+        which is exactly the juddering this scroll is supposed to avoid.
+
+        A hand-scroll is already caught by `yieldToReader`, which jumps the
+        value itself, so the only disagreement worth acting on here is a large
+        one — a resize, or a layout that moved under us.
+      */
+      if (Math.abs(offset.get() - list.scrollTop) > 24) offset.jump(list.scrollTop);
+
       animate(offset, clamped, glide);
+      targetRef.current = clamped;
     },
     [offset, glide],
   );
@@ -412,7 +476,34 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
     if (activeIndex < 0 || !followingRef.current) return;
 
     scrollToActive(activeIndex, !reduced);
-    const frame = requestAnimationFrame(() => scrollToActive(activeIndex, !reduced));
+
+    /**
+     * Measured again next frame, and re-aimed only if the answer moved.
+     *
+     * The second pass exists because the column's own end padding is set from
+     * a height measured in an effect, and a web font swapping in reflows every
+     * line — so the first measurement after mount can be against a list that
+     * has not settled. What it must *not* do is restart a healthy animation
+     * every few seconds for the rest of the episode, which is what calling it
+     * unconditionally did: the spring lost its velocity one frame in and
+     * finished the trip as a slower, flatter second animation.
+     *
+     * A pixel of tolerance, because sub-pixel layout differences are not a
+     * reflow and re-aiming at them costs a visible hitch to move nothing.
+     */
+    const frame = requestAnimationFrame(() => {
+      const list = listRef.current;
+      const line = list?.querySelector<HTMLElement>(`[data-line="${activeIndex}"]`);
+      if (!list || !line) return;
+
+      const target = line.offsetTop + line.offsetHeight / 2 - list.clientHeight * ANCHOR;
+      const clamped = Math.max(0, Math.min(target, list.scrollHeight - list.clientHeight));
+
+      if (targetRef.current === null || Math.abs(clamped - targetRef.current) > 1) {
+        scrollToActive(activeIndex, !reduced);
+      }
+    });
+
     return () => cancelAnimationFrame(frame);
   }, [activeIndex, reduced, scrollToActive]);
 
@@ -523,26 +614,33 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
   }
 
   return (
+    <div
+      className={['flex min-h-0 flex-col', className ?? ''].join(' ')}
+      /**
+       * The caption size moved up here from the list, and it had to.
+       *
+       * The measure below is in `ch`, which resolves against the font size of
+       * the element it is written on — so the size has to be on an ancestor of
+       * everything that uses it, not on the list alone. Setting it here leaves
+       * `max-w-[34ch]` on the list resolving against exactly the same inherited
+       * size it always did, and lets the sync row underneath line up with the
+       * column instead of guessing at its width.
+       *
+       * Deliberately not a type token. Every size in the scale is for reading at
+       * arm's length in a dense screen; this is read at a glance, from further
+       * away, as the only text on its half of the window. It is also the one
+       * place whose size should follow the window, because the column it lives
+       * in does.
+       */
+      style={{ fontSize: 'clamp(1.375rem, 1.9vw, 1.875rem)' }}
+    >
     <ol
       ref={listRef}
       aria-label={t.t('transcript.title')}
       style={{
-        /**
-         * The caption size lives here, on the list, and the lines inherit it.
-         *
-         * It has to, because the measure below is in `ch` and `ch` resolves
-         * against the font size of the element it is written on. Set on the
-         * lines instead, the list was still 15px UI text, and a 34-character
-         * measure came out around 250px — the captions wrapped every three or
-         * four words and read as a column of fragments.
-         *
-         * Deliberately not a type token. Every size in the scale is for reading
-         * at arm's length in a dense screen; this is read at a glance, from
-         * further away, as the only text on its half of the window. It is also
-         * the one place whose size should follow the window, because the column
-         * it lives in does.
-         */
-        fontSize: 'clamp(1.375rem, 1.9vw, 1.875rem)',
+        // Size is inherited from the wrapper, which is where it has to be set
+        // for `34ch` below and the sync row underneath to resolve against the
+        // same measure. See the note there.
         paddingBlockStart: columnHeight * ANCHOR,
         paddingBlockEnd: columnHeight * (1 - ANCHOR),
         // The column fades out rather than being cut off by the edge of the
@@ -573,18 +671,167 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
           'color-mix(in oklab, var(--color-text-primary) 38%, transparent)',
       }}
       className={[
-        'm-0 h-full list-none overflow-y-auto overscroll-contain',
+        // `min-h-0 flex-1` rather than `h-full`: the list is now a flex child
+        // sharing the column with the sync row, and `h-full` would claim the
+        // whole height and push that row out of the panel.
+        'm-0 min-h-0 flex-1 list-none overflow-y-auto overscroll-contain',
         // The measure is the point of the column. A caption running the full
         // width of a wide window is a line of body text in a large font, not a
         // lyric — the eye has to travel too far to find the next one, and the
         // shape stops reading as speech.
         'w-full max-w-[34ch] ps-1 pe-4',
         'scrollbar-none',
-        className ?? '',
       ].join(' ')}
     >
       {lines}
     </ol>
+
+      {/* Only for the episode actually playing, and only when the cues carry
+          timings — there is nothing to be out of sync with otherwise. */}
+      {syncing ? (
+        <CaptionSync
+          episodeId={episodeId}
+          offsetMs={offsetMs}
+          driftMs={driftMs(transcript?.audioDurationMs, state.durationSec)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * "These captions do not match what I am hearing."
+ *
+ * The control that answers the one caption complaint no amount of care in the
+ * timing code can fix: the audio a listener is served is stitched per request,
+ * so it is frequently a different cut from the one that was transcribed —
+ * different ads, in different places, and a different amount of drift for each
+ * person. See `caption-sync` for why this is a manual nudge rather than an
+ * automatic rescale.
+ *
+ * Quiet until it has a reason to speak. With no measured drift and no stored
+ * correction this is a single muted word, because the overwhelming majority of
+ * transcripts are in sync and a permanent row of adjustment buttons under them
+ * is an apology for a problem the reader does not have. When the two durations
+ * are known to disagree it says so plainly — that is the case where somebody is
+ * otherwise left thinking the feature is simply broken.
+ */
+function CaptionSync({
+  episodeId,
+  offsetMs,
+  driftMs: drift,
+}: {
+  episodeId: string;
+  offsetMs: number;
+  /** Non-null only when the two durations are known *and* disagree. */
+  driftMs: number | null;
+}) {
+  const t = useTranslator();
+  const [open, setOpen] = useState(false);
+
+  // Opened on its own when there is evidence, so the fix is in front of the
+  // person who needs it rather than behind a control they have no reason to
+  // press. A stored offset does the same: they have used this before on this
+  // episode and are likely to want it again.
+  const expanded = open || drift !== null || offsetMs !== 0;
+
+  const nudge = (delta: number) => setCaptionOffsetMs(episodeId, offsetMs + delta);
+
+  if (!expanded) {
+    return (
+      <div className="w-full max-w-[34ch] ps-1 pe-4">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="type-caption mt-2 cursor-pointer border-0 bg-transparent p-0 text-[var(--color-text-tertiary)] underline decoration-transparent underline-offset-4 transition-colors hover:text-[var(--color-text-secondary)] hover:decoration-[var(--color-border-strong)]"
+        >
+          {t.t('captions.outOfSync')}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-[34ch] ps-1 pe-4">
+      <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] pt-2.5">
+        {drift !== null ? (
+          // Said once, above the controls, and only when it is true. The number
+          // is not shown: it is the difference in *total length*, which is the
+          // evidence that the files differ rather than the amount any given cue
+          // is out by, and printing it would invite someone to dial in exactly
+          // that and find it did not work.
+          <p className="type-caption m-0 w-full text-[var(--color-text-tertiary)]">
+            {t.t('captions.differentCut')}
+          </p>
+        ) : null}
+
+        <span className="type-caption text-[var(--color-text-secondary)]">
+          {t.t('captions.sync')}
+        </span>
+
+        <div className="flex items-center gap-1">
+          <NudgeButton
+            label={t.t('captions.syncEarlier')}
+            onClick={() => nudge(-OFFSET_STEP_MS)}
+            glyph="−"
+          />
+
+          {/*
+            The current correction, in seconds and always signed.
+
+            Signed even at zero-point-something, because the sign is the only
+            part that says which way the last press moved things — and somebody
+            adjusting this is pressing a button and watching the words, not
+            reading a number they already predicted.
+          */}
+          <span className="type-timecode min-w-[3.5em] text-center text-[var(--color-text-primary)]">
+            {offsetMs === 0 ? '0.0s' : `${offsetMs > 0 ? '+' : '−'}${(Math.abs(offsetMs) / 1000).toFixed(1)}s`}
+          </span>
+
+          <NudgeButton
+            label={t.t('captions.syncLater')}
+            onClick={() => nudge(OFFSET_STEP_MS)}
+            glyph="+"
+          />
+        </div>
+
+        {offsetMs !== 0 ? (
+          <button
+            type="button"
+            onClick={() => setCaptionOffsetMs(episodeId, 0)}
+            className="type-caption cursor-pointer border-0 bg-transparent p-0 text-[var(--color-text-tertiary)] underline decoration-transparent underline-offset-4 transition-colors hover:text-[var(--color-text-secondary)] hover:decoration-[var(--color-border-strong)]"
+          >
+            {t.t('captions.syncReset')}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function NudgeButton({
+  label,
+  onClick,
+  glyph,
+}: {
+  label: string;
+  onClick: () => void;
+  glyph: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      // 28px rather than the 44px minimum: this sits inside a reading column at
+      // caption size, and a pair of full-size touch targets under the words
+      // would out-weigh the transcript they are adjusting. It is a secondary
+      // control on a surface that is not primarily touch-driven.
+      className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-[var(--color-border-strong)] bg-transparent type-caption leading-none text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)]"
+    >
+      {glyph}
+    </button>
   );
 }
 

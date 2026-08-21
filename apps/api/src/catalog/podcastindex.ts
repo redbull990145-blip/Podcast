@@ -194,8 +194,26 @@ export function createPodcastIndexClient(
         request('/search/byterm', {
           q: normalized,
           max: String(options.limit ?? 25),
-          // Ask upstream to drop dead feeds rather than filtering them here.
-          clean: '1',
+          /*
+            No `clean` parameter, and it is worth being explicit about why it is
+            absent rather than leaving a silence for somebody to helpfully fill.
+
+            This used to send `clean: '1'` under the comment "ask upstream to
+            drop dead feeds rather than filtering them here". That is not what
+            the flag does. In the PodcastIndex API `clean` means *return only
+            feeds marked non-explicit* — it has nothing to do with dead feeds —
+            so the effect was that every explicit show in the index was
+            invisible to search. Call Her Daddy, My Favorite Murder and Behind
+            the Bastards all returned zero results while "daddy" on its own
+            returned twenty-five, which is the shape of a search that looks
+            merely bad at its job rather than one that is filtering a whole
+            category out.
+
+            Explicitness is carried through to the client on the feed's own
+            `explicit` field, which is where a decision about showing it
+            belongs — a listener searching for a show by name has already
+            decided.
+          */
           ...(options.language ? { lang: options.language } : {}),
         }),
       );

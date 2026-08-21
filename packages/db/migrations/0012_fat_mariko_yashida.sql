@@ -1,0 +1,1 @@
+ALTER TABLE "transcription_jobs" ADD COLUMN "waiting_until" timestamp with time zone;

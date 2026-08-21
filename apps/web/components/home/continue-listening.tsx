@@ -14,6 +14,7 @@ import { Artwork } from '@/components/media/artwork';
 import { api } from '@/lib/api';
 import { usePlayerActions } from '@/lib/player/store';
 import { useSession } from '@/lib/session';
+import { isLightNow, useThemeChoice } from '@/lib/theme';
 
 /**
  * Pick up where you left off.
@@ -173,7 +174,19 @@ function ResumeHero({ entry }: { entry: ContinueEntry }) {
   const t = useTranslator();
   const { play, playAt } = usePlayerActions();
   const { left, fraction } = remainingOf(entry, t);
-  const tint = entry.accentColor ? deriveTint(entry.accentColor, 'dark') : null;
+  /*
+    Resolved on the client, which is the one thing this hero can do that the
+    tinted *pages* cannot.
+
+    Those render on the server and have to emit both palettes and let CSS
+    choose, because the theme is not known until a blocking script has read
+    localStorage. This section is client-rendered already — it is gated on the
+    session and shows a skeleton until that resolves — so it can simply ask
+    which theme is on, and `useThemeChoice` re-renders it if the answer changes
+    under it, including when the OS flips at sunset while `system` is selected.
+  */
+  const isLight = isLightNow(useThemeChoice());
+  const tint = entry.accentColor ? deriveTint(entry.accentColor, isLight ? 'light' : 'dark') : null;
   /**
    * The show's colour as a whole palette, not just a background.
    *
@@ -188,7 +201,9 @@ function ResumeHero({ entry }: { entry: ContinueEntry }) {
    * way a hand-picked foreground colour would — it is the same move the
    * expanded player and the podcast page make, for the same reason.
    */
-  const scheme = entry.accentColor ? tintedScheme(entry.accentColor) : null;
+  const scheme = entry.accentColor
+    ? tintedScheme(entry.accentColor, isLight ? 'light' : 'dark')
+    : null;
 
   const playable = playableFromQueueEntry(entry);
 

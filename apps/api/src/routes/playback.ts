@@ -99,7 +99,20 @@ export function playbackRoutes(app: FastifyInstance): void {
 
     const incoming: ProgressRecord = {
       positionSec: Math.round(input.positionSec),
-      durationSec: input.durationSec ?? null,
+      /*
+        Rounded for the same reason `positionSec` is: the column is an integer
+        and the client's number never is. `HTMLMediaElement.duration` is a
+        float on essentially every browser and every file — 1882.122449 for a
+        typical MP3 — so this write failed with a Postgres type error on
+        nearly every real report, silently, because the client swallows a
+        failed progress write rather than surface it (a dropped position
+        report is not worth interrupting listening for). The device sending it
+        never knew; the server logged "unhandled error" and 500ed every few
+        seconds for as long as anything played.
+      */
+      durationSec: input.durationSec === null || input.durationSec === undefined
+        ? null
+        : Math.round(input.durationSec),
       completed: input.completed ?? false,
       deviceId: input.deviceId,
       // A client clock ahead of ours would let one device win every race, so

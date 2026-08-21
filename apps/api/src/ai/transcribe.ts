@@ -26,9 +26,9 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { AppError } from '../errors.ts';
 import { claimQuota, keyFor, refundQuota } from './access.ts';
-import { fetchAudio } from './audio.ts';
+import { streamAudioChunks } from './audio.ts';
 import { transcribe as transcribeChunk, type TranscribedSegment } from './groq.ts';
-import { chunkMp3, durationMs } from './mp3.ts';
+import type { Mp3Chunk } from './mp3.ts';
 import { complete, enqueue, fail, heartbeat, isActive, jobFor, type JobProgress } from './queue.ts';
 
 /**
@@ -39,6 +39,21 @@ import { complete, enqueue, fail, heartbeat, isActive, jobFor, type JobProgress 
  * over budget because a single frame could not be split.
  */
 const CHUNK_BYTES = 20 * 1024 * 1024;
+
+/**
+ * How long one episode may spend waiting out the provider's rate limit, in
+ * total, across all of its chunks.
+ *
+ * A job-wide budget rather than a per-upload one. The free tier's allowance
+ * refills continuously, so a long episode does not fail against it so much as
+ * meter itself through it — the useful question is not "is this chunk worth
+ * waiting for" but "is this episode going to finish today". Forty-five minutes
+ * covers a full refill cycle with room to spare, which is what a two-and-a-half
+ * hour episode needs on a shared key; past that the shared allowance is not
+ * going to serve this episode today, and saying so returns the reader's button
+ * rather than holding the worker indefinitely.
+ */
+const WAIT_BUDGET_MS = 45 * 60_000;
 
 export type TranscribeProgress = JobProgress;
 
@@ -112,6 +127,12 @@ export async function transcribeProgress(
     stage: job.stage as TranscribeProgress['stage'],
     done: job.done,
     total: job.total,
+    // Only meaningful while waiting, and only while still in the future — a
+    // deadline that has passed says the wait is over, which is not something
+    // to ask the client to render a countdown to.
+    ...(job.waitingUntil && job.waitingUntil.getTime() > Date.now()
+      ? { waitingUntilMs: job.waitingUntil.getTime() }
+      : {}),
   };
 }
 
@@ -194,12 +215,33 @@ export async function runJob(
       'transcription attempt failed',
     );
 
-    if (exhausted || terminal) {
-      // Only now is this a dead end worth showing. Marking the transcript
-      // failed while a retry is still queued would report one to a reader who
-      // is about to get a transcript.
-      await mark(app.db, episodeId, 'failed', detail);
+    /*
+      Marked failed here unconditionally now — not only once `exhausted` or
+      `terminal`, which is the fix for the report this file exists to answer.
 
+      The comment this replaces reasoned that marking the transcript failed
+      "while a retry is still queued" would lie to a reader about to get one.
+      That retry does not exist. `fail()` in `queue.ts` always leaves the job
+      unreachable to `claimNext` — nothing distinguishes "one attempt left" from
+      "out of attempts" in what it claims — so the only way back from *any*
+      clean failure is a person pressing "Generate captions" again, which
+      `enqueue()` answers by reviving the job. `exhausted` also cannot become
+      true through that path: reviving resets `attempts` to zero, so a single
+      button press can never accumulate the count `MAX_ATTEMPTS` compares
+      against, and this branch was reached almost only by errors this codebase
+      already treats as terminal — the case it was supposedly distinguishing
+      from barely occurs.
+
+      So leaving the transcript at `processing` here left it there forever: no
+      further write was ever coming, the progress bar had nothing left to move
+      it, and the reader had no way to learn why or a button to press again —
+      `GenerateCaptions` only shows one once the status is no longer
+      `processing`. This is not the rare case; for an ordinary rate limit or a
+      dropped connection, it was the *only* case.
+    */
+    await mark(app.db, episodeId, 'failed', detail);
+
+    if (exhausted || terminal) {
       // The work was charged for and will not happen. Refunded here rather than
       // per attempt, because a retry spends nothing new.
       if (job.userId && job.quotaDay) {
@@ -231,90 +273,107 @@ async function run(
 ): Promise<void> {
   await heartbeat(app.db, episodeId, { stage: 'fetching', done: 0, total: 0 });
 
-  const audio = await fetchAudio(audioUrl);
-
-  if (audio.status !== 'ok') {
-    /*
-      Two codes for one situation, because they mean different things to the
-      queue. `bad_request` is this file will never work — too big, empty, gone
-      — and is terminal; `upstream_unavailable` is it did not work *this time*
-      and earns the retries.
-    */
-    throw new AppError(
-      audio.permanent ? 'bad_request' : 'upstream_unavailable',
-      `Could not fetch the audio: ${audio.detail}`,
-    );
-  }
-
-  await heartbeat(app.db, episodeId, { stage: 'splitting', done: 0, total: 0 });
-
-  const chunks = chunkMp3(audio.bytes, CHUNK_BYTES);
-
-  /**
-   * Not an MP3.
-   *
-   * A minority of shows ship AAC in an MP4 container, which cannot be split on
-   * frame boundaries by this code. If it fits in one upload we send it whole
-   * and Whisper handles the format perfectly well; if it does not, we say so
-   * plainly rather than producing half a transcript. Splitting MP4 properly
-   * means parsing sample tables, which is a different piece of work than this.
-   */
-  const pieces =
-    chunks.length > 0
-      ? chunks
-      : audio.bytes.length <= CHUNK_BYTES
-        ? [{ bytes: audio.bytes, startMs: 0, durationMs: 0 }]
-        : [];
-
-  if (pieces.length === 0) {
-    throw new AppError(
-      'bad_request',
-      'This episode’s audio is in a format too large to split for transcription (only MP3 can be split).',
-    );
-  }
-
-  /**
-   * What this particular copy of the audio actually was.
-   *
-   * Measured by walking frame headers, so it describes the bytes in hand rather
-   * than anything the publisher claimed. Kept in a variable and *stored* with
-   * the transcript, because the enclosure is stitched per request: the file a
-   * listener is served is routinely a different length from this one, and the
-   * cues below are only valid against this one. See `transcripts.audioDurationMs`.
-   */
-  const audioDurationMs = durationMs(audio.bytes);
-  const audioBytes = audio.bytes.length;
-
-  app.log.info(
-    { episodeId, chunks: pieces.length, bytes: audioBytes, durationMs: audioDurationMs },
-    'transcribing',
-  );
-
   const collected: StoredSegment[] = [];
+  let uploaded = 0;
 
   /**
-   * One chunk at a time.
+   * How many chunks this episode probably has, from its declared size — set
+   * once the download's response headers arrive, long before the first chunk
+   * does. `0` means unknown, matching every other "nothing to count yet" spot
+   * in this progress model.
    *
-   * Parallel uploads would finish sooner and would also be the fastest way to
-   * hit the free tier's rate limit on the shared key, converting a slow success
-   * into a fast failure for everyone.
+   * The gap this closes: for a large episode the download is the single
+   * longest silent stretch in the whole job — a 350MB, 320kbps show takes over
+   * a minute just to fetch, and until now nothing was reported for the whole
+   * of it beyond the one "fetching" heartbeat sent before the request even
+   * went out. A listener watching that has no way to tell a slow download from
+   * a dead one. This does not turn the fetching stage determinate — there is
+   * still nothing *done* to show a fraction of — but it lets the label say
+   * something true about how long a wait to expect, rather than nothing.
    */
-  let done = 0;
-  await heartbeat(app.db, episodeId, { stage: 'transcribing', done, total: pieces.length });
+  let estimatedChunks = 0;
 
-  for (const piece of pieces) {
+  /** Time already spent parked on rate limits, against `WAIT_BUDGET_MS`. */
+  let waitedMs = 0;
+
+  /*
+    Upload sequentially as chunks arrive from the download, rather than
+    downloading everything first and then uploading.
+
+    This is what lets a three-hour, 320kbps episode — 350MB, a real file in
+    this catalogue — transcribe at all: buffering it whole before splitting is
+    what the old `MAX_BYTES` ceiling existed to protect against, and it refused
+    exactly this kind of long, well-recorded interview show. `streamAudioChunks`
+    never holds more than roughly one chunk in memory, so the ceiling on an
+    episode's length is now a sanity check rather than a memory budget — see
+    the note on `MAX_BYTES` in `audio.ts`.
+
+    Sequential rather than parallel for the same reason it always was:
+    parallel uploads would finish sooner and would also be the fastest way to
+    hit the free tier's rate limit on the shared key, converting a slow
+    success into a fast failure for everyone.
+  */
+  const uploadChunk = async (piece: Mp3Chunk): Promise<void> => {
     const segments = await transcribeChunk({
       key: funding.key,
       byok: funding.byok,
       bytes: piece.bytes,
       filename: `${episodeId}-${piece.startMs}.mp3`,
+      /**
+       * Keep beating, and say why nothing is moving.
+       *
+       * Two things depend on this. The queue calls a job abandoned after three
+       * minutes of silence, and a rate-limit wait can approach that on its own
+       * — so without a beat here another worker would claim the episode and
+       * start it again from the beginning, which is the exact duplicated
+       * 350MB download this whole path exists to avoid.
+       *
+       * And the reader gets the truth. "Waiting for the shared allowance,
+       * resuming in 1:14, 7 of 18 done" is a different message from a spinner
+       * that has not moved in ten minutes, even though the spinner was the
+       * honest rendering of everything this job previously knew how to say.
+       * `done`/`total` stay on the real chunk count throughout, so the bar
+       * holds its position rather than resetting for the pause.
+       */
+      onWait: ({ waitMs, remainingMs }) => {
+        // The opening notice of a wait is the one that reports its full length,
+        // so it is the one that charges the budget. Later notices of the same
+        // wait are the countdown, and charging those would bill it repeatedly.
+        if (remainingMs === waitMs) waitedMs += waitMs;
+
+        return heartbeat(app.db, episodeId, {
+          stage: 'waiting',
+          done: uploaded,
+          total: Math.max(estimatedChunks, uploaded),
+          waitingUntilMs: Date.now() + remainingMs,
+        });
+      },
+      rateLimitBudgetMs: Math.max(0, WAIT_BUDGET_MS - waitedMs),
     });
 
-    done += 1;
-    // Doubles as the liveness beat. A chunk is minutes of work, so a job that
-    // did not report between them would look abandoned and be taken by another
-    // worker halfway through.
-    await heartbeat(app.db, episodeId, { stage: 'transcribing', done, total: pieces.length });
+    uploaded += 1;
+    /*
+      Doubles as the liveness beat. A chunk is minutes of work, so a job that
+      did not report between them would look abandoned and be taken by another
+      worker halfway through.
+
+      `total` is an estimate now rather than an exact count: the old code knew
+      how many pieces existed before uploading any of them, because it had
+      already downloaded and split the whole file first. Streaming trades that
+      certainty for the memory saving above, so the bar is honest about it —
+      `total` only ever grows to match `uploaded` if nothing better is known,
+      which is the same "nothing to count yet, so do not pretend otherwise"
+      reasoning the client already applies when `progress` is null.
+
+      `estimatedChunks` is taken over the moment reality exceeds it — a size
+      declared from a stitched-per-request enclosure is a guess, and `uploaded`
+      is a fact.
+    */
+    await heartbeat(app.db, episodeId, {
+      stage: 'transcribing',
+      done: uploaded,
+      total: Math.max(estimatedChunks, uploaded),
+    });
 
     for (const segment of placeChunk(segments, piece)) {
       collected.push({
@@ -329,6 +388,47 @@ async function run(
         words: segment.words,
       });
     }
+  };
+
+  const outcome = await streamAudioChunks(audioUrl, CHUNK_BYTES, uploadChunk, {
+    onStarted: (declaredBytes) => {
+      if (declaredBytes === null) return;
+      estimatedChunks = Math.max(1, Math.ceil(declaredBytes / CHUNK_BYTES));
+      // Fire-and-forget: this is a courtesy update between two real stages,
+      // not a step anything downstream waits on, and the next real heartbeat
+      // is at most a few seconds behind it either way.
+      void heartbeat(app.db, episodeId, { stage: 'fetching', done: 0, total: estimatedChunks });
+    },
+  });
+
+  if (outcome.status === 'error') {
+    /*
+      Two codes for one situation, because they mean different things to the
+      queue. `bad_request` is this file will never work — too big, empty, gone
+      — and is terminal; `upstream_unavailable` is it did not work *this time*
+      and earns the retries.
+    */
+    throw new AppError(
+      outcome.permanent ? 'bad_request' : 'upstream_unavailable',
+      `Could not fetch the audio: ${outcome.detail}`,
+    );
+  }
+
+  /**
+   * Not an MP3, and too big to hand over whole.
+   *
+   * A minority of shows ship AAC in an MP4 container, which cannot be split on
+   * frame boundaries by this code. If it fits in one upload it was already
+   * sent whole by `streamAudioChunks` — this branch is only reached when it
+   * did not, and there is nothing to do but say so plainly rather than produce
+   * half a transcript. Splitting MP4 properly means parsing sample tables,
+   * which is a different piece of work than this.
+   */
+  if (outcome.status === 'unsplittable') {
+    throw new AppError(
+      'bad_request',
+      'This episode’s audio is in a format too large to split for transcription (only MP3 can be split).',
+    );
   }
 
   if (collected.length === 0) {
@@ -344,7 +444,7 @@ async function run(
    * the concatenated case — it is assembled here, from separate uploads — and
    * it was the one path that skipped the sort.
    *
-   * `placeChunk` now keeps each chunk inside its own span, so this should be a
+   * `placeChunk` keeps each chunk inside its own span, so this should be a
    * no-op. It stays because the cost is one sort of an already-ordered array
    * per episode, and the thing it protects against is a binary search silently
    * returning wrong answers across a whole region of the transcript.
@@ -357,11 +457,7 @@ async function run(
     segment.index = index;
   });
 
-  await heartbeat(app.db, episodeId, {
-    stage: 'saving',
-    done: pieces.length,
-    total: pieces.length,
-  });
+  await heartbeat(app.db, episodeId, { stage: 'saving', done: uploaded, total: uploaded });
 
   await app.db
     .update(transcripts)
@@ -372,15 +468,23 @@ async function run(
       segments: collected,
       // Recorded with the cues they describe, in the same write, so a transcript
       // can never exist without the measurement that says what it is timed
-      // against.
-      audioDurationMs,
-      audioBytes,
+      // against. Measured by the streaming download itself now rather than by
+      // walking a finished buffer, but it is the same number either way — the
+      // total of every confirmed frame's duration.
+      audioDurationMs: outcome.audioDurationMs,
+      audioBytes: outcome.audioBytes,
       fetchedAt: new Date(),
     })
     .where(eq(transcripts.episodeId, episodeId));
 
   app.log.info(
-    { episodeId, segments: collected.length, audioDurationMs, audioBytes },
+    {
+      episodeId,
+      chunks: uploaded,
+      segments: collected.length,
+      audioDurationMs: outcome.audioDurationMs,
+      audioBytes: outcome.audioBytes,
+    },
     'transcription ready',
   );
 }

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { audioStart, chunkMp3, durationMs, frames, readFrameHeader } from './mp3.ts';
+import {
+  audioStart,
+  chunkMp3,
+  durationMs,
+  frames,
+  Mp3ChunkStream,
+  readFrameHeader,
+  resolveTagEnd,
+} from './mp3.ts';
 
 /**
  * Build one MPEG-1 Layer III frame.
@@ -239,5 +247,114 @@ describe('durationMs', () => {
 
   it('is zero for a file with no frames', () => {
     expect(durationMs(new TextEncoder().encode('nope'))).toBe(0);
+  });
+});
+
+describe('resolveTagEnd', () => {
+  it('is null when there is not even a header yet', () => {
+    expect(resolveTagEnd(new Uint8Array(5))).toBeNull();
+  });
+
+  it('is null while the declared tag is still arriving', () => {
+    const tag = id3(500);
+    expect(resolveTagEnd(tag.subarray(0, 200))).toBeNull();
+  });
+
+  it('resolves once the whole tag is in hand, matching audioStart', () => {
+    const bytes = concat(id3(500), frame());
+    expect(resolveTagEnd(bytes)).toBe(audioStart(bytes));
+  });
+
+  it('is zero — resolved, not unknown — for a file with no tag at all', () => {
+    expect(resolveTagEnd(frame())).toBe(0);
+  });
+});
+
+describe('Mp3ChunkStream', () => {
+  /**
+   * Feed a whole file through the stream in pieces and collect every chunk.
+   *
+   * `sizes` describes how the caller happens to have received the bytes —
+   * standing in for TCP segments, which have nothing to do with frame or
+   * chunk boundaries and routinely cut a header in half.
+   */
+  function pushInPieces(bytes: Uint8Array, maxBytes: number, pieceSize: number): ReturnType<typeof chunkMp3> {
+    const stream = new Mp3ChunkStream(maxBytes);
+    const out: ReturnType<typeof chunkMp3> = [];
+
+    for (let at = 0; at < bytes.length; at += pieceSize) {
+      out.push(...stream.push(bytes.subarray(at, at + pieceSize)));
+    }
+    out.push(...stream.finish());
+    return out;
+  }
+
+  /** The property the whole class exists for: it must agree with `chunkMp3`. */
+  function expectEquivalent(bytes: Uint8Array, maxBytes: number) {
+    const whole = chunkMp3(bytes, maxBytes);
+
+    for (const pieceSize of [1, 2, 3, 7, 64, 512, bytes.length, bytes.length * 2]) {
+      const streamed = pushInPieces(bytes, maxBytes, pieceSize);
+
+      expect(streamed.map((c) => ({ startMs: c.startMs, durationMs: c.durationMs, length: c.bytes.length }))).toEqual(
+        whole.map((c) => ({ startMs: c.startMs, durationMs: c.durationMs, length: c.bytes.length })),
+      );
+      // Not just the shape — the actual bytes, so a boundary computed one byte
+      // off would fail here even if every length happened to match.
+      for (let i = 0; i < streamed.length; i += 1) {
+        expect(streamed[i]!.bytes).toEqual(whole[i]!.bytes);
+      }
+    }
+  }
+
+  it('matches chunkMp3 on a run of same-size frames, at every push granularity', () => {
+    expectEquivalent(concat(...Array.from({ length: 50 }, () => frame())), 5000);
+  });
+
+  it('matches chunkMp3 on a variable-bitrate stream', () => {
+    const bytes = concat(
+      ...Array.from({ length: 40 }, (_, i) => frame({ kbps: [64, 96, 128, 192, 256, 320][i % 6]! })),
+    );
+    expectEquivalent(bytes, 4000);
+  });
+
+  it('matches chunkMp3 with an ID3 tag ahead of the audio', () => {
+    expectEquivalent(concat(id3(3000), ...Array.from({ length: 30 }, () => frame())), 4000);
+  });
+
+  it('matches chunkMp3 when a single frame exceeds the budget', () => {
+    expectEquivalent(concat(frame({ kbps: 320 }), frame({ kbps: 320 })), 500);
+  });
+
+  it('matches chunkMp3 across many chunk boundaries', () => {
+    // 200 frames at 417 bytes ≈ 83KB, cut into ~2KB pieces: roughly 40 chunks,
+    // several times more than the earlier tests, to stress the "carry the
+    // in-progress chunk across several pushes" path repeatedly rather than
+    // once.
+    expectEquivalent(concat(...Array.from({ length: 200 }, () => frame())), 2000);
+  });
+
+  it('produces nothing for a file with no recognisable frames', () => {
+    const notAudio = new TextEncoder().encode('<!doctype html>'.repeat(50));
+    expect(pushInPieces(notAudio, 1000, 17)).toEqual([]);
+  });
+
+  it('reports the true total duration once finished', () => {
+    const bytes = concat(...Array.from({ length: 100 }, () => frame()));
+    const stream = new Mp3ChunkStream(5000);
+    for (let at = 0; at < bytes.length; at += 37) stream.push(bytes.subarray(at, at + 37));
+    stream.finish();
+    expect(stream.totalDurationMs).toBe(durationMs(bytes));
+  });
+
+  it('resynchronises past garbage the same way chunkMp3 does', () => {
+    const junk = new Uint8Array(64).fill(0x13);
+    expectEquivalent(concat(frame(), frame(), junk, frame(), frame()), 900);
+  });
+
+  it('handles an ID3 tag that arrives split across many small pushes', () => {
+    // The tag alone is bigger than several of the push sizes tried below, so
+    // `resolveTagEnd` must return null and wait through more than one push.
+    expectEquivalent(concat(id3(5000), frame(), frame(), frame()), 3000);
   });
 });

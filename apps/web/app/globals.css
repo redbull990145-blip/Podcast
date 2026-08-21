@@ -138,20 +138,36 @@ body {
  * `tintedScheme()` the way those surfaces already do, rather than to nest
  * another switch here.
  */
+/*
+ * `--tint-blend` is here for the same reason the two colours are.
+ *
+ * A wash laid over an already-tinted ground has to *lift* it on a dark theme —
+ * an opaque band at that lightness is a slightly different flat colour with a
+ * visible seam where it stops, whereas screening only ever brightens, so the
+ * band fades out instead of ending. On paper the identical argument runs the
+ * other way: screening a near-white wash onto a near-white page computes back
+ * to near-white and the band simply vanishes, so there the wash has to darken.
+ *
+ * Carried as a variable rather than branched at the call site because the call
+ * sites are server components — the same constraint that put the colours here.
+ */
 [data-tint] {
   --tint-wash: var(--tint-wash-dark);
   --tint-text: var(--tint-text-dark);
+  --tint-blend: screen;
 }
 
 [data-theme='light'] [data-tint] {
   --tint-wash: var(--tint-wash-light);
   --tint-text: var(--tint-text-light);
+  --tint-blend: multiply;
 }
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) [data-tint] {
     --tint-wash: var(--tint-wash-light);
     --tint-text: var(--tint-text-light);
+    --tint-blend: multiply;
   }
 }
 

@@ -186,11 +186,29 @@ export const transcriptionJobs = pgTable(
      */
     heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
 
-    /** `fetching`, `splitting`, `transcribing` or `saving`, for the progress ring. */
+    /**
+     * `fetching`, `splitting`, `transcribing`, `waiting` or `saving`, for the
+     * progress ring.
+     */
     stage: text('stage'),
     /** Chunks finished and chunks total; both 0 until the audio has been split. */
     done: integer('done').notNull().default(0),
     total: integer('total').notNull().default(0),
+
+    /**
+     * When a job parked behind the provider's rate limit expects to resume.
+     *
+     * Stored as the deadline rather than as seconds remaining, because the
+     * client polls: a number counted down server-side is already stale by the
+     * time it is read, and would tick in whatever irregular steps the poll
+     * happened to land on. An instant is true whenever it is read, so the
+     * client can run a smooth local countdown against it between polls.
+     *
+     * Null in every stage but `waiting`, and cleared on the way out of it — a
+     * deadline left behind would have the reader waiting for a moment that has
+     * already passed.
+     */
+    waitingUntil: timestamp('waiting_until', { withTimezone: true }),
 
     /** Why the last attempt failed, so a retry can say something specific. */
     detail: text('detail'),

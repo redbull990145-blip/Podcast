@@ -218,3 +218,229 @@ export function durationMs(bytes: Uint8Array): number {
   for (const frame of frames(bytes)) total += frame.durationMs;
   return Math.round(total);
 }
+
+// ---------------------------------------------------------- streaming split --
+
+/**
+ * `audioStart`, for a buffer that is still arriving.
+ *
+ * `audioStart` clamps its answer to `bytes.length`, which is the right call for
+ * a buffer holding the whole file and the wrong one for a buffer holding the
+ * first few kilobytes of one: podcast cover art routinely makes an ID3v2 tag
+ * hundreds of kilobytes, comfortably more than a single network read, and
+ * clamping there would have the streaming chunker "skip the tag" at a point
+ * still inside it and start scanning cover-art bytes for frame sync words.
+ *
+ * Returns `null` for "not enough has arrived to know yet" — the caller's job is
+ * to wait for more and ask again, not to guess.
+ */
+export function resolveTagEnd(bytes: Uint8Array): number | null {
+  if (bytes.length < 10) return null;
+  if (bytes[0] !== 0x49 || bytes[1] !== 0x44 || bytes[2] !== 0x33) return 0; // 'ID3'
+
+  const size =
+    ((bytes[6]! & 0x7f) << 21) |
+    ((bytes[7]! & 0x7f) << 14) |
+    ((bytes[8]! & 0x7f) << 7) |
+    (bytes[9]! & 0x7f);
+
+  const footer = (bytes[5]! & 0x10) !== 0 ? 10 : 0;
+  const end = 10 + size + footer;
+
+  return end <= bytes.length ? end : null;
+}
+
+function concatAll(parts: readonly Uint8Array[]): Uint8Array {
+  if (parts.length === 1) return parts[0]!;
+
+  const total = parts.reduce((sum, part) => sum + part.byteLength, 0);
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.byteLength;
+  }
+  return out;
+}
+
+/**
+ * The same join, exported for the one caller outside this file that needs it.
+ *
+ * `audio.ts` keeps a small raw buffer alive only while an episode might still
+ * turn out to be the small, never-recognised-as-MP3 case — untimed audio in a
+ * container this module cannot parse, handed to Whisper whole rather than
+ * refused on our own uncertainty. Assembling that buffer is the identical
+ * "many small reads, one copy" problem `Mp3ChunkStream` solves internally, so
+ * it gets the same answer rather than a second implementation of it.
+ */
+export function concatAllForFallback(parts: readonly Uint8Array[]): Uint8Array {
+  return concatAll(parts);
+}
+
+/**
+ * `chunkMp3`, fed a downloading file instead of a downloaded one.
+ *
+ * The reason this exists is memory, not correctness: `chunkMp3` needs the
+ * whole episode in hand before it can cut the first chunk, which is exactly
+ * what makes a three-hour, 320kbps interview show — a real file in this
+ * catalogue, and not a rare one — cost 350MB of resident memory before a
+ * single byte can be sent anywhere. This produces byte-for-byte the same
+ * chunks (proven in `mp3.test.ts` against `chunkMp3` on identical input, fed
+ * through every push pattern from "one call" to "one byte at a time"), while
+ * never holding more than roughly one chunk's worth of data at a time —
+ * independent of how long the episode runs.
+ *
+ * **The trick is deferred concatenation.** Pushed segments are queued as
+ * references, not copied, until enough have arrived to plausibly contain a
+ * full chunk; only then are they joined into one buffer and walked for a cut
+ * point. That single join costs one chunk's worth of copying, not the whole
+ * file's — the same total work `chunkMp3` already does, just spread across
+ * many small buffers instead of paid for against one enormous one.
+ *
+ * **State carried between calls is a time, not a byte offset.** Byte offsets
+ * into "the buffer" stop meaning anything the moment the buffer is rebuilt on
+ * the next push, so what survives a call is `baseMs` alone — the elapsed
+ * position of the very first retained byte. Every call re-walks `combined`
+ * from its start rather than resuming mid-scan: an earlier version tried to
+ * resume past the frames already confirmed by pre-seeding the loop's offset,
+ * and it was wrong in exactly the way that sounds plausible and costs a day —
+ * `elapsedMs` only advances *inside* the loop, so skipping straight past
+ * already-known frames skipped advancing the clock for them too, and every
+ * chunk after the first came out with `durationMs: 0`. Re-walking costs a
+ * small constant multiple of CPU, because `readFrameHeader` is pure and cheap;
+ * getting the clock right is worth every cycle of it.
+ */
+export class Mp3ChunkStream {
+  private readonly maxBytes: number;
+
+  private retained: Uint8Array[] = [];
+  private retainedBytes = 0;
+  private tagResolved = false;
+
+  /** Elapsed-ms position of the first byte of `retained`. */
+  private baseMs = 0;
+  /** How far frame-walking has progressed, for `totalDurationMs` once streaming ends. */
+  private walkedMs = 0;
+
+  constructor(maxBytes: number) {
+    this.maxBytes = maxBytes;
+  }
+
+  /** Feed the next bytes as they arrive. Returns any chunks now complete, in order. */
+  push(segment: Uint8Array): Mp3Chunk[] {
+    if (segment.byteLength === 0) return [];
+
+    this.retained.push(segment);
+    this.retainedBytes += segment.byteLength;
+
+    return this.retainedBytes >= this.maxBytes ? this.drain(false) : [];
+  }
+
+  /** No more data. Emits whatever remains as a final, possibly under-sized, chunk. */
+  finish(): Mp3Chunk[] {
+    return this.drain(true);
+  }
+
+  /** Total duration walked so far — the true episode length once `finish()` has run. */
+  get totalDurationMs(): number {
+    return Math.round(this.walkedMs);
+  }
+
+  private drain(final: boolean): Mp3Chunk[] {
+    if (this.retainedBytes === 0) return [];
+
+    const combined = concatAll(this.retained);
+
+    let scanStart = 0;
+    if (!this.tagResolved) {
+      const end = resolveTagEnd(combined);
+      if (end === null) {
+        if (!final) {
+          this.retained = [combined];
+          return [];
+        }
+        // The stream ended mid-tag. There is no audio to recover from a file
+        // that is nothing but a partial cover-art payload.
+        this.retained = [];
+        this.retainedBytes = 0;
+        return [];
+      }
+      scanStart = end;
+      this.tagResolved = true;
+    }
+
+    let chunkStart = -1;
+    let chunkEnd = -1;
+    let chunkStartMs = this.baseMs;
+    let elapsedMs = this.baseMs;
+    let offset = scanStart;
+
+    const out: Mp3Chunk[] = [];
+
+    while (offset + 4 <= combined.length) {
+      const header = readFrameHeader(combined, offset);
+
+      if (!header) {
+        offset += 1;
+        continue;
+      }
+
+      // The tail of what has arrived so far, mid-frame. Wait for more, unless
+      // this is genuinely the end of the download — then it is a truncated
+      // last frame, and `frames()` would stop here too.
+      if (!final && header.offset + header.length > combined.length) break;
+
+      if (chunkStart >= 0 && chunkEnd - chunkStart + header.length > this.maxBytes) {
+        out.push({
+          bytes: combined.subarray(chunkStart, chunkEnd),
+          startMs: Math.round(chunkStartMs),
+          durationMs: Math.round(elapsedMs) - Math.round(chunkStartMs),
+        });
+        chunkStart = -1;
+      }
+
+      if (chunkStart < 0) {
+        chunkStart = header.offset;
+        chunkStartMs = elapsedMs;
+      }
+
+      chunkEnd = header.offset + header.length;
+      elapsedMs += header.durationMs;
+      offset = chunkEnd;
+    }
+
+    this.walkedMs = elapsedMs;
+
+    if (final) {
+      if (chunkStart >= 0 && chunkEnd > chunkStart) {
+        out.push({
+          bytes: combined.subarray(chunkStart, chunkEnd),
+          startMs: Math.round(chunkStartMs),
+          durationMs: Math.round(elapsedMs) - Math.round(chunkStartMs),
+        });
+      }
+      this.retained = [];
+      this.retainedBytes = 0;
+      return out;
+    }
+
+    /*
+      What to keep for next time, and where its clock starts.
+
+      Mid-chunk, that is everything from the chunk's own first byte onward —
+      including any not-yet-complete tail frame past `chunkEnd`, which may
+      complete on the next push — and the clock resumes at that chunk's own
+      start, because the whole chunk gets re-walked next time (see the class
+      doc). At a clean boundary it is whatever the scan could not yet resolve
+      (a partial header, or nothing at all), and the clock resumes at `offset`,
+      the point scanning actually reached.
+    */
+    const carryFrom = chunkStart >= 0 ? chunkStart : offset;
+    const carry = combined.subarray(carryFrom);
+    this.retained = carry.byteLength > 0 ? [carry] : [];
+    this.retainedBytes = carry.byteLength;
+    this.baseMs = chunkStart >= 0 ? chunkStartMs : elapsedMs;
+
+    return out;
+  }
+}

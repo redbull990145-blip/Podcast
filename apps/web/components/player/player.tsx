@@ -476,7 +476,19 @@ export function Player() {
   if (!episode) return null;
 
   const playing = state.status === 'playing';
-  const loading = state.status === 'loading';
+  /*
+    Opening a source and waiting for one mid-episode look identical from here,
+    and should: both mean "pressing this will not produce sound yet". Buffering
+    is a flag rather than a status precisely so this line can fold the two
+    together without any of the `status === 'playing'` checks around it changing
+    meaning during a stall.
+
+    Before this, a seek into an unbuffered part of a streamed episode left the
+    transport showing a pause button over as much as ten seconds of silence —
+    the player claiming to be playing while the browser re-requested from a new
+    byte offset.
+  */
+  const loading = state.status === 'loading' || state.buffering;
 
   /** Where the artwork rests, for the path that does not travel there. */
   const art = expanded

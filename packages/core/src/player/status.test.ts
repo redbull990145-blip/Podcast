@@ -63,7 +63,7 @@ describe('eventsFromStatus', () => {
     const buffering = snapshot({ isLoaded: true, isBuffering: true });
     const events = run([buffering, buffering, buffering, buffering]);
 
-    expect(typesOf(events).filter((type) => type === 'stalled')).toHaveLength(1);
+    expect(typesOf(events).filter((type) => type === 'buffering')).toHaveLength(1);
   });
 
   it('reports a second stall once buffering has recovered in between', () => {
@@ -73,7 +73,22 @@ describe('eventsFromStatus', () => {
       snapshot({ isLoaded: true, isBuffering: true, isPlaying: true }),
     ]);
 
-    expect(typesOf(events).filter((type) => type === 'stalled')).toHaveLength(2);
+    // Three edges, not two: up, back down, and up again. The falling one is
+    // what tells the UI to take the spinner down, and reporting only the rises
+    // is how a transport gets stuck mid-stall.
+    expect(typesOf(events).filter((type) => type === 'buffering')).toHaveLength(3);
+  });
+
+  it('says when a stall ended, not only that one began', () => {
+    const events = run([
+      snapshot({ isLoaded: true, isBuffering: true }),
+      snapshot({ isLoaded: true, isBuffering: false, isPlaying: true }),
+    ]);
+
+    expect(events.filter((event) => event.type === 'buffering')).toEqual([
+      { type: 'buffering', active: true },
+      { type: 'buffering', active: false },
+    ]);
   });
 
   it('emits play and pause only when the transport actually changed', () => {
@@ -191,8 +206,12 @@ describe('eventsFromStatus', () => {
       'playing',
       'position',
       'position',
-      'stalled',
+      // Into the buffer...
+      'buffering',
       'position',
+      // ...and out of it again. The recovery is an event in its own right, so
+      // whatever put a spinner up on the way in is told to take it down.
+      'buffering',
       'position',
       'position',
       'ended',

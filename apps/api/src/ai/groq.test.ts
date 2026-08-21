@@ -73,13 +73,109 @@ describe('withRetry', () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
-  it('does not retry a rate limit', async () => {
-    // Retrying immediately is the least helpful possible response to a 429.
-    const send = vi.fn<() => Promise<Response>>().mockResolvedValue(response(429));
+  /**
+   * The rate limit is an appointment, not a failure.
+   *
+   * These replace a test asserting that a 429 was never retried, which encoded
+   * the bug rather than a policy: a long episode is several sequential uploads
+   * and the free tier's hourly allowance runs out partway through one, so
+   * giving up on the 429 threw away every finished chunk and the next attempt
+   * hit the identical wall at the identical place. Pressing the button again
+   * could never help — only waiting could, and nothing waited.
+   */
+  function rateLimited(retryAfter?: string): Response {
+    return new Response('{}', {
+      status: 429,
+      ...(retryAfter === undefined ? {} : { headers: { 'retry-after': retryAfter } }),
+    });
+  }
 
-    await settle(withRetry(send));
+  it('waits the interval Groq asks for, then tries again', async () => {
+    const send = vi
+      .fn<() => Promise<Response>>()
+      .mockResolvedValueOnce(rateLimited('30'))
+      .mockResolvedValueOnce(response(200));
 
+    const result = await settle(withRetry(send, undefined, { rateLimitBudgetMs: 60_000 }));
+
+    expect(result.status).toBe(200);
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not spend a transient-failure attempt on a rate limit', async () => {
+    // Three 429s is one server saying "not yet" three times. Counting them
+    // against the ceiling meant for 502s is what capped the waiting at two
+    // rounds and failed jobs that were one refill away from finishing.
+    const send = vi
+      .fn<() => Promise<Response>>()
+      .mockResolvedValueOnce(rateLimited('10'))
+      .mockResolvedValueOnce(rateLimited('10'))
+      .mockResolvedValueOnce(rateLimited('10'))
+      .mockResolvedValueOnce(response(200));
+
+    const result = await settle(withRetry(send, undefined, { rateLimitBudgetMs: 600_000 }));
+
+    expect(result.status).toBe(200);
+    expect(send).toHaveBeenCalledTimes(4);
+  });
+
+  it('reports the rate limit once the budget cannot cover the next wait', async () => {
+    // Waiting has to end somewhere. Handing back the 429 is what gets the
+    // reader a message and their button, instead of an unbounded spinner.
+    const send = vi.fn<() => Promise<Response>>().mockResolvedValue(rateLimited('40'));
+
+    const result = await settle(withRetry(send, undefined, { rateLimitBudgetMs: 60_000 }));
+
+    expect(result.status).toBe(429);
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces a wait too long to be worth holding the job for', async () => {
+    const send = vi.fn<() => Promise<Response>>().mockResolvedValue(rateLimited('3600'));
+
+    const result = await settle(withRetry(send, undefined, { rateLimitBudgetMs: 600_000 }));
+
+    expect(result.status).toBe(429);
     expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits a default interval when Groq does not say how long', async () => {
+    // Falling back to giving up would reintroduce the whole bug through a side
+    // door, for the sake of one absent header.
+    const send = vi
+      .fn<() => Promise<Response>>()
+      .mockResolvedValueOnce(rateLimited())
+      .mockResolvedValueOnce(response(200));
+
+    const result = await settle(withRetry(send, undefined, { rateLimitBudgetMs: 60_000 }));
+
+    expect(result.status).toBe(200);
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports where a wait is up to, often enough to prove the job is alive', async () => {
+    /*
+      Load-bearing twice over: the queue reclaims a job that goes quiet for
+      three minutes, so a silent 150-second wait would have another worker
+      restart the episode from a fresh download — and the reader watching a
+      still bar needs to be told the difference between parked and hung.
+    */
+    const send = vi
+      .fn<() => Promise<Response>>()
+      .mockResolvedValueOnce(rateLimited('60'))
+      .mockResolvedValueOnce(response(200));
+
+    const notices: number[] = [];
+
+    await settle(
+      withRetry(send, undefined, {
+        rateLimitBudgetMs: 600_000,
+        onWait: ({ remainingMs }) => void notices.push(remainingMs),
+      }),
+    );
+
+    // A 60s wait, reported every 15s, counting down rather than repeating.
+    expect(notices).toEqual([60_000, 45_000, 30_000, 15_000]);
   });
 
   it('does not retry audio that was too large', async () => {

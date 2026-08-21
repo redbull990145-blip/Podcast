@@ -183,6 +183,21 @@ export function SearchClient({
             <Advice title={t.t('search.noResults')} body={t.t('search.noResultsBody')} />
           ) : null}
 
+          {/*
+            The directory is down and these came from our own shelves.
+
+            Said above the results rather than instead of them, because they are
+            real matches and the listener may well have found what they wanted.
+            What they must not do is conclude from a short list that the show
+            they are looking for does not exist — which is exactly what a silent
+            fallback invites, and the reason the server bothers to say so.
+          */}
+          {search.data?.degraded ? (
+            <p className="type-caption mb-4 rounded-[var(--radius-md)] bg-[var(--color-surface)] px-3.5 py-2.5 text-[var(--color-text-secondary)]">
+              {t.t('search.degraded')}
+            </p>
+          ) : null}
+
           {results.length > 0 ? (
             <ul
               className="m-0 list-none p-0 transition-opacity duration-[var(--duration-fast)]"

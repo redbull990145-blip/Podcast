@@ -440,7 +440,17 @@ export function createClient(options: ClientOptions) {
     searchPodcasts(
       query: string,
       params: { language?: string; limit?: number; signal?: AbortSignal } = {},
-    ): Promise<{ results: PodcastSearchResult[] }> {
+      /**
+       * `degraded` is set when the directory was unreachable and these results
+       * came from our own catalogue instead.
+       *
+       * Optional because it is absent on the ordinary path rather than false —
+       * the server only says so when it has something to say. The distinction
+       * matters to the caller: a short list is not evidence of anything on its
+       * own, and this is what separates "three matches" from "three matches,
+       * and search is currently only seeing part of the world".
+       */
+    ): Promise<{ results: PodcastSearchResult[]; degraded?: boolean }> {
       return request('/podcasts/search', {
         query: { q: query, language: params.language, limit: params.limit },
         ...(params.signal ? { signal: params.signal } : {}),
@@ -776,10 +786,19 @@ export type AiPanelState = {
 };
 
 export type TranscribeProgress = {
-  stage: 'fetching' | 'splitting' | 'transcribing' | 'saving';
+  stage: 'fetching' | 'splitting' | 'transcribing' | 'waiting' | 'saving';
   /** Chunks finished, and how many there are. Both 0 before the split. */
   done: number;
   total: number;
+  /**
+   * When a `waiting` job resumes, as epoch milliseconds — absent otherwise.
+   *
+   * An instant rather than a duration, deliberately. The client polls every few
+   * seconds, so seconds-remaining would arrive already stale and could only
+   * advance in whatever ragged steps the poll landed on; a deadline stays true
+   * between polls and lets the countdown run smoothly off the local clock.
+   */
+  waitingUntilMs?: number;
 };
 
 export type AiGeneration = {

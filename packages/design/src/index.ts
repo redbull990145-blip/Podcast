@@ -14,7 +14,13 @@ export {
 } from './tokens/tint.ts';
 export type { Rgb, TintSet } from './tokens/tint.ts';
 
-export { colorVarStyle, TINT_ATTR, tintTextProps, tintVars } from './css.ts';
+export {
+  colorVarStyle,
+  TINT_ATTR,
+  tintedSchemeCss,
+  tintTextProps,
+  tintVars,
+} from './css.ts';
 
 export { icon } from './tokens/icons.ts';
 export type { IconPath, IconToken } from './tokens/icons.ts';

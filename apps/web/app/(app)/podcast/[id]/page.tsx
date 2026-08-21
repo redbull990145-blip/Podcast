@@ -4,7 +4,7 @@ import { notFound, redirect } from 'next/navigation';
 import { Suspense } from 'react';
 import { ApiClientError } from '@cue/api-client';
 import { getTranslator } from '@/lib/i18n';
-import { colorVarStyle, deriveTint, tintedScheme } from '@cue/design';
+import { deriveTint, tintVars } from '@cue/design';
 import { ChromeTint } from '@/components/shell/chrome-tint';
 import { Artwork } from '@/components/media/artwork';
 import { ShowNotice } from '@/components/podcast/show-notice';
@@ -100,8 +100,19 @@ export default async function PodcastPage({ params, searchParams }: Params) {
    * arriving after an image decodes. It is a property of the show and not of
    * the reader, so it survives this page's shared cache.
    */
-  const scheme = podcast.accentColor ? tintedScheme(podcast.accentColor) : null;
-  const tint = podcast.accentColor ? deriveTint(podcast.accentColor, 'dark') : null;
+  const tint = tintVars(podcast.accentColor);
+  /*
+    The saturated fill, which is theme-independent by construction.
+
+    `deriveTint` returns the same `fill` for both themes — it is a strong
+    background that carries its own foreground, so unlike `wash` and `text` it
+    does not depend on what is behind it. That is why it is the one value here
+    that can still be read off a single call rather than resolved through CSS,
+    and why `tintVars` has no `-dark`/`-light` pair for it.
+  */
+  const fill = podcast.accentColor
+    ? (deriveTint(podcast.accentColor, 'dark')?.fill ?? null)
+    : null;
   const t = await getTranslator();
 
   return (
@@ -110,7 +121,20 @@ export default async function PodcastPage({ params, searchParams }: Params) {
       // rather than a coloured strip on top of the app's background — the
       // failure the old fixed-height wash had, one level up.
       className="relative min-h-dvh bg-[var(--color-bg)]"
-      style={scheme ? colorVarStyle(scheme) : undefined}
+      /*
+        Painted by the same rule that paints the chrome, rather than by an
+        inline palette of its own.
+
+        This used to spread `colorVarStyle(tintedScheme(...))` here, which had
+        two problems and they were the same problem: an inline style can hold
+        one value per property, so it could only ever carry the dark palette,
+        and a light-theme listener got a dark page. `ChromeTint` already emits
+        both variants under `[data-chrome-tint]` and lets the stylesheet pick,
+        so wearing that attribute gets the page the correct one for free —
+        and guarantees the page and the rail beside it cannot disagree, which
+        two independently-computed palettes eventually would.
+      */
+      data-chrome-tint=""
     >
       {/* And the same palette on the rail and the player bar, so the window is
           one object rather than a coloured page with the app's own chrome
@@ -134,14 +158,17 @@ export default async function PodcastPage({ params, searchParams }: Params) {
       {tint ? (
         <div
           aria-hidden="true"
+          data-tint=""
           className="pointer-events-none absolute inset-x-0 top-0 h-[300px] sm:h-[380px]"
           style={{
-            background: `linear-gradient(to bottom, ${tint.wash} 0%, transparent 100%)`,
-            // Screened rather than laid over. At this lightness an opaque wash
-            // on an already-tinted ground is a slightly different flat colour
-            // with a visible seam where it ends; screening only ever lifts, so
-            // the band fades out instead of stopping.
-            mixBlendMode: 'screen',
+            ...tint,
+            background: `linear-gradient(to bottom, var(--tint-wash) 0%, transparent 100%)`,
+            // Screened on a dark ground and multiplied on paper — see
+            // `--tint-blend` in globals.css. Hardcoding `screen` here meant the
+            // band computed back to near-white and disappeared entirely in the
+            // light theme, taking the one place the cover's colour is allowed
+            // to be strong with it.
+            mixBlendMode: 'var(--tint-blend)' as React.CSSProperties['mixBlendMode'],
             zIndex: 0,
           }}
         />
@@ -192,13 +219,13 @@ export default async function PodcastPage({ params, searchParams }: Params) {
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <SubscribeButton
               podcastId={podcast.id}
-              {...(tint ? { tint: tint.fill } : {})}
+              {...(fill ? { tint: fill } : {})}
             />
 
             <ShowNotice
               podcastId={podcast.id}
               source={podcast.source}
-              {...(tint ? { tint: tint.fill } : {})}
+              {...(fill ? { tint: fill } : {})}
             />
           </div>
         </div>
@@ -225,7 +252,7 @@ export default async function PodcastPage({ params, searchParams }: Params) {
           <EpisodeArchive
             podcast={podcast}
             searchParams={searchParams}
-            {...(tint ? { tint: tint.fill } : {})}
+            {...(fill ? { tint: fill } : {})}
           />
         </Suspense>
       </section>

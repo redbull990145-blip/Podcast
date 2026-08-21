@@ -121,6 +121,20 @@ const UNCHOSEN: [string, ColorScheme][] = [
   ...COVER_COLOURS.map(
     ([name, hex]): [string, ColorScheme] => [`tinted by ${name}`, tintedScheme(hex)!],
   ),
+  /**
+   * And every cover again on paper.
+   *
+   * The light branch is newer and is the one with somewhere to hide: a tinted
+   * page is most often looked at in the dark theme, so a light palette that
+   * drifted under AA would be wrong for a long time before anybody reported it.
+   * It is exactly the case the loop above exists for.
+   */
+  ...COVER_COLOURS.map(
+    ([name, hex]): [string, ColorScheme] => [
+      `tinted by ${name} on paper`,
+      tintedScheme(hex, 'light')!,
+    ],
+  ),
 ];
 
 describe.each(UNCHOSEN)('%s', (_name, scheme) => {

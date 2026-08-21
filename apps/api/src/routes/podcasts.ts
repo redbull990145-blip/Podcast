@@ -50,6 +50,65 @@ function serializeDirectoryFeed(feed: PodcastIndexFeed): PodcastSearchResult {
   };
 }
 
+/**
+ * The catalogue as a directory, for when the real directory is unreachable.
+ *
+ * Returns the same `PodcastSearchResult` shape rather than `Podcast`, so the
+ * client renders one list and never learns where a row came from. These rows
+ * *do* have ids here — they are already ingested — but the field that matters
+ * to the caller is `feedUrl`, because adding by feed URL is idempotent: a show
+ * already in the table resolves to the row it already has.
+ *
+ * A plain `ILIKE` over title and author. It is a fallback on a table of at most
+ * a few thousand rows, and reaching for full-text ranking here would be
+ * building a second search engine to cover the minutes the first one is down.
+ */
+async function searchCatalogue(
+  app: FastifyInstance,
+  term: string,
+  limit: number,
+): Promise<PodcastSearchResult[]> {
+  // Escaped, so a listener searching for "100%" gets that rather than a
+  // wildcard — `%` and `_` are operators inside LIKE.
+  const pattern = `%${term.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
+
+  const rows = await app.db
+    .select({
+      feedUrl: podcasts.feedUrl,
+      title: podcasts.title,
+      author: podcasts.author,
+      description: podcasts.description,
+      artworkUrl: podcasts.artworkUrl,
+      language: podcasts.language,
+      explicit: podcasts.explicit,
+      lastPublishedAt: podcasts.lastPublishedAt,
+    })
+    .from(podcasts)
+    .where(
+      or(
+        sql`${podcasts.title} ILIKE ${pattern}`,
+        sql`${podcasts.author} ILIKE ${pattern}`,
+      ),
+    )
+    .orderBy(desc(podcasts.lastPublishedAt))
+    .limit(limit);
+
+  return rows.map((row) => ({
+    feedUrl: row.feedUrl,
+    title: row.title,
+    author: row.author,
+    description: row.description,
+    artworkUrl: row.artworkUrl,
+    language: row.language,
+    // Not carried on the row in a form worth reconstructing here, and the
+    // fallback list is short enough that category chips add nothing.
+    categories: [],
+    explicit: row.explicit,
+    episodeCount: null,
+    lastPublishedAt: row.lastPublishedAt?.toISOString() ?? null,
+  }));
+}
+
 function normalizeSearchText(value: string | null | undefined): string {
   return (value ?? '')
     .normalize('NFKD')
@@ -201,10 +260,40 @@ export function podcastRoutes(app: FastifyInstance): void {
     const query = searchQuery.parse(request.query);
     const limit = query.limit ?? 25;
 
-    const feeds = await app.podcastIndex.search(query.q, {
-      ...(query.language ? { language: query.language } : {}),
-      limit: Math.max(limit, SEARCH_CANDIDATES),
-    });
+    let feeds: PodcastIndexFeed[];
+    try {
+      feeds = await app.podcastIndex.search(query.q, {
+        ...(query.language ? { language: query.language } : {}),
+        limit: Math.max(limit, SEARCH_CANDIDATES),
+      });
+    } catch (error) {
+      /*
+        The directory is down. Answer with what we already have rather than
+        with a 502.
+
+        Searching our own table is the wrong *primary* behaviour — it would
+        mean an empty app for the first person to look for anything, which is
+        why this endpoint goes upstream at all. As a fallback it is strictly
+        better than the alternative: the shows in this table are the ones
+        somebody here already cared enough to add, and a short list of them
+        beats "Server returned an error" over an empty screen.
+
+        Logged at warn rather than swallowed. A listener seeing degraded
+        results should not be the only trace that the directory is failing.
+      */
+      request.log.warn({ err: error, q: query.q }, 'directory search failed; serving catalogue');
+
+      return ok({
+        results: await searchCatalogue(app, query.q, limit),
+        /**
+         * Said out loud, so the client can tell a thin answer from a complete
+         * one. Without it, three local results and thirty directory results
+         * are indistinguishable — and the honest UI for the first is "search
+         * is having trouble", not silence.
+         */
+        degraded: true,
+      });
+    }
 
     return ok({
       results: rankSearchResults(feeds, query.q, {

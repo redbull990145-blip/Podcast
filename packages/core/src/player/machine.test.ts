@@ -185,12 +185,55 @@ describe('playback', () => {
 
   it('does not treat buffering as an error', async () => {
     await machine.play(episode('a'));
-    engine.emit({ type: 'stalled' });
+    engine.emit({ type: 'buffering', active: true });
 
     // Replacing the UI with an error because a train went into a tunnel is
     // the single most annoying thing a player can do.
     expect(machine.getState().status).toBe('playing');
     expect(machine.getState().error).toBeNull();
+  });
+
+  it('reports buffering without disturbing the transport', async () => {
+    await machine.play(episode('a'));
+    engine.emit({ type: 'buffering', active: true });
+
+    // The episode is still the current one and the button still means pause —
+    // that is why this is a flag rather than a status. What changes is only
+    // that the UI can now say the audio is waiting.
+    expect(machine.getState().buffering).toBe(true);
+    expect(machine.getState().status).toBe('playing');
+  });
+
+  it('clears buffering once audio flows again', async () => {
+    await machine.play(episode('a'));
+    engine.emit({ type: 'buffering', active: true });
+    engine.emit({ type: 'buffering', active: false });
+
+    expect(machine.getState().buffering).toBe(false);
+  });
+
+  /**
+   * The bug this whole flag exists for.
+   *
+   * Seeking into an unbuffered stretch leaves the element waiting, and on the
+   * web that never re-fires `play` — so if only the rising edge were reported
+   * the player would sit showing a pause button over silence until the episode
+   * ended. `playing` has to be able to clear it on its own.
+   */
+  it('clears buffering when playback resumes without an explicit end', async () => {
+    await machine.play(episode('a'));
+    engine.emit({ type: 'buffering', active: true });
+    engine.emit({ type: 'playing' });
+
+    expect(machine.getState().buffering).toBe(false);
+  });
+
+  it('does not leave a spinner over a paused episode', async () => {
+    await machine.play(episode('a'));
+    engine.emit({ type: 'buffering', active: true });
+    engine.emit({ type: 'paused' });
+
+    expect(machine.getState().buffering).toBe(false);
   });
 });
 

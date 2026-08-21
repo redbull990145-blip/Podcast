@@ -231,6 +231,27 @@ export type Transcript = {
    * never offered to looks finished.
    */
   timed: boolean;
+  /**
+   * How long the audio these cues were timed against actually ran, in ms.
+   *
+   * The reason captions drift. Podcast enclosures are stitched per request, so
+   * the copy the server transcribed and the copy a listener is served are
+   * routinely different lengths — different ad loads, inserted in different
+   * places. On one measured episode the feed declared 2416s, the browser was
+   * served 2596s, and the transcribed copy ran 2622s, which put every cue after
+   * the first ad break about 26 seconds out, by a different amount per listener.
+   *
+   * The measurement has been stored against the transcript for a while and read
+   * by nothing, which meant the app had the evidence that its captions were
+   * describing a different cut of the audio and no way to say so. Carrying it to
+   * the client is what lets the player compare it against the duration it is
+   * actually playing and offer to correct the difference.
+   *
+   * Null when nothing was measured: transcripts written before this was
+   * recorded, and publisher-supplied ones, whose audio we never fetch. Null
+   * means "unknown", never "they match".
+   */
+  audioDurationMs: number | null;
   segments: TranscriptSegment[];
 };
 

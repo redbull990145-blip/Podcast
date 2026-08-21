@@ -42,6 +42,17 @@ export type PlayerState = {
   positionSec: number;
   /** The engine's duration once known, else the feed's, else null. */
   durationSec: number | null;
+  /**
+   * Waiting on data, while still intending to play.
+   *
+   * Deliberately a flag beside `status` rather than a sixth status. Buffering
+   * is not an alternative to playing — the episode is still the current one,
+   * the transport still means "pause", and the position is still where it is.
+   * Modelling it as a status would make every `status === 'playing'` check in
+   * the app wrong for the duration of a stall, which is exactly the set of
+   * checks that must keep working *during* one.
+   */
+  buffering: boolean;
   rate: PlaybackRate;
   volume: number;
   /** Epoch ms at which playback should stop, or null. */
@@ -79,6 +90,7 @@ const INITIAL: PlayerState = {
   queue: [],
   positionSec: 0,
   durationSec: null,
+  buffering: false,
   rate: 1,
   volume: 1,
   sleepAtMs: null,
@@ -157,6 +169,9 @@ export class PlayerMachine {
       current: episode,
       positionSec: startAt,
       durationSec: episode.durationSec,
+      // A new source has nothing to wait for yet, and carrying the previous
+      // episode's stall into this one would open it under a spinner.
+      buffering: false,
       error: null,
     });
 
@@ -414,11 +429,18 @@ export class PlayerMachine {
       }
 
       case 'playing':
-        this.set({ status: 'playing', error: null });
+        // Audio is flowing, so whatever it was waiting for arrived. Cleared
+        // here as well as on the falling edge because a platform that reports
+        // playback resuming without first reporting the stall ending would
+        // otherwise leave the flag set for the rest of the episode.
+        this.set({ status: 'playing', buffering: false, error: null });
         break;
 
       case 'paused':
-        this.set({ status: 'paused' });
+        // A pause ends the wait by ending the intention to play. Leaving this
+        // set would show a spinner over a paused episode that is not loading
+        // anything.
+        this.set({ status: 'paused', buffering: false });
         break;
 
       case 'ended': {
@@ -427,13 +449,15 @@ export class PlayerMachine {
         break;
       }
 
-      case 'stalled':
-        // Buffering is not an error and must not replace the UI with one. The
-        // status stays as it was; the engine will resume or eventually error.
+      case 'buffering':
+        // Not an error, and not a status — see `buffering` on `PlayerState`.
+        // The episode, the position and the transport all stay exactly as they
+        // are; the only thing that changes is that the UI can now say so.
+        this.set({ buffering: event.active });
         break;
 
       case 'error':
-        this.set({ status: 'error', error: event.message });
+        this.set({ status: 'error', buffering: false, error: event.message });
         break;
     }
   }

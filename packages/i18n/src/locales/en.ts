@@ -32,6 +32,9 @@ export const en = {
   'theme.toDark': 'Switch to the dark theme',
   'theme.appearance': 'Appearance',
   'theme.appearanceCaption': 'Cue is dark by default. Choose otherwise and it remembers.',
+  'theme.nowPlayingTint': 'Colour the app from what’s playing',
+  'theme.nowPlayingTintHint':
+    'Tints every screen with the current episode’s artwork colour, and changes it when the episode does.',
   'theme.label': 'Theme',
   'theme.hint': 'Until you choose, this follows your system setting.',
   'theme.dark': 'Dark',
@@ -142,6 +145,7 @@ export const en = {
   'search.tooShortBody': 'Three letters is enough to start.',
   'search.noResults': 'No shows matched',
   'search.noResultsBody': 'Try a different spelling, or the host’s name.',
+  'search.degraded': 'The podcast directory isn’t responding, so this is only what Cue already knows about. Try again shortly for the full index.',
   'search.filterLanguage': 'Filter by language',
   'search.anyLanguage': 'Any language',
   'search.trending': 'Trending this week',
@@ -204,6 +208,11 @@ export const en = {
   'player.mute': 'Mute',
   'player.unmute': 'Unmute',
   'player.openQueue': 'Open the queue',
+  // Plural-aware: "in 1 second" reads as broken English, and this string is on
+  // screen counting down through exactly that value every single time.
+  'player.upNextIn': 'Up next in {seconds, plural, one {# second} other {# seconds}}',
+  'player.playNow': 'Play now',
+  'common.dismiss': 'Dismiss',
   'player.dismiss': 'Close the player',
   'player.speedOpen': 'Playback speed: {rate}×. Choose a speed.',
   'player.speedPresets': 'Speed presets',
@@ -300,10 +309,21 @@ export const en = {
   'captions.working': 'Listening to the episode. This takes a few minutes for a long one — you can keep playing while it runs.',
   'captions.stageStarting': 'Starting up',
   'captions.stageFetching': 'Fetching the audio',
+  // Shown instead of the line above once the episode is long enough that the
+  // download alone is worth a sentence — see `longDownload` in generate-captions.tsx.
+  'captions.stageFetchingLong': 'Fetching the audio — this one’s long, so it may take a minute or two',
   'captions.stageSplitting': 'Cutting it into pieces',
   'captions.stageListening': 'Writing captions — part {done} of {total}',
   'captions.stageAlmost': 'Almost done',
   'captions.stageSaving': 'Lining the words up with the audio',
+  /*
+    Named as a queue rather than as an error, because that is what it is: the
+    shared allowance refills continuously and the job resumes on its own. The
+    variant with a time is the one that almost always shows — Groq says when to
+    come back and we hold the reader to that same number.
+  */
+  'captions.stageWaiting': 'Waiting for the shared AI allowance to free up',
+  'captions.stageWaitingIn': 'Shared AI allowance is busy — resuming in {time}',
   'captions.cost': 'Uses one of your {remaining, plural, one {# remaining request} other {# remaining requests}} today.',
   'captions.costUnknown': 'Uses one of your daily requests.',
   'captions.noAllowance': 'You’ve used today’s allowance. Add your own API key in Settings to keep going.',
@@ -311,6 +331,22 @@ export const en = {
   'captions.failed': 'Couldn’t start writing captions.',
   'captions.untimed': 'This transcript has no timings, so it can’t follow along.',
   'captions.silence': 'Pause in the conversation',
+  'captions.outOfSync': 'Captions out of sync?',
+  'captions.sync': 'Sync',
+  'captions.syncEarlier': 'Show captions earlier',
+  'captions.syncLater': 'Show captions later',
+  'captions.syncReset': 'Reset',
+  /*
+    Deliberately about the *file*, not about the captions being wrong.
+
+    The cues are correct; they are correct about a different copy of this
+    episode. Ads are stitched in per request, so the version this listener was
+    served is a different length from the one that was transcribed. Saying
+    "captions are wrong" would be both inaccurate and unactionable, where naming
+    the cause explains why a fix has to be a nudge rather than a repair.
+  */
+  'captions.differentCut':
+    'This episode was transcribed from a copy with different ads, so the timings drift. Nudge them into place.',
 
   // ----------------------------------------------------------- transcript --
   'transcript.title': 'Transcript',

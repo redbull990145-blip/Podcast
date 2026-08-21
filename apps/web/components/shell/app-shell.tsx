@@ -9,6 +9,7 @@ import { useEffect, type ReactNode } from 'react';
 import { useSession, useSignOut } from '@/lib/session';
 import { Artwork } from '@/components/media/artwork';
 import { Player } from '@/components/player/player';
+import { UpNext } from '@/components/player/up-next';
 import { OfflineBanner } from '@/components/pwa/offline-banner';
 import { ServiceWorker } from '@/components/pwa/service-worker';
 import { api } from '@/lib/api';
@@ -20,6 +21,7 @@ import {
 } from '@/lib/player/store';
 import { setRailCollapsed, useRailCollapsed } from '@/lib/rail';
 import { NavIcon } from './nav-icon';
+import { NowPlayingTint } from './now-playing-tint';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { navItems, settingsItem } from './nav-items';
 
@@ -42,6 +44,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           page mid-sign-in is a complication with no upside. */}
       <ServiceWorker />
       <OfflineBanner />
+
+      {/* Repaints the window in the playing episode's colour, when the listener
+          has asked for that. Renders nothing on its own. */}
+      <NowPlayingTint />
 
       <SidebarNav />
 
@@ -84,6 +90,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* Outside <main>, so a route change never unmounts it and playback
           continues straight through navigation. */}
       <Player />
+
+      {/* Announces the queue advancing, in the last seconds of an episode.
+          Beside the player rather than inside it: the mini bar's layout is one
+          interpolated motion value from cover to full sheet, and a card that
+          appears and leaves on its own schedule has no place in that. */}
+      <UpNext />
 
       <TabBar />
     </div>

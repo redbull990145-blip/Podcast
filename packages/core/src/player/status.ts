@@ -94,9 +94,16 @@ export function eventsFromStatus(
   }
   next.wasLoaded = status.isLoaded;
 
-  // Buffering is not an error and must not replace the UI with one. Reported on
-  // the edge only, so a long stall does not emit the same event every tick.
-  if (status.isBuffering && !memory.wasBuffering) events.push({ type: 'stalled' });
+  /*
+    Buffering is not an error and must not replace the UI with one. Reported on
+    the edges only, so a two-second buffer does not emit the same event twenty
+    times — but on *both* edges, so whatever is showing a spinner is also told
+    when to take it down. Reporting only the start is how a transport ends up
+    stuck mid-stall with no way back.
+  */
+  if (status.isBuffering !== memory.wasBuffering) {
+    events.push({ type: 'buffering', active: status.isBuffering });
+  }
   next.wasBuffering = status.isBuffering;
 
   if (status.isPlaying !== memory.wasPlaying) {

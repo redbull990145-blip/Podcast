@@ -303,6 +303,7 @@ const SERVER_STATE: PlayerState = {
   queue: [],
   positionSec: 0,
   durationSec: null,
+  buffering: false,
   rate: 1,
   volume: 1,
   sleepAtMs: null,

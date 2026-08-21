@@ -141,6 +141,12 @@ function toWire(row: {
   source: string;
   status: string;
   language: string;
+  /**
+   * Optional on the parameter, because two call sites hand this freshly built
+   * rows from the publisher path, where nothing was measured. `?? null` below
+   * keeps "we did not measure" and "we measured zero" distinct.
+   */
+  audioDurationMs?: number | null;
   segments: Transcript['segments'];
 }): Transcript {
   /**
@@ -168,6 +174,9 @@ function toWire(row: {
     status: row.status as Transcript['status'],
     language: row.language,
     timed: isTimed(segments),
+    // What the cues were timed against, so the player can notice it is playing
+    // a different cut — see `Transcript.audioDurationMs`.
+    audioDurationMs: row.audioDurationMs ?? null,
     segments,
   };
 }

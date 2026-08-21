@@ -49,51 +49,187 @@ export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: stri
  * of the bug, and it gets more likely the longer the episode — so it was worst
  * exactly where the feature is most useful.
  *
- * Only transient classes are retried. A 401 is a wrong key and will be wrong
- * again; a 429 is a real rate limit where retrying immediately is the least
- * helpful possible response; a 413 is audio that is genuinely too big. Those
- * surface at once, with the message that tells the user what to do.
+ * Only transient classes are retried here. A 401 is a wrong key and will be
+ * wrong again; a 413 is audio that is genuinely too big. Those surface at once,
+ * with the message that tells the user what to do.
+ *
+ * A 429 is neither, and is handled separately below.
  */
 const RETRY_STATUS = new Set([408, 500, 502, 503, 504, 522, 524]);
 const MAX_ATTEMPTS = 3;
+
+/**
+ * Waiting out a rate limit, rather than treating it as a failure.
+ *
+ * This is the fix for the report that a long episode could never be captioned
+ * on the shared key, no matter how many times the button was pressed.
+ *
+ * The reasoning it replaces was half right: retrying a 429 *immediately* is
+ * indeed the least helpful possible response. The conclusion drawn from that —
+ * give up at once — was wrong, because a 429 from Groq arrives with a
+ * `retry-after` header saying exactly when capacity will exist. That is not a
+ * failure, it is an appointment, and the only thing to do with it is keep it.
+ *
+ * What giving up cost: a transcription is a sequence of 20MB uploads, and the
+ * limit is usually reached somewhere in the middle of one. Throwing at that
+ * point discarded every chunk already transcribed, so the next attempt began
+ * again from a fresh 350MB download and hit the same wall at the same place.
+ * The failure was therefore perfectly reproducible and the retry button could
+ * not fix it — for an episode longer than the free tier's hourly audio
+ * allowance, no number of attempts would ever have finished, because finishing
+ * requires waiting and nothing here ever waited.
+ *
+ * Bounded on both axes, because "wait as long as it says" is how a worker slot
+ * disappears for an afternoon. A single wait longer than `MAX_WAIT_MS` is
+ * reported instead of served — at that point the honest thing is to hand the
+ * reader their button back — and `DEFAULT_BUDGET_MS` caps the total across one
+ * call, which the transcription path raises for itself.
+ *
+ * Ten minutes for a single wait, measured rather than guessed: a saturated
+ * shared key answers with four-minute intervals as a matter of routine, and the
+ * first version of this capped a single wait at two and a half. That looked
+ * principled and simply reintroduced the bug at a higher threshold — the job
+ * got six chunks in, was asked to wait 241 seconds, refused, and threw away all
+ * six. The cap has to sit above what the provider actually asks for or it is
+ * just the old give-up behaviour with extra steps.
+ */
+const MAX_WAIT_MS = 10 * 60_000;
+const DEFAULT_BUDGET_MS = 60_000;
+
+/**
+ * How long to wait when a 429 arrives with no `retry-after` to read.
+ *
+ * Groq sends the header reliably, so this is the defensive branch rather than
+ * the expected one. It exists because the alternative — falling back to the old
+ * give-up behaviour — reintroduces exactly the bug above through a side door,
+ * for the sake of a header being missing.
+ */
+const BLIND_WAIT_MS = 15_000;
+
+/**
+ * How often the caller hears from a wait in progress.
+ *
+ * Two jobs at once: a wait can outlast the queue's staleness window, so the
+ * worker has to keep beating through one or another worker will decide it died
+ * and start the whole episode again. And a reader watching a spinner deserves
+ * to be told the difference between "working" and "parked until 14:32".
+ */
+const NOTICE_EVERY_MS = 15_000;
+
+/** Where a wait is up to, reported every `NOTICE_EVERY_MS` while it runs. */
+export type WaitNotice = {
+  /** The full length of this wait, as Groq asked for it. */
+  waitMs: number;
+  /** How much of it is left. Counts down; reaches roughly zero. */
+  remainingMs: number;
+};
+
+export type RetryOptions = {
+  /** Called periodically while parked on a rate limit. See `WaitNotice`. */
+  onWait?: (notice: WaitNotice) => void | Promise<void>;
+  /** Total time this call may spend waiting out 429s. */
+  rateLimitBudgetMs?: number;
+};
 
 /** Backoff before attempt n (1-indexed): 1s, then 3s. Jittered. */
 function backoffMs(attempt: number): number {
   return attempt * 1000 * (1 + Math.random() * 0.5) + (attempt - 1) * 1000;
 }
 
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * `retry-after` in milliseconds, or null if it does not carry a usable number.
+ *
+ * The header is also allowed to be an HTTP date. Groq sends seconds, and a date
+ * would need clock-skew handling to be trusted, so an unparseable value reads as
+ * absent and takes the blind wait rather than a wrong one.
+ */
+function retryAfterMs(response: Response): number | null {
+  const raw = response.headers.get('retry-after');
+  if (raw === null) return null;
+
+  const seconds = Number(raw);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+
+  return Math.ceil(seconds * 1000);
+}
+
+/** Sleep, telling the caller where we are often enough to prove we are alive. */
+async function waitOut(waitMs: number, onWait: RetryOptions['onWait']): Promise<void> {
+  const until = waitMs;
+  let elapsed = 0;
+
+  while (elapsed < until) {
+    await onWait?.({ waitMs, remainingMs: until - elapsed });
+    const slice = Math.min(NOTICE_EVERY_MS, until - elapsed);
+    await sleep(slice);
+    elapsed += slice;
+  }
+}
+
 /** Exported for its tests; every caller in this module goes through it. */
 export async function withRetry(
   send: () => Promise<Response>,
   signal?: AbortSignal | undefined,
+  options?: RetryOptions | undefined,
 ): Promise<Response> {
-  let last: unknown = null;
+  const budgetMs = options?.rateLimitBudgetMs ?? DEFAULT_BUDGET_MS;
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+  /**
+   * Counts transient failures only — a rate limit does not spend one.
+   *
+   * They are different kinds of event and conflating them is what made the
+   * attempt ceiling meaningless for the case that needed it: three 429s in a
+   * row is one server saying "not yet" three times, and answering it by
+   * refusing to ask again is how a long episode never finished.
+   */
+  let attempts = 0;
+  let waitedMs = 0;
+
+  for (;;) {
+    let response: Response;
+
     try {
-      const response = await send();
-      if (response.ok || !RETRY_STATUS.has(response.status)) return response;
-
-      // The body has to be drained or the connection is held open for the life
-      // of the process — and on the final attempt the caller reads it for the
-      // error message, so only discard it when we are going round again.
-      if (attempt === MAX_ATTEMPTS) return response;
-      await response.body?.cancel();
-      last = response.status;
+      response = await send();
     } catch (error) {
       // A dropped socket mid-upload is the same class of problem as a 502, and
       // on a 20MB request body it is not rare. An abort is not: that is the
       // caller having gone away, and retrying would ignore them.
       if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
-      if (attempt === MAX_ATTEMPTS) throw error;
-      last = error;
+      attempts += 1;
+      if (attempts >= MAX_ATTEMPTS) throw error;
+      await sleep(backoffMs(attempts));
+      continue;
     }
 
-    await new Promise((resolve) => setTimeout(resolve, backoffMs(attempt)));
-  }
+    if (response.ok) return response;
 
-  // Unreachable: the loop either returns or throws on its final attempt.
-  throw last instanceof Error ? last : new AppError('upstream_unavailable', 'Groq did not respond');
+    if (response.status === 429) {
+      const asked = retryAfterMs(response) ?? BLIND_WAIT_MS;
+
+      // Longer than we are willing to hold the job, or more than this call has
+      // left to spend. Either way the answer is the same: surface it, so the
+      // reader gets a message and a button rather than an unbounded spinner.
+      if (asked > MAX_WAIT_MS || waitedMs + asked > budgetMs) return response;
+
+      await response.body?.cancel();
+      waitedMs += asked;
+      await waitOut(asked, options?.onWait);
+      continue;
+    }
+
+    if (!RETRY_STATUS.has(response.status)) return response;
+
+    attempts += 1;
+    // The body has to be drained or the connection is held open for the life of
+    // the process — and on the final attempt the caller reads it for the error
+    // message, so only discard it when we are going round again.
+    if (attempts >= MAX_ATTEMPTS) return response;
+    await response.body?.cancel();
+    await sleep(backoffMs(attempts));
+  }
 }
 
 /**
@@ -304,6 +440,27 @@ export async function transcribe(options: {
   /** BCP-47 hint. Omitted lets Whisper detect, which is better than guessing wrong. */
   language?: string | null;
   signal?: AbortSignal;
+  /**
+   * Told when this upload is parked behind the provider's rate limit.
+   *
+   * A transcription is the one caller that genuinely should sit out a 429: it
+   * is already minutes long, it has expensive finished work behind it that
+   * failing would discard, and on the shared key a long episode reaches the
+   * hourly allowance as a matter of course rather than as an incident. The
+   * budget is raised to match — see the note on `MAX_WAIT_MS`.
+   */
+  onWait?: (notice: WaitNotice) => void | Promise<void>;
+  /**
+   * How long this upload may spend parked, of the episode's shared allowance.
+   *
+   * Passed in rather than fixed here because the budget that matters is the
+   * *job's*, not the chunk's. A per-chunk allowance multiplies by the number of
+   * chunks — eighteen of them at ten minutes each is a worker gone for three
+   * hours — while the question worth bounding is how long this episode may take
+   * in total. The caller subtracts what it has already spent, so a job that has
+   * been waiting all along tightens its own budget as it goes.
+   */
+  rateLimitBudgetMs?: number;
 }): Promise<TranscribedSegment[]> {
   // Copied into a fresh ArrayBuffer: chunks are subarrays of one large episode
   // buffer, and `new Blob([subarray])` would otherwise be free to reference the
@@ -337,7 +494,12 @@ export async function transcribe(options: {
       body: form,
       ...(options.signal ? { signal: options.signal } : {}),
     });
-  }, options.signal);
+  }, options.signal, {
+    ...(options.onWait ? { onWait: options.onWait } : {}),
+    ...(options.rateLimitBudgetMs === undefined
+      ? {}
+      : { rateLimitBudgetMs: options.rateLimitBudgetMs }),
+  });
 
   if (!response.ok) throw await failure(response, options.byok);
 

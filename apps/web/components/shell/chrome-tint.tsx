@@ -1,4 +1,4 @@
-import { colorVarStyle, tintedScheme } from '@cue/design';
+import { tintedSchemeCss } from '@cue/design';
 
 /**
  * Repaint the app's chrome in the colour of the page it is standing next to.
@@ -23,24 +23,24 @@ import { colorVarStyle, tintedScheme } from '@cue/design';
  * with no cleanup to forget.
  */
 export function ChromeTint({ color }: { color: string | null }) {
-  const scheme = color ? tintedScheme(color) : null;
-  if (!scheme) return null;
-
   /*
-    Safe to interpolate, and worth saying why rather than leaving it to be
-    rediscovered nervously.
+    Both themes, not just the dark one — and this is the component where getting
+    that wrong was most visible.
 
-    `color` originates from a publisher's artwork, which is attacker-adjacent
-    data — but it never reaches this string. `tintedScheme` parses it through
-    `hexToRgb`, which accepts six hex digits and nothing else, and returns
-    `null` otherwise; everything below is a value this codebase *generated* from
-    the parsed numbers. There is no path by which a feed can put a `}` in here.
+    `tintedScheme` used to return a dark palette whatever the listener had
+    chosen, and this rule paints the rail, the tab bar and the content gutter.
+    So opening any show while on the light theme repainted the entire window
+    dark and left it that way until you navigated somewhere untinted: choosing
+    Light and then tapping a podcast was indistinguishable from the setting
+    having failed to save.
+
+    `tintedSchemeCss` emits the light palette alongside the dark one and lets
+    the stylesheet choose, which is the only mechanism available here — this
+    renders on the server, and the theme is not known until a blocking script
+    reads localStorage on the client. Interpolation safety is covered there.
   */
-  const declarations = Object.entries(colorVarStyle(scheme))
-    .map(([property, value]) => `${property}:${value}`)
-    .join(';');
+  const css = color ? tintedSchemeCss(color, '[data-chrome-tint]') : null;
+  if (!css) return null;
 
-  return (
-    <style>{`[data-chrome-tint]{${declarations}}`}</style>
-  );
+  return <style>{css}</style>;
 }

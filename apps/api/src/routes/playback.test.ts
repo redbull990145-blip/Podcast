@@ -213,6 +213,24 @@ describe('progress', () => {
     expect(response.statusCode).toBe(400);
   });
 
+  /**
+   * The regression this guards: `duration_sec` is an integer column and
+   * `HTMLMediaElement.duration` is a float on essentially every browser and
+   * every file — 1882.122449 for a typical MP3, never a round number. Every
+   * real report carried a value like that, and every one of them 500ed until
+   * this was rounded the same way `positionSec` already is.
+   */
+  it('accepts a fractional duration, as every browser actually reports one', async () => {
+    const response = await report(episodeId, {
+      positionSec: 742,
+      durationSec: 1882.122449,
+      deviceId: 'phone',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.progress.durationSec).toBe(1882);
+  });
+
   it('404s for an episode that does not exist', async () => {
     const response = await report('00000000-0000-4000-8000-000000000000', {
       positionSec: 10,

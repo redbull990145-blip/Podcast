@@ -29,7 +29,21 @@ export type EngineEvent =
   | { type: 'playing' }
   | { type: 'paused' }
   | { type: 'ended' }
-  | { type: 'stalled' }
+  /**
+   * Playback is waiting on data, or has stopped waiting.
+   *
+   * Both edges, which is the whole point — this used to be a bare `stalled`
+   * reporting only that buffering had *started*. Nothing ever said it had
+   * finished, so the one state a listener most needs described was the one the
+   * machine could enter and never leave, and every consumer quietly ignored it
+   * rather than latch a spinner forever.
+   *
+   * That is why seeking looked broken: dragging the scrubber on a streamed
+   * episode makes the browser re-request from a new byte offset, which takes as
+   * long as it takes, and for those seconds the transport still showed a pause
+   * button over silence. The audio was fine; the player was lying about it.
+   */
+  | { type: 'buffering'; active: boolean }
   | { type: 'error'; message: string };
 
 export type EngineListener = (event: EngineEvent) => void;

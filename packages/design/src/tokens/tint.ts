@@ -16,7 +16,7 @@
  * that inconsistency is exactly what makes a tinted UI look accidental.
  */
 
-import { dark, stage, type ColorScheme } from './color.ts';
+import { dark, light, stage, type ColorScheme } from './color.ts';
 
 export type Rgb = { r: number; g: number; b: number };
 
@@ -97,6 +97,28 @@ function refit(lab: Oklab, targetL: number, maxChroma: number): Oklab {
   const scale = Math.min(1, maxChroma / chroma);
   return { L: targetL, a: lab.a * scale, b: lab.b * scale };
 }
+
+/**
+ * Status colours for a tinted *light* page.
+ *
+ * The mirror of the dark branch borrowing from `stage`, and for the identical
+ * reason. `status.*Light` are fitted against paper and have no headroom left —
+ * the note beside them in `color.ts` records that two of them were already
+ * sitting at 4.47 and 4.49:1 before being corrected. A tinted surface moves the
+ * ground by a fraction of a step, which is all it takes to put them back under:
+ * `warning` on an ember-tinted page landed at 4.4991:1, a failure invisible to
+ * everything except the assertion that caught it.
+ *
+ * So these are the same three hues taken down far enough to survive a ground
+ * that is no longer exactly paper. There is nowhere to borrow them from — there
+ * is no light `stage` — and deriving them from the cover would be wrong, since
+ * "this failed" must not change colour with the artwork.
+ */
+const STATUS_ON_TINTED_PAPER = {
+  danger: '#B32328',
+  success: '#236437',
+  warning: '#7E4B10',
+} as const;
 
 export type TintSet = {
   /** Ambient wash behind a header. Sits just above the app background. */
@@ -188,13 +210,101 @@ export function deriveTint(hex: string, theme: 'dark' | 'light'): TintSet | null
  *
  * Returns `null` for a colour it cannot parse, and the caller falls back to the
  * ordinary theme — an untinted page is a perfectly good page.
+ *
+ * **Both themes, because a tinted page is still the listener's app.** This used
+ * to return a dark palette unconditionally, on the reasoning that artwork sits
+ * better on a dark ground — true, and not the function's call to make. The
+ * result was that every podcast page, every episode page and the resume hero
+ * repainted the whole window dark for somebody who had chosen the light theme,
+ * rail and tab bar included, because `ChromeTint` pushes this onto the chrome
+ * too. Choosing Light and then opening a show was indistinguishable from the
+ * setting not having been saved.
+ *
+ * The three rules in the doc above are what survive the flip: the ground is
+ * still refit away from the cover's own lightness (up towards paper here rather
+ * than down towards black), the chroma ceilings are unchanged, and the text
+ * ramp is still a fixed neutral rather than a tinted one — so legibility stays
+ * a property of the function whichever theme it is asked for.
  */
-export function tintedScheme(hex: string): ColorScheme | null {
+export function tintedScheme(
+  hex: string,
+  /**
+   * Defaulted, and defaulted to the old behaviour on purpose: three call sites
+   * and a table of contrast tests already ask for a tinted page without saying
+   * which theme they are on, and dark is what they have always meant.
+   */
+  theme: 'dark' | 'light' = 'dark',
+): ColorScheme | null {
   const rgb = hexToRgb(hex);
   if (!rgb) return null;
 
   const lab = rgbToOklab(rgb);
   const at = (L: number, chroma: number) => rgbToHex(oklabToRgb(refit(lab, L, chroma)));
+
+  if (theme === 'light') {
+    /*
+      The same construction from the other end.
+
+      `light`'s own surfaces get *darker* as they recede — a card on paper is a
+      recess, not a glare — so the tint follows that ordering rather than
+      inverting the dark ramp, which would have raised every panel towards white
+      and produced the spreadsheet look the light theme was designed away from.
+
+      The lightness figures are the ones `deriveTint`'s light branch already
+      settled on for the same problem: a wash up near 0.96 is where a hue stops
+      reading as a colour wash and starts reading as a stain, and ember is the
+      hue that decides it because it is both the app's accent and a very common
+      cover colour.
+    */
+    return {
+      ...light,
+
+      /*
+        Held inside `light`'s own luminance band, and the tests are the reason
+        — the mirror of the note on `danger`/`success`/`warning` below.
+
+        `status.*Light` were fitted against paper, which runs from #FFFFFF down
+        to about OKLab L 0.96. An earlier draft of this branch put `surface` at
+        0.935 to give the tint something to be visible *in*, and that one step
+        past the bottom of the band took `success` and `warning` to 4.2–4.4:1 on
+        every cover tried — a uniform, invisible AA failure of exactly the kind
+        this file exists to catch. The hue has to come from chroma here, not
+        from lightness.
+      */
+      bg: at(0.975, 0.032),
+      surface: at(0.963, 0.04),
+      surfaceRaised: at(0.99, 0.018),
+      surfaceOverlay: at(0.99, 0.018),
+      // Neutral overlays, as in `light`. A tinted hover on a tinted surface is
+      // two washes of the same hue and reads as a rendering artefact.
+      surfaceHover: 'rgba(23, 21, 18, 0.05)',
+      surfacePressed: 'rgba(23, 21, 18, 0.08)',
+
+      border: at(0.89, 0.04),
+      borderStrong: 'rgba(23, 21, 18, 0.5)',
+
+      // Fixed and neutral, exactly as the dark branch fixes white — see the
+      // third rule above. A hue-carrying near-black on a hue-carrying near-white
+      // is where tinted palettes go wrong.
+      textPrimary: '#171512',
+      textSecondary: 'rgba(23, 21, 18, 0.78)',
+      textTertiary: 'rgba(23, 21, 18, 0.64)',
+
+      // The accent takes the hue and has to be dark enough to read *on* paper,
+      // which is the mirror of the dark branch lightening it to clear near-black.
+      accent: at(0.52, 0.13),
+      accentText: at(0.42, 0.12),
+      accentMuted: 'rgba(23, 21, 18, 0.08)',
+      textOnAccent: at(0.98, 0.02),
+
+      ink: '#171512',
+      textOnInk: at(0.98, 0.02),
+
+      ...STATUS_ON_TINTED_PAPER,
+
+      skeleton: at(0.92, 0.036),
+    };
+  }
 
   /*
     For a neutral, OKLab's L is the cube root of relative luminance — so

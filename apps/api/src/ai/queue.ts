@@ -41,9 +41,17 @@ const STALE_AFTER_SEC = 180;
 export const MAX_ATTEMPTS = 3;
 
 export type JobProgress = {
-  stage: 'fetching' | 'splitting' | 'transcribing' | 'saving';
+  stage: 'fetching' | 'splitting' | 'transcribing' | 'waiting' | 'saving';
   done: number;
   total: number;
+  /**
+   * When a `waiting` job expects to resume, as an epoch millisecond count.
+   *
+   * Only ever set alongside `stage: 'waiting'`; every other stage leaves it
+   * undefined, and `heartbeat` writes null for those so a deadline cannot
+   * outlive the wait that produced it.
+   */
+  waitingUntilMs?: number;
 };
 
 /**
@@ -169,7 +177,20 @@ export async function heartbeat(
     .set({
       heartbeatAt: new Date(),
       ...(progress
-        ? { stage: progress.stage, done: progress.done, total: progress.total }
+        ? {
+            stage: progress.stage,
+            done: progress.done,
+            total: progress.total,
+            /*
+              Written on every progress beat, not only on the waiting ones, so
+              that leaving the waiting stage clears the deadline as a matter of
+              course. Setting it only where it applies would leave the last
+              wait's instant sitting on the row through the upload that
+              followed, and the client would render a countdown to a moment in
+              the past for the rest of the job.
+            */
+            waitingUntil: progress.waitingUntilMs ? new Date(progress.waitingUntilMs) : null,
+          }
         : {}),
     })
     .where(eq(transcriptionJobs.episodeId, episodeId));

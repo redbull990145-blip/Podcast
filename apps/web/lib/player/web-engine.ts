@@ -16,6 +16,8 @@ export class WebAudioEngine implements PlaybackEngine {
   private readonly audio: HTMLAudioElement;
   private readonly listeners = new Set<EngineListener>();
   private rafId: number | null = null;
+  /** Mirrors what was last reported, so repeats are not sent. */
+  private buffering = false;
 
   constructor() {
     this.audio = new Audio();
@@ -42,23 +44,73 @@ export class WebAudioEngine implements PlaybackEngine {
     });
 
     this.audio.addEventListener('pause', () => {
+      this.setBuffering(false);
       this.emit({ type: 'paused' });
       this.stopPositionLoop();
     });
 
     this.audio.addEventListener('ended', () => {
+      this.setBuffering(false);
       this.emit({ type: 'ended' });
       this.stopPositionLoop();
     });
 
-    this.audio.addEventListener('waiting', () => {
-      this.emit({ type: 'stalled' });
+    /*
+      The four events that bracket a stall.
+
+      `waiting` and `seeking` open one; `playing` and `canplay` close it. The
+      pairing is not symmetrical by accident — `playing` is a different event
+      from `play`, and it is the one that matters here. A seek performed while
+      the element is already playing never re-fires `play`, because the element
+      was never paused, so listening only for `play` meant nothing in this class
+      could observe a seek finishing. That is the missing signal that left the
+      transport showing a pause button over several seconds of silence every
+      time somebody dragged the scrubber.
+    */
+    this.audio.addEventListener('waiting', () => this.setBuffering(true));
+    this.audio.addEventListener('seeking', () => {
+      // Only a seek that has to fetch. Landing inside an already-buffered range
+      // resolves within a frame or two, and flashing a spinner for that reads
+      // as the app stuttering rather than as it working.
+      if (!this.isBuffered(this.audio.currentTime)) this.setBuffering(true);
     });
+    this.audio.addEventListener('playing', () => this.setBuffering(false));
+    this.audio.addEventListener('canplay', () => this.setBuffering(false));
 
     this.audio.addEventListener('error', () => {
+      this.setBuffering(false);
       this.emit({ type: 'error', message: describeMediaError(this.audio.error) });
       this.stopPositionLoop();
     });
+  }
+
+  /**
+   * Emit only on a change of state.
+   *
+   * `waiting` and `canplay` both fire repeatedly around a single stall, and the
+   * machine pushes every event into React state — so reporting each one would
+   * re-render the player several times to say the same thing twice.
+   */
+  private setBuffering(active: boolean): void {
+    if (this.buffering === active) return;
+    this.buffering = active;
+    this.emit({ type: 'buffering', active });
+  }
+
+  /**
+   * Whether a position already has data behind it.
+   *
+   * `buffered` is a list of ranges rather than one, because seeking around an
+   * episode leaves the browser holding several disconnected stretches of it.
+   */
+  private isBuffered(positionSec: number): boolean {
+    const ranges = this.audio.buffered;
+
+    for (let i = 0; i < ranges.length; i += 1) {
+      if (positionSec >= ranges.start(i) && positionSec <= ranges.end(i)) return true;
+    }
+
+    return false;
   }
 
   /**

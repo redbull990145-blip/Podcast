@@ -68,10 +68,24 @@ export function createCache(config: Config, log: FastifyBaseLogger): Cache {
   };
 }
 
+/**
+ * Bumped when the *meaning* of a cached search changes.
+ *
+ * Results are held for an hour, and a cache is only an accelerator while the
+ * thing it accelerates has not changed underneath it. Dropping the `clean`
+ * parameter from the upstream query changed which feeds a search can return at
+ * all — every explicit show went from invisible to findable — so without a new
+ * namespace the fix would have been real and unobservable for an hour per term,
+ * with the most-searched terms staying wrong the longest.
+ *
+ * Cheaper than deleting keys: the old ones simply expire unread.
+ */
+const SEARCH_SCHEMA = 'v2';
+
 /** Key namespaces, in one place so they cannot collide by accident. */
 export const cacheKey = {
   feed: (feedUrl: string) => `feed:${feedUrl}`,
   search: (query: string, language: string | undefined) =>
-    `search:${language ?? 'any'}:${query.toLowerCase()}`,
-  trending: (language: string | undefined) => `trending:${language ?? 'any'}`,
+    `search:${SEARCH_SCHEMA}:${language ?? 'any'}:${query.toLowerCase()}`,
+  trending: (language: string | undefined) => `trending:${SEARCH_SCHEMA}:${language ?? 'any'}`,
 } as const;

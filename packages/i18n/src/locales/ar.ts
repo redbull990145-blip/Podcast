@@ -32,6 +32,9 @@ export const ar: Catalog = {
   'theme.toDark': 'التبديل إلى المظهر الداكن',
   'theme.appearance': 'المظهر',
   'theme.appearanceCaption': 'يبدأ Cue داكنًا. إذا اخترت غير ذلك فسيتذكّره.',
+  'theme.nowPlayingTint': 'تلوين التطبيق بما يُشغَّل',
+  'theme.nowPlayingTintHint':
+    'يصبغ كل الشاشات بلون غلاف الحلقة الحالية، ويتغيّر اللون بتغيّر الحلقة.',
   'theme.label': 'المظهر',
   'theme.hint': 'إلى أن تختار، يتبع إعداد نظامك.',
   'theme.dark': 'داكن',
@@ -121,6 +124,7 @@ export const ar: Catalog = {
   'search.tooShortBody': 'ثلاثة أحرف تكفي للبدء.',
   'search.noResults': 'لا يوجد برنامج مطابق',
   'search.noResultsBody': 'جرّب كتابة مختلفة، أو اسم المقدّم.',
+  'search.degraded': 'دليل البودكاست لا يستجيب، لذا هذه فقط ما يعرفه Cue مسبقًا. أعد المحاولة بعد قليل للفهرس الكامل.',
   'search.filterLanguage': 'تصفية حسب اللغة',
   'search.anyLanguage': 'أي لغة',
   'search.trending': 'الأكثر رواجًا هذا الأسبوع',
@@ -181,6 +185,10 @@ export const ar: Catalog = {
   'player.mute': 'كتم الصوت',
   'player.unmute': 'إلغاء كتم الصوت',
   'player.openQueue': 'فتح قائمة التشغيل',
+  'player.upNextIn':
+    'التالي بعد {seconds, plural, zero {# ثانية} one {ثانية} two {ثانيتين} few {# ثوانٍ} many {# ثانية} other {# ثانية}}',
+  'player.playNow': 'تشغيل الآن',
+  'common.dismiss': 'إغلاق',
   'player.dismiss': 'إغلاق المشغّل',
   'player.speedOpen': 'سرعة التشغيل: {rate}×. اختر سرعة.',
   'player.speedPresets': 'سرعات جاهزة',
@@ -273,10 +281,13 @@ export const ar: Catalog = {
   'captions.generating': 'جارٍ كتابة التسميات…',
   'captions.stageStarting': 'جارٍ البدء',
   'captions.stageFetching': 'جارٍ جلب الصوت',
+  'captions.stageFetchingLong': 'جارٍ جلب الصوت — هذه الحلقة طويلة، فقد يستغرق الأمر دقيقة أو دقيقتين',
   'captions.stageSplitting': 'جارٍ تقسيمه إلى أجزاء',
   'captions.stageListening': 'جارٍ كتابة التسميات — الجزء {done} من {total}',
   'captions.stageAlmost': 'أوشك على الانتهاء',
   'captions.stageSaving': 'جارٍ مطابقة الكلمات مع الصوت',
+  'captions.stageWaiting': 'في انتظار توفّر حصة الذكاء الاصطناعي المشتركة',
+  'captions.stageWaitingIn': 'حصة الذكاء الاصطناعي المشتركة مشغولة — يُستأنف خلال {time}',
   'captions.working':
     'يجري الاستماع إلى الحلقة. يستغرق ذلك دقائق في الحلقات الطويلة — يمكنك متابعة التشغيل أثناء ذلك.',
   'captions.cost':
@@ -288,6 +299,13 @@ export const ar: Catalog = {
   'captions.failed': 'تعذّر بدء كتابة التسميات.',
   'captions.untimed': 'هذا النص بلا توقيتات، لذا لا يمكنه مجاراة الصوت.',
   'captions.silence': 'توقف في الحديث',
+  'captions.outOfSync': 'النص غير متزامن؟',
+  'captions.sync': 'المزامنة',
+  'captions.syncEarlier': 'إظهار النص مبكرًا',
+  'captions.syncLater': 'إظهار النص متأخرًا',
+  'captions.syncReset': 'إعادة الضبط',
+  'captions.differentCut':
+    'فُرِّغت هذه الحلقة من نسخة بإعلانات مختلفة، لذا تنحرف التوقيتات. اضبطها يدويًا.',
 
   'transcript.title': 'النص',
   'transcript.read': 'اقرأ النص',

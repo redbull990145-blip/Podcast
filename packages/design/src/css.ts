@@ -7,7 +7,7 @@
  */
 
 import { dark, light, onyx, type ColorScheme } from './tokens/color.ts';
-import { deriveTint } from './tokens/tint.ts';
+import { deriveTint, tintedScheme } from './tokens/tint.ts';
 import { text, fontWeight } from './tokens/typography.ts';
 import { elevation, radius, space, measure } from './tokens/layout.ts';
 
@@ -98,6 +98,43 @@ export function tintVars(hex: string | null | undefined): Record<string, string>
     '--tint-text-light': onLight.text,
     '--tint-fill': onDark.fill,
   };
+}
+
+/**
+ * A whole tinted palette as a rule set, in both themes.
+ *
+ * `colorVarStyle` hands back one scheme as an inline style, which is all a
+ * subtree that must *not* follow the theme needs. A tinted page is the opposite
+ * case: it has to follow the theme, and an inline style cannot — there is no
+ * way to write "these variables, but the other set when the user chose light"
+ * into a `style` attribute.
+ *
+ * So the pair is emitted as CSS and the *stylesheet* picks, keyed on the same
+ * three selectors `buildCssVariables` already uses for every other token. That
+ * ordering is what makes onyx keep the dark tint without being named: dark is
+ * the unqualified rule, and only light overrides it.
+ *
+ * `selector` is written by the caller and `hex` never reaches the output as
+ * text — `tintedScheme` parses it through `hexToRgb`, which accepts six hex
+ * digits and returns `null` for anything else, so every value below is one this
+ * codebase generated from the parsed numbers. There is no path by which a
+ * publisher's feed can close a brace here.
+ */
+export function tintedSchemeCss(hex: string, selector: string): string | null {
+  const onDark = tintedScheme(hex, 'dark');
+  const onLight = tintedScheme(hex, 'light');
+  if (!onDark || !onLight) return null;
+
+  const declare = (scheme: ColorScheme): string =>
+    Object.entries(colorVarStyle(scheme))
+      .map(([property, value]) => `${property}:${value}`)
+      .join(';');
+
+  return [
+    `${selector}{${declare(onDark)}}`,
+    `[data-theme='light'] ${selector}{${declare(onLight)}}`,
+    `@media (prefers-color-scheme: light){:root:not([data-theme]) ${selector}{${declare(onLight)}}}`,
+  ].join('');
 }
 
 /**

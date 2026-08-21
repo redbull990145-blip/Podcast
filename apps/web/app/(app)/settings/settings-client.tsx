@@ -15,6 +15,7 @@ import { LanguagePicker } from '@/components/i18n/language-picker';
 import { SpeedScale } from '@/components/player/speed-control';
 import { ThemePicker } from '@/components/shell/theme-picker';
 import { readPreferences, updatePreferences } from '@/lib/player/store';
+import { setNowPlayingTint, useNowPlayingTint } from '@/lib/now-playing-tint';
 import { useSession, useSignOut } from '@/lib/session';
 
 /**
@@ -83,6 +84,14 @@ export function SettingsClient() {
               button that cycles four states is a control you have to press
               repeatedly to find out what it does. */}
           <ThemePicker />
+        </Field>
+
+        {/* Under the theme, because it is a modifier on it rather than a
+            separate decision: the tint is fitted to whichever scheme is
+            selected, so choosing one first is the order the two are actually
+            made in. */}
+        <Field label={t.t('theme.nowPlayingTint')} hint={t.t('theme.nowPlayingTintHint')}>
+          <NowPlayingTintToggle />
         </Field>
       </Section>
 
@@ -210,6 +219,53 @@ function Field({
       <p className="type-caption mt-0.5 mb-3 text-[var(--color-text-tertiary)]">{hint}</p>
       {children}
     </div>
+  );
+}
+
+/**
+ * The one on/off setting in the product, so it is the one switch.
+ *
+ * `role="switch"` rather than the `role="radio"` pairs everything else on this
+ * screen uses, because those are choices between alternatives and this is a
+ * single thing being turned on. A two-option radio group would read to a screen
+ * reader as "on, 1 of 2" and make the reader hunt for what the other one was.
+ *
+ * The track carries the state in position *and* fill rather than fill alone, so
+ * it survives being looked at by someone who does not separate those two hues —
+ * the same two-signal rule the navigation rail follows for its active row.
+ */
+function NowPlayingTintToggle() {
+  const t = useTranslator();
+  const enabled = useNowPlayingTint();
+
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      aria-label={t.t('theme.nowPlayingTint')}
+      onClick={() => setNowPlayingTint(!enabled)}
+      className={[
+        'relative flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full border p-0',
+        'transition-colors duration-[var(--duration-fast)] ease-standard',
+        enabled
+          ? 'border-[var(--color-accent)] bg-[var(--color-accent)]'
+          : 'border-[var(--color-border-strong)] bg-transparent',
+      ].join(' ')}
+    >
+      <span
+        aria-hidden="true"
+        className={[
+          'block h-5 w-5 rounded-full',
+          // Travel is a transform, not a margin or an inset: it keeps the knob
+          // on the compositor so the toggle cannot cost a layout pass.
+          'transition-transform duration-[var(--duration-fast)] ease-standard',
+          enabled
+            ? 'translate-x-[22px] bg-[var(--color-text-on-accent)]'
+            : 'translate-x-[3px] bg-[var(--color-text-tertiary)]',
+        ].join(' ')}
+      />
+    </button>
   );
 }
 

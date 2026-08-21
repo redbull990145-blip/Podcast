@@ -85,6 +85,13 @@
       "when": 1787089155649,
       "tag": "0011_enable_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787343375314,
+      "tag": "0012_fat_mariko_yashida",
+      "breakpoints": true
     }
   ]
 }

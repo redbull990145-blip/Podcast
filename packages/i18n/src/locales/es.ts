@@ -25,6 +25,9 @@ export const es: Catalog = {
   'theme.toDark': 'Cambiar al tema oscuro',
   'theme.appearance': 'Apariencia',
   'theme.appearanceCaption': 'Cue es oscuro por defecto. Si eliges otra cosa, la recuerda.',
+  'theme.nowPlayingTint': 'Colorear la app con lo que suena',
+  'theme.nowPlayingTintHint':
+    'Tiñe todas las pantallas con el color de la portada del episodio actual, y cambia cuando cambia el episodio.',
   'theme.label': 'Tema',
   'theme.hint': 'Mientras no elijas, sigue la configuración de tu sistema.',
   'theme.dark': 'Oscuro',
@@ -115,6 +118,7 @@ export const es: Catalog = {
   'search.tooShortBody': 'Con tres letras basta para empezar.',
   'search.noResults': 'Ningún programa coincide',
   'search.noResultsBody': 'Prueba con otra grafía o con el nombre de quien lo presenta.',
+  'search.degraded': 'El directorio de podcasts no responde, así que esto es solo lo que Cue ya conoce. Vuelve a intentarlo en un momento para ver el índice completo.',
   'search.filterLanguage': 'Filtrar por idioma',
   'search.anyLanguage': 'Cualquier idioma',
   'search.trending': 'Tendencia esta semana',
@@ -174,6 +178,9 @@ export const es: Catalog = {
   'player.mute': 'Silenciar',
   'player.unmute': 'Activar el sonido',
   'player.openQueue': 'Abrir la cola',
+  'player.upNextIn': 'A continuación en {seconds, plural, one {# segundo} other {# segundos}}',
+  'player.playNow': 'Reproducir ya',
+  'common.dismiss': 'Descartar',
   'player.dismiss': 'Cerrar el reproductor',
   'player.speedOpen': 'Velocidad de reproducción: {rate}×. Elige una velocidad.',
   'player.speedPresets': 'Velocidades predefinidas',
@@ -266,10 +273,14 @@ export const es: Catalog = {
   'captions.generating': 'Escribiendo subtítulos…',
   'captions.stageStarting': 'Empezando',
   'captions.stageFetching': 'Obteniendo el audio',
+  'captions.stageFetchingLong':
+    'Obteniendo el audio — este episodio es largo, puede tardar uno o dos minutos',
   'captions.stageSplitting': 'Dividiéndolo en partes',
   'captions.stageListening': 'Escribiendo subtítulos: parte {done} de {total}',
   'captions.stageAlmost': 'Casi listo',
   'captions.stageSaving': 'Sincronizando las palabras con el audio',
+  'captions.stageWaiting': 'Esperando a que se libere la cuota de IA compartida',
+  'captions.stageWaitingIn': 'La cuota de IA compartida está ocupada — se reanuda en {time}',
   'captions.working':
     'Escuchando el episodio. En uno largo tarda unos minutos; puedes seguir reproduciéndolo mientras tanto.',
   'captions.cost':
@@ -282,6 +293,13 @@ export const es: Catalog = {
   'captions.failed': 'No se pudieron empezar los subtítulos.',
   'captions.untimed': 'Esta transcripción no tiene marcas de tiempo, así que no puede seguir el audio.',
   'captions.silence': 'Pausa en la conversación',
+  'captions.outOfSync': '¿Subtítulos desincronizados?',
+  'captions.sync': 'Sincronía',
+  'captions.syncEarlier': 'Mostrar los subtítulos antes',
+  'captions.syncLater': 'Mostrar los subtítulos después',
+  'captions.syncReset': 'Restablecer',
+  'captions.differentCut':
+    'Este episodio se transcribió de una copia con otros anuncios, así que los tiempos se desvían. Ajústalos.',
 
   'transcript.title': 'Transcripción',
   'transcript.read': 'Leer la transcripción',
