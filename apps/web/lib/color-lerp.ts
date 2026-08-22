@@ -86,12 +86,84 @@ function toCss({ r, g, b, a }: Rgba): string {
  * Falls back to a hard switch at the halfway mark when either end cannot be
  * parsed — the change still happens, it just happens once, under whatever else
  * is moving at the time.
+ *
+ * Convenient for a one-off. For anything running per frame use `buildRamp`
+ * instead — this re-parses both ends on every call, which is exactly the work
+ * a ramp exists to hoist out of the loop.
  */
 export function lerpColor(from: string, to: string, t: number): string {
   const a = parseColor(from);
   const b = parseColor(to);
 
   if (!a || !b) return t < 0.5 ? from : to;
+
+  return toCss({
+    r: a.r + (b.r - a.r) * t,
+    g: a.g + (b.g - a.g) * t,
+    b: a.b + (b.b - a.b) * t,
+    a: a.a + (b.a - a.a) * t,
+  });
+}
+
+/** One variable's journey, parsed once so the frame loop only does arithmetic. */
+export type ColorRamp = {
+  property: string;
+  from: Rgba;
+  to: Rgba;
+};
+
+/**
+ * Plan a palette transition: parse every colour once, up front.
+ *
+ * The animation this feeds runs sixty times a second over twenty-two CSS
+ * variables. Parsing inside that loop meant `#2A2419` was taken apart with a
+ * regex and `parseInt` roughly two and a half thousand times a second to
+ * produce the same four numbers each time — pure waste on the main thread, and
+ * the main thread is also the one being asked to restyle the entire document
+ * on the same frame. Parsing once turns each frame into four multiplications
+ * and a string join per variable.
+ *
+ * **Unchanged variables are dropped, not ramped.** Two tinted schemes share a
+ * good deal — `textOnAccent`, the scrim, often the whole text ramp — and a
+ * variable whose endpoints are identical still cost a parse, a lerp and a
+ * `setProperty` per frame to arrive back at the value already on the element.
+ * Those are returned separately as `fixed`, to be written once.
+ *
+ * A pair that cannot be parsed is treated as fixed too: it lands on its final
+ * value immediately rather than being animated wrongly.
+ */
+export function buildRamp(
+  from: Record<string, string>,
+  to: Record<string, string>,
+): { ramps: ColorRamp[]; fixed: Record<string, string> } {
+  const ramps: ColorRamp[] = [];
+  const fixed: Record<string, string> = {};
+
+  for (const [property, end] of Object.entries(to)) {
+    const start = from[property];
+
+    if (start === undefined || start === end) {
+      fixed[property] = end;
+      continue;
+    }
+
+    const a = parseColor(start);
+    const b = parseColor(end);
+
+    if (!a || !b) {
+      fixed[property] = end;
+      continue;
+    }
+
+    ramps.push({ property, from: a, to: b });
+  }
+
+  return { ramps, fixed };
+}
+
+/** Where one ramp sits at `t`. Arithmetic and a string — no parsing. */
+export function rampAt(ramp: ColorRamp, t: number): string {
+  const { from: a, to: b } = ramp;
 
   return toCss({
     r: a.r + (b.r - a.r) * t,
