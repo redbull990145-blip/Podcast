@@ -118,6 +118,16 @@ const config: NextConfig = {
   typedRoutes: true,
 
   /**
+   * Drop `X-Powered-By: Next.js`.
+   *
+   * Nothing is exploitable through it, and anyone determined can fingerprint
+   * the framework from `/_next/` paths anyway. It goes because handing a
+   * scanner the stack for free buys nothing back — the header exists purely as
+   * marketing.
+   */
+  poweredByHeader: false,
+
+  /**
    * Rewrite barrel imports into direct module imports before bundling.
    *
    * `motion/react` re-exports its entire surface from one module, and the
@@ -183,8 +193,60 @@ const config: NextConfig = {
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           // Nothing here is meant to be embedded. `SAMEORIGIN` rather than
-          // `DENY` so a future preview or dev tool can still frame it.
+          // `DENY` so a future preview or dev tool can still frame it. The
+          // `frame-ancestors` directive in middleware.ts says the same thing
+          // to browsers that read a CSP; this stays for the ones that don't.
           { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+
+          /**
+           * Refuse the hardware APIs this app has no use for.
+           *
+           * An empty allowlist is a denial, including to same-origin code, so
+           * this is not only about embeds: a dependency that decides to ask
+           * for the microphone gets a rejected promise rather than a
+           * permission prompt with our domain's name on it. Playback needs
+           * none of these — the audio element is an output, not a capture.
+           *
+           * Left out on purpose: `autoplay`, which a podcast player obviously
+           * needs, and `fullscreen`, which costs nothing to leave available.
+           */
+          {
+            key: 'Permissions-Policy',
+            value: [
+              'camera=()',
+              'microphone=()',
+              'geolocation=()',
+              'payment=()',
+              'usb=()',
+              'magnetometer=()',
+              'gyroscope=()',
+              'accelerometer=()',
+              'interest-cohort=()',
+            ].join(', '),
+          },
+
+          /**
+           * HSTS.
+           *
+           * Cloudflare can send this from the dashboard, and probably also
+           * should — but a toggle in someone's account is not a property of
+           * this app, and it does not survive a move back to Vercel (still the
+           * rollback target) or follow a preview deployment. Stating it here
+           * means the guarantee travels with the code.
+           *
+           * Two years, subdomains included. `preload` is deliberately absent:
+           * it is a request to be hardcoded into browser binaries, and getting
+           * back off that list takes months. Worth doing once the domain is
+           * settled and every subdomain is known to be https-only; not worth
+           * doing by accident.
+           *
+           * Note this only reaches browsers that already made one successful
+           * https connection — it hardens the second visit, not the first.
+           */
+          {
+            key: 'Strict-Transport-Security',
+            value: 'max-age=63072000; includeSubDomains',
+          },
         ],
       },
     ];

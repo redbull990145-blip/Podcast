@@ -1,5 +1,6 @@
 import { directionOf } from '@cue/i18n';
 import type { Metadata, Viewport } from 'next';
+import { headers } from 'next/headers';
 import { Geist, Geist_Mono } from 'next/font/google';
 import type { ReactNode } from 'react';
 import { resolveLocale } from '@/lib/i18n';
@@ -69,8 +70,25 @@ export const viewport: Viewport = {
  * per-component override.
  */
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  const locale = await resolveLocale();
+  const [locale, headerList] = await Promise.all([resolveLocale(), headers()]);
   const direction = directionOf(locale);
+
+  /*
+    The CSP nonce for the two inline scripts below, minted per request in
+    middleware.ts and handed here on a request header.
+
+    Next stamps this on the script tags it generates by itself; these two are
+    hand-written, so they need it written on explicitly or `script-src` blocks
+    them — and blocking them is not a quiet failure. The first is what applies
+    a stored theme before the first paint, so losing it means everyone who
+    chose light sees a frame of the dark app on every full page load.
+
+    Undefined rather than empty when absent: React omits the attribute
+    entirely, which is what you want in the one case this is missing — a build
+    where middleware did not run, where a bogus `nonce=""` would be worse than
+    none.
+  */
+  const nonce = headerList.get('x-nonce') ?? undefined;
 
   return (
     <html
@@ -108,6 +126,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           import either, so adding a scheme means editing this string too.
         */}
         <script
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html:
               "try{var t=localStorage.getItem('cue-theme');if(t==='dark'||t==='onyx'||t==='light')document.documentElement.dataset.theme=t}catch(e){}",
@@ -129,6 +148,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           either.
         */}
         <script
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html:
               "try{if(localStorage.getItem('cue-rail')==='collapsed'){var r=document.documentElement;r.dataset.rail='collapsed';r.style.setProperty('--measure-sidebar','72px')}}catch(e){}",
