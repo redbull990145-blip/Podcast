@@ -82,7 +82,28 @@ export function AppShell({ children }: { children: ReactNode }) {
       */}
       <main
         data-chrome-tint=""
-        className="bg-[var(--color-bg)] pb-[calc(160px+env(safe-area-inset-bottom))] md:pb-[104px] md:ps-[var(--measure-sidebar)]"
+        /*
+          `overflow-x-hidden`, added for the paged rails on Home.
+
+          Their edge arrows deliberately bleed past the row they belong to, so
+          they can hang in open margin instead of sitting on top of a show's
+          own artwork — see `PagedRail`. That bleed is contained by an
+          `overflow-hidden` wrapper local to the rail, which stops it reaching
+          any *cover*, but the wrapper's own box still physically extends past
+          it, and on a browser window narrower than this content column's
+          natural margin, past the true edge of the page too. Nothing between
+          that rail and the document was clipping horizontal overflow, so the
+          page gained a horizontal scrollbar for the sake of an arrow four
+          sections down the screen that nobody had scrolled sideways to find.
+
+          `<main>` is the natural place to stop it: every route renders inside
+          it, so anything any page bleeds sideways is caught here rather than
+          each page having to remember to contain its own overflow. Vertical
+          scrolling is untouched — this only says the *document* never grows
+          wider than the viewport, which nothing in this app's layout needs to
+          do on purpose.
+        */
+        className="overflow-x-hidden bg-[var(--color-bg)] pb-[calc(160px+env(safe-area-inset-bottom))] md:pb-[104px] md:ps-[var(--measure-sidebar)]"
       >
         {children}
       </main>

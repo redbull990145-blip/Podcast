@@ -8,13 +8,15 @@ import { useTranslator } from '@/components/i18n/locale-provider';
 import { colorVarStyle, deriveTint, tintedScheme } from '@cue/design';
 import type { ContinueEntry } from '@cue/types';
 import { useQuery } from '@tanstack/react-query';
-import { useMotionValue } from 'motion/react';
+import { duration } from '@cue/motion';
+import { animate, AnimatePresence, useMotionValue, useReducedMotion } from 'motion/react';
 import * as m from 'motion/react-m';
 import type { Route } from 'next';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Artwork } from '@/components/media/artwork';
 import { api } from '@/lib/api';
+import { usePressScale, useTransition } from '@/lib/motion';
 import { readPosition, usePlayerActions, usePlayerSelector } from '@/lib/player/store';
 import { useSession } from '@/lib/session';
 import { isLightNow, useThemeChoice } from '@/lib/theme';
@@ -229,6 +231,42 @@ function ResumeHero({ entry }: { entry: ContinueEntry }) {
 
   const playable = playableFromQueueEntry(entry);
 
+  const press = usePressScale(0.97);
+  const settle = useTransition('responsive');
+  const reduced = useReducedMotion();
+
+  /**
+   * A pop on the button itself, every time play/pause flips.
+   *
+   * Driven from a motion value rather than declared as an `animate` prop,
+   * because it has to re-run on a change that does not alter the value it
+   * animates: the button ends at scale 1 either way, so a declarative
+   * `animate={{ scale: 1 }}` has nothing to transition and simply never fires.
+   * Firing it imperatively is what makes the second press feel like the first.
+   *
+   * Skipped on mount. A hero that flinches as the page settles is the app
+   * reacting to its own arrival, and the listener did nothing.
+   */
+  const pop = useMotionValue(1);
+  const popped = useRef(false);
+
+  useEffect(() => {
+    if (!popped.current) {
+      popped.current = true;
+      return;
+    }
+
+    if (reduced) return;
+
+    const controls = animate(pop, [1, 0.92, 1.05, 1], {
+      duration: 0.42,
+      times: [0, 0.18, 0.55, 1],
+      ease: 'easeOut',
+    });
+
+    return () => controls.stop();
+  }, [isPlaying, pop, reduced]);
+
   return (
     <article
       className="relative -mx-5 overflow-hidden border-y border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-7 md:mx-0 md:rounded-[var(--radius-lg)] md:border-0 md:px-8 md:py-8"
@@ -322,14 +360,70 @@ function ResumeHero({ entry }: { entry: ContinueEntry }) {
               it in the bar do the identical thing, and both surfaces show the
               result immediately, because both are reading the same state.
             */}
-            <button
+            <m.button
               type="button"
               onClick={() => (isCurrent ? toggle() : void play(playable))}
-              className="flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-2 rounded-full border-0 bg-[var(--color-ink)] px-6 type-body-strong text-[var(--color-text-on-ink)] transition-[transform,opacity] duration-[var(--duration-instant)] ease-standard hover:opacity-90 active:scale-[0.97] motion-reduce:active:scale-100 sm:flex-none"
+              whileTap={{ scale: press }}
+              transition={settle}
+              style={{ scale: pop }}
+              className="flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-2.5 rounded-full border-0 bg-[var(--color-ink)] px-6 type-body-strong text-[var(--color-text-on-ink)] hover:opacity-90 sm:flex-none"
             >
-              {isPlaying ? <PauseGlyph /> : <PlayGlyph />}
+              {/*
+                The glyph is swapped, not redrawn — and the swap has to be big
+                enough to see.
+
+                The first version of this scaled and rotated the mark a little
+                and was genuinely imperceptible, for a reason worth writing
+                down: the glyph is twelve pixels tall. A 0.6 scale change on a
+                12px object is a seven-pixel movement, over in a fifth of a
+                second, on the thing your own finger is covering at the moment
+                it happens. The physics were right and there was nothing to
+                look at.
+
+                So the motion is carried by things that are *not* the glyph. A
+                ring expands out from under it, at a size the button itself
+                does not have, which puts movement outside the area the cursor
+                hides. The mark makes a full quarter-turn rather than a nudge,
+                and the pair of them pop the whole cluster slightly past its
+                resting size on the way back — see `pop` above.
+              */}
+              <span className="relative grid h-5 w-5 shrink-0 place-items-center">
+                {/* The ring. Keyed so a fresh one runs on every toggle, and
+                    `pointer-events-none` because it briefly covers the button
+                    it belongs to. */}
+                <AnimatePresence initial={false}>
+                  <m.span
+                    key={`ring-${isPlaying}`}
+                    aria-hidden="true"
+                    initial={{ scale: 0.2, opacity: 0.55 }}
+                    animate={{ scale: 2.6, opacity: 0 }}
+                    transition={{ duration: 0.55, ease: 'easeOut' }}
+                    className="pointer-events-none absolute inset-0 col-start-1 row-start-1 rounded-full border-2 border-current"
+                  />
+                </AnimatePresence>
+
+                <AnimatePresence mode="popLayout" initial={false}>
+                  <m.span
+                    key={isPlaying ? 'pause' : 'play'}
+                    initial={{ scale: 0, opacity: 0, rotate: -90 }}
+                    animate={{ scale: 1, opacity: 1, rotate: 0 }}
+                    exit={{ scale: 0, opacity: 0, rotate: 90 }}
+                    // Sprung on scale and rotation, tweened on opacity: the
+                    // motion package's rule, and the reason this settles with
+                    // weight rather than easing flatly to a stop.
+                    transition={{ ...settle, opacity: { duration: duration.fast / 1000 } }}
+                    className="col-start-1 row-start-1 flex"
+                  >
+                    {isPlaying ? <PauseGlyph /> : <PlayGlyph />}
+                  </m.span>
+                </AnimatePresence>
+              </span>
+
+              {/* The word changes with the glyph and is deliberately not
+                  animated: a label that slides is a label you cannot read, and
+                  this one is the accessible name of the control. */}
               {isPlaying ? t.t('episode.pause') : t.t('home.continue')}
-            </button>
+            </m.button>
 
             {/* Start over is not a duplicate of Resume. A half-finished episode
                 is the one case where "play" is genuinely ambiguous, and the

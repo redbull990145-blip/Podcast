@@ -139,17 +139,40 @@ const QueueRow = memo(function QueueRow({
         </p>
       </div>
 
+      {/*
+        A glyph rather than the words "Play now".
+
+        Two reasons beyond the look. The label was a bare English string that
+        never went through the translator, so this row read half in the
+        reader's language and half in mine — and a word-button beside the
+        icon-button that removes the row made two controls of the same
+        importance look like different kinds of thing. A filled triangle is the
+        one symbol in this product that already means exactly this.
+      */}
       <button
         type="button"
         onClick={() => void actions.play(episode)}
-        className="type-caption shrink-0 cursor-pointer rounded-[var(--radius-sm)] border-none bg-transparent px-3 py-2 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+        aria-label={t.t('player.playNow')}
+        title={t.t('player.playNow')}
+        className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full border-none bg-transparent text-[var(--color-text-secondary)] transition-colors transition-transform duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] active:scale-[0.94] motion-reduce:active:scale-100"
         /* The show's colour, resolved against the theme rather than fixed to
            the dark one. Spread whole because the marker attribute and the
            values have to arrive together; absent when the show has no colour,
            which leaves the class above as the fallback. */
         {...tintTextProps(episode.accentColor)}
       >
-        Play now
+        {/* Filled, and mirrored under Arabic — a play triangle points the way
+            time runs, which is the direction the script does. */}
+        <svg
+          width="13"
+          height="14"
+          viewBox="0 0 10 12"
+          fill="currentColor"
+          aria-hidden="true"
+          className="rtl:-scale-x-100"
+        >
+          <path d="M0 0 10 6 0 12Z" />
+        </svg>
       </button>
 
       <button

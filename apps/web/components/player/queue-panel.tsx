@@ -50,8 +50,23 @@ export function QueuePanel({
   const current = usePlayerSelector((state) => state.current);
 
   return (
-    <div className={['flex min-h-0 flex-col', className].join(' ')} style={style}>
-      <div className="mb-3 flex shrink-0 items-baseline justify-between gap-3">
+    /*
+      Bounded, and sitting at the top of the column rather than filling it.
+
+      The column this shares with the transcript is half the window, which for a
+      transcript is a reading measure and for a list of three rows is a title
+      stretched across nine hundred pixels with its show name orphaned at the
+      far end. A queue is a short list; it should read as a panel of that size,
+      not as a column that failed to fill.
+
+      `max-w` rather than a fixed width so it still fits when the column is
+      narrower than the cap — on a phone this is the whole screen.
+    */
+    <div
+      className={['flex min-h-0 w-full max-w-[560px] flex-col', className].join(' ')}
+      style={style}
+    >
+      <div className="mb-2 flex shrink-0 items-baseline justify-between gap-3">
         <h3 className="type-title3 m-0 text-[var(--color-text-primary)]">
           {t.t('player.upNext')}
         </h3>

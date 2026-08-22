@@ -358,8 +358,23 @@ export function Player() {
    * a question people ask at a glance. One column, two answers, and pressing
    * the button for the panel already open closes it.
    */
-  const [panelChoice, setPanelChoice] = useState<'captions' | 'queue' | null>(null);
-  const panel = panelChoice ?? (wide ? 'captions' : null);
+  /*
+    `'unset'` is a third state, and it has to be.
+
+    This was `null` for "nobody has chosen", falling back to `'captions'` at
+    wide widths — which made closing a panel impossible, because closing *also*
+    wrote `null` and the fallback immediately reopened the transcript. Pressing
+    queue-to-close swapped to captions; pressing captions-to-close swapped
+    straight back. Two meanings sharing one value, and the bug was the fallback
+    firing on a deliberate close.
+
+    `null` now means exactly one thing — closed, on purpose — and the width only
+    decides before anybody has touched the control.
+  */
+  const [panelChoice, setPanelChoice] = useState<'captions' | 'queue' | null | 'unset'>(
+    'unset',
+  );
+  const panel = panelChoice === 'unset' ? (wide ? 'captions' : null) : panelChoice;
   const captionsOpen = panel !== null;
 
   const togglePanel = (next: 'captions' | 'queue') =>

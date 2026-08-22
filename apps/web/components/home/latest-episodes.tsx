@@ -3,14 +3,15 @@ import type { Route } from 'next';
 import Link from 'next/link';
 import { Artwork } from '@/components/media/artwork';
 import { PlayButton } from '@/components/episode/play-button';
-import { SectionHeader } from '@/components/ui/section-header';
+import { PagedRail } from '@/components/ui/paged-rail';
 import { api } from '@/lib/api';
 import { getTranslator } from '@/lib/i18n';
 
 /** How many shows to ask, and how many picks to keep. */
-const SOURCES = 8;
-/** Four, to fill the row the grid now draws at desktop width. */
-const PICKS = 4;
+const SOURCES = 10;
+/** Six in the shelf, three on screen — the same shape as Recommended above. */
+const PICKS = 6;
+const PER_PAGE = 3;
 
 type Pick = { episode: Episode; podcast: Podcast };
 
@@ -53,24 +54,25 @@ export async function LatestEpisodes({ podcasts }: { podcasts: Podcast[] }) {
 
   return (
     <section aria-labelledby="latest-heading" className="mb-14">
-      <SectionHeader
-        id="latest-heading"
+      {/*
+        Rendered here, on the server, and handed to a client component to page.
+
+        The rows are React elements by the time `PagedRail` sees them, so the
+        feed reading, the `allSettled`, and every `await` above stay server-side
+        — the only thing that crosses the boundary is which three are visible.
+      */}
+      <PagedRail
+        headingId="latest-heading"
         label={t.t('home.latest')}
         note={t.t('home.latestNote')}
-        action={{ href: '/library', label: t.t('home.viewMore'), variant: 'icon' }}
-      />
-
-      {/* Four across rather than three — see the note on Recommended's grid.
-          One fewer column than that rail because each of these carries an
-          episode title as well as a show name, and five columns of two-line
-          titles is a wall of text under a row of stamps. */}
-      <ul className="m-0 grid list-none grid-cols-1 gap-x-5 gap-y-6 p-0 sm:grid-cols-2 lg:grid-cols-4">
-        {picks.map(({ episode, podcast }) => (
+        action={{ href: '/library', label: t.t('home.viewMore') }}
+        perPage={PER_PAGE}
+        items={picks.map(({ episode, podcast }) => (
           <li key={episode.id}>
             <LatestPick episode={episode} podcast={podcast} />
           </li>
         ))}
-      </ul>
+      />
     </section>
   );
 }
@@ -213,8 +215,10 @@ export function LatestEpisodesSkeleton() {
       {/* Shaped like the real grid above, breakpoint for breakpoint — a
           placeholder reserving a different amount of space than the content it
           stands in for is a layout shift with extra steps. */}
-      <div className="grid grid-cols-1 gap-x-5 gap-y-6 sm:grid-cols-2 lg:grid-cols-4">
-        {Array.from({ length: PICKS }, (_, index) => (
+      <div className="grid grid-cols-1 gap-x-5 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
+        {/* `PER_PAGE`, not `PICKS`: the shelf holds six and shows three, and
+            what has to be reserved is the space three of them take. */}
+        {Array.from({ length: PER_PAGE }, (_, index) => (
           <div key={index} className="flex items-center gap-4 sm:block">
             <div className="aspect-square w-[72px] shrink-0 rounded-[var(--radius-md)] bg-[var(--color-skeleton)] sm:mb-3.5 sm:w-full" />
             <div className="min-w-0 flex-1">

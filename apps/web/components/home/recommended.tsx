@@ -6,10 +6,9 @@ import type { Translator } from '@cue/i18n';
 import { useQuery } from '@tanstack/react-query';
 import type { Route } from 'next';
 import Link from 'next/link';
-import type { CSSProperties } from 'react';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { Artwork } from '@/components/media/artwork';
-import { SectionHeader } from '@/components/ui/section-header';
+import { PagedRail } from '@/components/ui/paged-rail';
 import { api } from '@/lib/api';
 import { useSession } from '@/lib/session';
 
@@ -20,17 +19,23 @@ import { useSession } from '@/lib/session';
  * five-column grid, which is a *listing*, and a listing cannot recommend
  * anything: eighteen equally-sized tiles ask the reader to do the choosing,
  * which is the job the ranking was supposed to have already done. That is
- * still the rule, and it is why this is capped rather than paged.
+ * still the rule, and it is why this is capped at all.
  *
  * The number was three, on the reasoning that three cards *at editorial size*
  * could each carry a reason and enough artwork to recognise a show by. The
  * size is what moved: at three across, a cover on a desktop window was very
  * nearly the 400px this app reserves for the expanded player, spent on a
- * suggestion. Smaller covers make five a scannable row rather than a wall —
- * the thing that would make this a listing is equal weight and no reason
- * attached, not the count.
+ * suggestion.
+ *
+ * Six in the shelf, three on screen. `PagedRail` keeps the other half behind a
+ * chevron, which is how both halves of that argument survive: the row on screen
+ * stays short enough to read as advice, and "more" is not immediately a dead
+ * end. The same shape as Latest episodes below, so the two rails read as one
+ * object at one size rather than two opinions about how many is right.
  */
-const RAIL = 5;
+const RAIL = 6;
+/** How many of those are on screen at once. */
+const PER_PAGE = 3;
 
 /**
  * Roughly how many episodes it takes before the ranker stops guessing.
@@ -101,50 +106,22 @@ export function Recommended({ fallback }: { fallback: Podcast[] }) {
 
   return (
     <section aria-labelledby="recommended-heading" className="mb-14">
-      <SectionHeader
-        id="recommended-heading"
+      <PagedRail
+        headingId="recommended-heading"
         label={t.t('home.recommended')}
         // Only claimed when it is true. Telling a listener with no history
         // that this was shaped by their listening is the kind of small lie
         // that makes the whole feature read as decoration.
         note={personalized ? t.t('home.recommendedNote') : t.t('home.recommendedGeneric')}
-        action={{ href: '/search', label: t.t('home.viewMore'), variant: 'icon' }}
-      />
-
-      {/*
-        Equal columns, matching Latest episodes directly below.
-
-        The design draws this row as a wide lead and two followers, and that
-        does not survive contact with square artwork: a wider column is a
-        taller cover, so the lead card's caption sits on a different baseline
-        from its neighbours' and the row reads as broken rather than ranked.
-        Sequence already carries the ranking.
-
-        Five across on a desktop rather than three. At three, a cover on a
-        1440px window is very nearly 400px square — the size this app reserves
-        for the *expanded player*, spent on a suggestion. A recommendation rail
-        is something you scan across, and covers that each take a third of the
-        width make it something you scroll down instead.
-      */}
-      {/*
-        The desktop column count follows however many the ranker actually
-        returned, capped at `RAIL`.
-
-        Hard-coding five would leave a two-column hole on any account the
-        ranker can only find three shows for — which is every new account, so
-        the empty half of the row would be the first thing a new listener sees
-        this section do. A grid that fits its contents cannot have that bug.
-      */}
-      <ul
-        className="m-0 grid list-none grid-cols-2 gap-x-5 gap-y-7 p-0 sm:grid-cols-3 lg:[grid-template-columns:repeat(var(--rail-cols),minmax(0,1fr))]"
-        style={{ '--rail-cols': Math.min(shows.length, RAIL) } as CSSProperties}
-      >
-        {shows.map((podcast) => (
+        action={{ href: '/search', label: t.t('home.viewMore') }}
+        perPage={PER_PAGE}
+        items={shows.map((podcast) => (
           <li key={podcast.id}>
             <RecommendationCard podcast={podcast} />
           </li>
         ))}
-      </ul>
+      />
+
 
       {isSignedIn && !personalized ? <StartLearning /> : null}
     </section>

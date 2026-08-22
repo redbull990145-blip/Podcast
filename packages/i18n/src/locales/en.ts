@@ -99,6 +99,12 @@ export const en = {
      visible "View more" beside every heading is four of the same two words
      down one page. */
   'home.viewMore': 'View more',
+  /* The paged rails on Home. The placeholder names which shelf, so a screen
+     reader hears "Show more in Recommended for you" rather than several
+     identical buttons down one page. */
+  'rail.next': 'Show more in {section}',
+  'rail.previous': 'Show previous in {section}',
+  'rail.goToPage': 'Page {page} of {total}',
   'home.catalogue': 'Everything on Cue',
   /* The same grid as the catalogue, ordered by what someone actually listens
      to. The note matters more than usual here: a personalised order that does

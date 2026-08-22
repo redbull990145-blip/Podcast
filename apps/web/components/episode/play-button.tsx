@@ -4,6 +4,7 @@ import { playableFromEpisode } from '@cue/core';
 import type { Episode } from '@cue/types';
 import * as m from 'motion/react-m';
 import { useRouter } from 'next/navigation';
+import { useHydrated } from '@/lib/hydrated';
 import { usePressScale, useTransition } from '@/lib/motion';
 import { usePlayerActions, usePlayerSelector } from '@/lib/player/store';
 import { useSession } from '@/lib/session';
@@ -45,7 +46,7 @@ export function PlayButton({
 }) {
   const actions = usePlayerActions();
   const router = useRouter();
-  const { isSignedIn } = useSession();
+  const { isSignedIn, isLoading } = useSession();
   const press = usePressScale(0.9);
   const transition = useTransition('snappy');
 
@@ -62,7 +63,30 @@ export function PlayButton({
   const isCurrent = usePlayerSelector((s) => s.current?.id === episode.id);
   const playing = usePlayerSelector((s) => s.status === 'playing');
 
-  const locked = requiresAccount && !isSignedIn;
+  /**
+   * Gated, and *known* to be gated.
+   *
+   * Three conditions, and the last two are the bug this fixes. `isSignedIn` is
+   * false in two completely different situations — nobody is signed in, and
+   * nobody has looked yet — and treating them the same made every gated button
+   * render as "Sign in to play" until the session query landed. On the podcast
+   * page that query resolves after the first paint, so a signed-in listener got
+   * a row of dead play buttons that routed them to a sign-in page they did not
+   * need, and React logged a hydration mismatch on every load because the
+   * server had rendered the locked label and the client had not.
+   *
+   * `useHydrated` is what makes the *first* client render agree with the
+   * server's. Gating on `isLoading` alone is not enough: it fixes the signed-in
+   * case and reintroduces the mismatch for a signed-out one, because the server
+   * always renders pending while the client may already know the answer.
+   *
+   * Unknown therefore reads as unlocked. That is the safe direction — this is a
+   * product gate rather than a security one (the audio streams from the
+   * publisher's own CDN and was never ours to withhold), so the cost of being
+   * briefly wrong is a play that works, not a leak.
+   */
+  const hydrated = useHydrated();
+  const locked = requiresAccount && hydrated && !isLoading && !isSignedIn;
 
   const isPlaying = isCurrent && playing;
 

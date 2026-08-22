@@ -247,34 +247,23 @@ export function SearchClient({
           */}
           <ForYou />
 
-          <CategoryBrowse />
-
-          {/* Two lists of the same data, side by side, doing different jobs:
-              the ranked one is for someone reading positions, the covers are
-              for someone recognising a show they have heard of. Splitting one
-              request between them costs nothing and beats a single column of
-              twenty identical rows. */}
           {/*
-            Two equal columns, not a 1 : 1.2 split favouring the covers.
+            Trending now lives inside Browse rather than as two more sections
+            beneath it.
 
-            The resting state of this page was doing two different things at
-            two different volumes: a quiet column of ranked text beside a wider
-            column of 220px artwork. Podcast covers are the loudest objects in
-            the product — saturated, type-heavy, competing with each other —
-            and giving them the larger half meant the screen someone lands on
-            before they have searched for anything was mostly a wall of other
-            people's branding, with the actual editorial ranking whispering
-            beside it. Equal halves and smaller covers put the two lists at the
-            same weight, which is what makes them read as one screen.
+            They were always the same question asked twice — "what is worth
+            opening when you have not searched for anything" — and stacking
+            three top-level headings down one page made the resting state read
+            as a list of features rather than as one screen. Browse is the
+            heading that covers all of it: the categories are the deliberate
+            way in, and the charts are the shortcut for someone who would
+            rather be told.
           */}
-          <div className="mt-12 grid gap-10 lg:grid-cols-2 lg:gap-14">
-            <TrendingRanked
-              results={trending.data?.results ?? NO_RESULTS}
-              pending={trending.isPending}
-              error={trending.error}
-            />
-            <TrendingCovers results={trending.data?.results ?? NO_RESULTS} />
-          </div>
+          <CategoryBrowse
+            trending={trending.data?.results ?? NO_RESULTS}
+            trendingPending={trending.isPending}
+            trendingError={trending.error}
+          />
         </>
       )}
     </div>
@@ -322,14 +311,20 @@ const ForYou = memo(function ForYou() {
   if (!data?.personalized || data.items.length === 0) return null;
 
   return (
-    <section aria-labelledby="for-you-heading" className="mb-12">
+    /* `mt-14`/`mb-16`: this sits directly under the search field, and the two
+       were close enough that the rail read as part of the input's own chrome
+       rather than as the first section of the page. */
+    <section aria-labelledby="for-you-heading" className="mt-14 mb-16">
       <SectionHeader
         id="for-you-heading"
         label={t.t('search.forYou')}
         note={t.t('search.forYouNote')}
       />
 
-      <ul className="m-0 grid list-none grid-cols-2 gap-x-4 gap-y-7 p-0 sm:grid-cols-3 lg:grid-cols-6">
+      {/* `gap-y-9`: the caption under each cover is three lines at its longest,
+          and at `gap-y-7` the last line of one row nearly touched the artwork
+          of the next. */}
+      <ul className="m-0 grid list-none grid-cols-2 gap-x-5 gap-y-9 p-0 sm:grid-cols-3 lg:grid-cols-6">
         {data.items.map((podcast) => (
           <li key={podcast.id}>
             <Link
@@ -477,7 +472,15 @@ function SearchField({
  */
 // Memoized, like ForYou: no props, one cached query, and typing is not one of
 // the things that changes what a category grid shows.
-const CategoryBrowse = memo(function CategoryBrowse() {
+const CategoryBrowse = memo(function CategoryBrowse({
+  trending,
+  trendingPending,
+  trendingError,
+}: {
+  trending: PodcastSearchResult[];
+  trendingPending: boolean;
+  trendingError: unknown;
+}) {
   const t = useTranslator();
 
   const { data, isPending } = useQuery({
@@ -496,14 +499,14 @@ const CategoryBrowse = memo(function CategoryBrowse() {
   const rest = items.slice(FEATURED_CATEGORIES);
 
   return (
-    <section aria-labelledby="categories-heading" className="mt-12">
+    <section aria-labelledby="categories-heading" className="mt-16">
       <SectionHeader
         id="categories-heading"
         label={t.t('search.browse')}
         note={t.t('search.categoryCount', { count: items.length })}
       />
 
-      <ul className="m-0 grid list-none grid-cols-2 gap-3.5 p-0 lg:grid-cols-4">
+      <ul className="m-0 grid list-none grid-cols-2 gap-4 p-0 lg:grid-cols-4">
         {featured.map((category) => (
           <li key={category.slug}>
             <CategoryTile category={category} />
@@ -526,7 +529,7 @@ const CategoryBrowse = memo(function CategoryBrowse() {
         aspect ratio warns about, at six times the scale.
       */}
       {rest.length > 0 ? (
-        <ul className="m-0 mt-3.5 grid list-none grid-cols-2 gap-3.5 p-0 sm:grid-cols-3 lg:grid-cols-4">
+        <ul className="m-0 mt-4 grid list-none grid-cols-2 gap-4 p-0 sm:grid-cols-3 lg:grid-cols-4">
           {rest.map((category) => (
             <li key={category.slug}>
               <CategoryTile category={category} compact />
@@ -534,6 +537,33 @@ const CategoryBrowse = memo(function CategoryBrowse() {
           ))}
         </ul>
       ) : null}
+
+      {/*
+        Two lists of the same data, side by side, doing different jobs: the
+        ranked one is for someone reading positions, the covers are for someone
+        recognising a show they have heard of. Splitting one request between
+        them costs nothing and beats a single column of twenty identical rows.
+
+        Two equal columns, not a 1 : 1.2 split favouring the covers. Podcast
+        covers are the loudest objects in the product — saturated, type-heavy,
+        competing with each other — and giving them the larger half made the
+        screen someone lands on before searching mostly a wall of other
+        people's branding, with the editorial ranking whispering beside it.
+
+        Separated by a rule rather than by margin alone. These are a different
+        kind of answer from the tiles above them, and inside one section the
+        only thing left to say so is a line.
+      */}
+      <div className="mt-12 border-t border-[var(--color-border)] pt-10">
+        <div className="grid gap-10 lg:grid-cols-2 lg:gap-14">
+          <TrendingRanked
+            results={trending}
+            pending={trendingPending}
+            error={trendingError}
+          />
+          <TrendingCovers results={trending} />
+        </div>
+      </div>
     </section>
   );
 });
