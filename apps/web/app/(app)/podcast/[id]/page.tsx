@@ -231,8 +231,20 @@ export default async function PodcastPage({ params, searchParams }: Params) {
         </div>
       </header>
 
+      {/*
+        Full content width, not a reading measure.
+
+        A show description is not an article — it is four lines of blurb read
+        once, and capping it to `--measure-prose` left it ending well short of
+        the episode rows directly beneath it. Two blocks in the same column
+        with different right edges reads as one of them being misaligned, and
+        on this page the shorter one is the paragraph rather than the list.
+
+        Balanced wrapping so the last line is not a single orphaned word, which
+        is the failure mode a wide measure introduces and the narrow one hid.
+      */}
       {podcast.description ? (
-        <p className="type-body mb-10 max-w-[var(--measure-prose)] text-[var(--color-text-secondary)]">
+        <p className="type-body mb-10 text-pretty text-[var(--color-text-secondary)]">
           {podcast.description}
         </p>
       ) : null}

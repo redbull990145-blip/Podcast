@@ -8,11 +8,14 @@ import { useTranslator } from '@/components/i18n/locale-provider';
 import { colorVarStyle, deriveTint, tintedScheme } from '@cue/design';
 import type { ContinueEntry } from '@cue/types';
 import { useQuery } from '@tanstack/react-query';
+import { useMotionValue } from 'motion/react';
+import * as m from 'motion/react-m';
 import type { Route } from 'next';
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { Artwork } from '@/components/media/artwork';
 import { api } from '@/lib/api';
-import { usePlayerActions } from '@/lib/player/store';
+import { readPosition, usePlayerActions, usePlayerSelector } from '@/lib/player/store';
 import { useSession } from '@/lib/session';
 import { isLightNow, useThemeChoice } from '@/lib/theme';
 
@@ -172,8 +175,27 @@ function remainingOf(
  */
 function ResumeHero({ entry }: { entry: ContinueEntry }) {
   const t = useTranslator();
-  const { play, playAt } = usePlayerActions();
+  const { play, playAt, toggle } = usePlayerActions();
   const { left, fraction } = remainingOf(entry, t);
+
+  /*
+    Whether this hero is describing the episode that is playing right now.
+
+    Two selectors rather than one returning an object, per `usePlayerSelector`'s
+    contract — two boolean comparisons cost nothing, and one fresh object per
+    call never settles. Neither of these changes while an episode plays, so this
+    component re-renders when the listener acts and not once per position tick.
+
+    The bug this closes: the hero was drawn entirely from a query with a 30s
+    stale time and no connection to the machine at all, so pressing play here
+    started the audio and then left the panel describing the episode as it was
+    half a minute ago — a "Continue listening" button on something already
+    playing, and a progress bar frozen where the server last heard about it.
+  */
+  const isCurrent = usePlayerSelector((state) => state.current?.id === entry.episode.id);
+  const isPlaying = usePlayerSelector(
+    (state) => state.current?.id === entry.episode.id && state.status === 'playing',
+  );
   /*
     Resolved on the client, which is the one thing this hero can do that the
     tinted *pages* cannot.
@@ -268,27 +290,45 @@ function ResumeHero({ entry }: { entry: ContinueEntry }) {
           </div>
 
           <div className="mt-5 max-w-[480px] md:mt-6">
-            <Track fraction={fraction} fill={tint?.fill} />
-            <div className="mt-1.5 flex justify-between text-[var(--color-text-tertiary)]">
-              <span className="type-timecode">
-                {formatTimestamp(entry.positionSec)}
-              </span>
-              {left ? (
-                <span className="type-timecode">
-                  {t.t('home.timeLeft', { duration: left })}
-                </span>
-              ) : null}
-            </div>
+            {isCurrent ? (
+              <LiveProgress
+                entry={entry}
+                playing={isPlaying}
+                fill={tint?.fill}
+                fallbackFraction={fraction}
+              />
+            ) : (
+              <>
+                <Track fraction={fraction} fill={tint?.fill} />
+                <div className="mt-1.5 flex justify-between text-[var(--color-text-tertiary)]">
+                  <span className="type-timecode">
+                    {formatTimestamp(entry.positionSec)}
+                  </span>
+                  {left ? (
+                    <span className="type-timecode">
+                      {t.t('home.timeLeft', { duration: left })}
+                    </span>
+                  ) : null}
+                </div>
+              </>
+            )}
           </div>
 
           <div className="mt-5 flex flex-wrap items-center gap-2.5">
+            {/*
+              One button, three meanings, decided by the machine rather than by
+              the query. While this episode is the current one it is the same
+              play/pause control the player has — pressing it here and pressing
+              it in the bar do the identical thing, and both surfaces show the
+              result immediately, because both are reading the same state.
+            */}
             <button
               type="button"
-              onClick={() => void play(playable)}
+              onClick={() => (isCurrent ? toggle() : void play(playable))}
               className="flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-2 rounded-full border-0 bg-[var(--color-ink)] px-6 type-body-strong text-[var(--color-text-on-ink)] transition-[transform,opacity] duration-[var(--duration-instant)] ease-standard hover:opacity-90 active:scale-[0.97] motion-reduce:active:scale-100 sm:flex-none"
             >
-              <PlayGlyph />
-              {t.t('home.continue')}
+              {isPlaying ? <PauseGlyph /> : <PlayGlyph />}
+              {isPlaying ? t.t('episode.pause') : t.t('home.continue')}
             </button>
 
             {/* Start over is not a duplicate of Resume. A half-finished episode
@@ -322,9 +362,17 @@ function ResumeHero({ entry }: { entry: ContinueEntry }) {
  */
 function ProgressCard({ entry }: { entry: ContinueEntry }) {
   const t = useTranslator();
-  const { play } = usePlayerActions();
+  const { play, toggle } = usePlayerActions();
   const { left, fraction } = remainingOf(entry, t);
   const duration = t.duration(entry.durationSec ?? entry.episode.durationSec);
+
+  // Same live wiring as the hero, for the same reason: a row showing a play
+  // glyph for the episode currently coming out of the speakers is the app
+  // disagreeing with itself.
+  const isCurrent = usePlayerSelector((state) => state.current?.id === entry.episode.id);
+  const isPlaying = usePlayerSelector(
+    (state) => state.current?.id === entry.episode.id && state.status === 'playing',
+  );
 
   return (
     <article className="flex h-full flex-col gap-3.5 rounded-[var(--radius-lg)] bg-[var(--color-surface-raised)] p-4 [box-shadow:var(--elevation-sm)]">
@@ -355,15 +403,21 @@ function ProgressCard({ entry }: { entry: ContinueEntry }) {
       <div className="mt-auto flex items-center gap-3">
         <button
           type="button"
-          onClick={() => void play(playableFromQueueEntry(entry))}
-          aria-label={t.t('home.resume', { title: entry.episode.title })}
+          onClick={() => (isCurrent ? toggle() : void play(playableFromQueueEntry(entry)))}
+          aria-label={
+            isPlaying ? t.t('episode.pause') : t.t('home.resume', { title: entry.episode.title })
+          }
           className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-[var(--color-ink)] text-[var(--color-text-on-ink)] transition-[transform,opacity] duration-[var(--duration-instant)] ease-standard hover:opacity-90 active:scale-[0.97] motion-reduce:active:scale-100"
         >
-          <PlayGlyph />
+          {isPlaying ? <PauseGlyph /> : <PlayGlyph />}
         </button>
 
         <div className="min-w-0 flex-1">
-          <Track fraction={fraction} />
+          {isCurrent ? (
+            <LiveTrack entry={entry} playing={isPlaying} />
+          ) : (
+            <Track fraction={fraction} />
+          )}
           <div className="mt-1.5 flex justify-between text-[var(--color-text-tertiary)]">
             {left ? (
               <span className="type-timecode">
@@ -420,10 +474,145 @@ function Track({ fraction, fill }: { fraction: number; fill?: string }) {
   );
 }
 
+/**
+ * The card's bar, live. The hero's `LiveProgress` without the timecodes —
+ * these rows carry "time left" and a total, neither of which is worth a
+ * per-second re-render on three cards at once.
+ */
+function LiveTrack({ entry, playing }: { entry: ContinueEntry; playing: boolean }) {
+  const total = entry.durationSec ?? entry.episode.durationSec;
+  const scaleX = useMotionValue(
+    total && total > 0 ? Math.min(1, entry.positionSec / total) : 0,
+  );
+
+  useEffect(() => {
+    if (!total || total <= 0) return;
+
+    let frame = 0;
+    const tick = () => {
+      scaleX.set(Math.min(1, Math.max(0, readPosition() / total)));
+      frame = requestAnimationFrame(tick);
+    };
+
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [total, playing, scaleX]);
+
+  return (
+    <div
+      aria-hidden="true"
+      className="h-1 overflow-hidden rounded-full bg-[var(--color-border)] md:h-[5px]"
+    >
+      <m.div
+        className="h-full w-full origin-left rounded-full bg-[var(--color-accent)]"
+        style={{ scaleX }}
+      />
+    </div>
+  );
+}
+
+/**
+ * The same bar and timecodes, driven by the machine instead of by the query.
+ *
+ * Split into its own component so that being live costs one small subtree
+ * rather than the whole hero: the timecodes below tick once a second, and the
+ * hero contains the artwork, the title link and two buttons that have no
+ * business re-rendering for a clock.
+ *
+ * The bar itself re-renders for nothing at all. It is written straight to a
+ * motion value from a `requestAnimationFrame` loop reading `readPosition()` —
+ * the same smoothed clock the player's own scrubber and the caption sweep run
+ * on, so all three agree to the frame rather than to whatever each last heard.
+ * A bar animated off React state would be capped at the machine's 25Hz report
+ * and would stutter visibly against the scrubber sitting a few hundred pixels
+ * below it.
+ */
+function LiveProgress({
+  entry,
+  playing,
+  fill,
+  fallbackFraction,
+}: {
+  entry: ContinueEntry;
+  playing: boolean;
+  fill?: string;
+  /** Used until the engine has a position to give — a fresh tab resuming. */
+  fallbackFraction: number;
+}) {
+  const t = useTranslator();
+  const total = entry.durationSec ?? entry.episode.durationSec;
+
+  const scaleX = useMotionValue(fallbackFraction);
+  const [positionSec, setPositionSec] = useState(entry.positionSec);
+
+  useEffect(() => {
+    if (!total || total <= 0) return;
+
+    let frame = 0;
+    // Whole seconds only: the label reads `12:04`, so writing state on any
+    // finer grain is a re-render that cannot change a pixel.
+    let shownSec = -1;
+
+    const tick = () => {
+      const position = readPosition();
+      scaleX.set(Math.min(1, Math.max(0, position / total)));
+
+      const whole = Math.floor(position);
+      if (whole !== shownSec) {
+        shownSec = whole;
+        setPositionSec(whole);
+      }
+
+      frame = requestAnimationFrame(tick);
+    };
+
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+    /*
+      `playing` is a dependency even though the loop does not read it.
+
+      Paused, `readPosition()` returns a constant and the loop is a no-op that
+      still wakes every frame — but stopping it outright would freeze the bar
+      at whatever it last wrote, which is wrong after a seek. Re-running on the
+      transition is what makes a paused-then-scrubbed position land.
+    */
+  }, [total, playing, scaleX]);
+
+  const left = total && total > 0 ? t.duration(Math.max(0, total - positionSec)) : null;
+
+  return (
+    <>
+      <div
+        aria-hidden="true"
+        className="h-1 overflow-hidden rounded-full bg-[var(--color-border)] md:h-[5px]"
+      >
+        <m.div
+          className="h-full w-full origin-left rounded-full"
+          style={{ scaleX, backgroundColor: fill ?? 'var(--color-accent)' }}
+        />
+      </div>
+      <div className="mt-1.5 flex justify-between text-[var(--color-text-tertiary)]">
+        <span className="type-timecode">{formatTimestamp(positionSec)}</span>
+        {left ? (
+          <span className="type-timecode">{t.t('home.timeLeft', { duration: left })}</span>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
 function PlayGlyph() {
   return (
     <svg width="11" height="12" viewBox="0 0 10 12" fill="currentColor" aria-hidden="true">
       <path d="M0 0 10 6 0 12Z" />
+    </svg>
+  );
+}
+
+function PauseGlyph() {
+  return (
+    <svg width="11" height="12" viewBox="0 0 10 12" fill="currentColor" aria-hidden="true">
+      <path d="M0 0h3v12H0zM7 0h3v12H7z" />
     </svg>
   );
 }

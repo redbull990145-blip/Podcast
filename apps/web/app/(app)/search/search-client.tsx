@@ -6,6 +6,7 @@ import { useTranslator } from '@/components/i18n/locale-provider';
 import type { Category, PodcastSearchResult, RecommendationReason } from '@cue/types';
 import type { Translator } from '@cue/i18n';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import * as m from 'motion/react-m';
 import type { Route } from 'next';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -15,6 +16,7 @@ import { PodcastTile } from '@/components/podcast/podcast-tile';
 import { SectionHeader } from '@/components/ui/section-header';
 import { api, ApiClientError } from '@/lib/api';
 import { useOnline } from '@/lib/connectivity';
+import { useCanTravel, useTransition } from '@/lib/motion';
 import { useDebounced } from '@/lib/use-debounced';
 import { useSession } from '@/lib/session';
 
@@ -548,37 +550,104 @@ const CategoryBrowse = memo(function CategoryBrowse() {
  */
 function CategoryTile({ category }: { category: Category }) {
   const cover = category.accentColor ? deriveCover(category.accentColor) : null;
+  const settle = useTransition('standard');
+  const travel = useCanTravel();
+
+  /*
+    A tile that reads as a surface rather than as a missing image.
+
+    The complaint this answers was "the category posters are blank", and the
+    tiles were not broken — they were a flat two-stop gradient with two small
+    labels in the corners, which at this size is a coloured rectangle. A cover
+    slot the reader has learned to expect artwork in, filled with nothing, reads
+    as a failed image load rather than as a deliberate design.
+
+    Three things give it substance, none of which invent a colour the catalogue
+    did not supply: a soft radial bloom that lifts one corner off the flat fill,
+    a large initial watermarked into the surface at low opacity, and a hairline
+    that keeps the tile's edge from dissolving into the page in the light theme.
+  */
+  const initial = category.name.trim().charAt(0).toUpperCase();
 
   return (
-    <Link
-      href={`/search?category=${category.slug}` as Route}
-      className="group flex aspect-4/3 flex-col justify-between overflow-hidden rounded-[var(--radius-lg)] p-4 no-underline"
-      style={{
-        background: cover
-          ? `linear-gradient(135deg, ${cover.from}, ${cover.to})`
-          : 'var(--color-surface-raised)',
-      }}
+    <m.div
+      // Spring on hover rather than a CSS transition, so an interrupted hover
+      // resolves from wherever it got to instead of restarting.
+      whileHover={travel ? { y: -3, scale: 1.015 } : {}}
+      whileTap={travel ? { scale: 0.99 } : {}}
+      transition={settle}
+      className="h-full"
     >
-      <span
+      <Link
+        href={`/search?category=${category.slug}` as Route}
         className={[
-          'type-title3 clamp-2 transition-transform duration-[var(--duration-fast)] ease-standard',
-          'group-hover:-translate-y-0.5 motion-reduce:group-hover:translate-y-0',
-          cover ? 'text-white' : 'text-[var(--color-text-primary)]',
+          'group relative flex aspect-4/3 flex-col justify-between overflow-hidden',
+          'rounded-[var(--radius-lg)] p-4 no-underline',
+          cover ? '' : 'border border-[var(--color-border)]',
         ].join(' ')}
+        style={{
+          background: cover
+            ? `linear-gradient(135deg, ${cover.from}, ${cover.to})`
+            : 'var(--color-surface-raised)',
+        }}
       >
-        {category.name}
-      </span>
+        {/* The bloom. Sits under everything and is purely tonal — white at
+            6%, so it reads as light falling on the surface rather than as a
+            second colour competing with the show's own. */}
+        {cover ? (
+          <span
+            aria-hidden="true"
+            className={[
+              'pointer-events-none absolute -top-1/4 -right-1/4 h-3/4 w-3/4 rounded-full',
+              'opacity-70 transition-opacity duration-[var(--duration-base)] ease-standard',
+              'group-hover:opacity-100',
+            ].join(' ')}
+            style={{
+              background:
+                'radial-gradient(circle at center, rgba(255,255,255,0.16), rgba(255,255,255,0) 70%)',
+            }}
+          />
+        ) : null}
 
-      <span
-        className={
-          cover
-            ? 'type-caption text-white/85'
-            : 'type-caption text-[var(--color-text-tertiary)]'
-        }
-      >
-        {category.count}
-      </span>
-    </Link>
+        {/* The watermark. Clipped by the tile and bled off its bottom edge, so
+            it is texture rather than a letter sitting in a box — and `leading-none`
+            because a glyph this size carries enormous line-box padding that would
+            otherwise push it out of the crop entirely. */}
+        <span
+          aria-hidden="true"
+          className={[
+            'pointer-events-none absolute -end-2 -bottom-8 leading-none font-semibold select-none',
+            'text-[7rem] transition-transform duration-[var(--duration-slow)] ease-standard',
+            'group-hover:-translate-y-1 motion-reduce:group-hover:translate-y-0',
+            cover ? 'text-white/10' : 'text-[var(--color-text-primary)]/5',
+          ].join(' ')}
+        >
+          {initial}
+        </span>
+
+        <span
+          className={[
+            'relative type-title3 clamp-2',
+            cover ? 'text-white' : 'text-[var(--color-text-primary)]',
+          ].join(' ')}
+        >
+          {category.name}
+        </span>
+
+        {/* The count, given a pill so it reads as a fact about the tile rather
+            than as a stray number floating in the corner. */}
+        <span
+          className={[
+            'relative w-fit rounded-full px-2 py-0.5 type-caption',
+            cover
+              ? 'bg-black/20 text-white/90'
+              : 'bg-[var(--color-surface-hover)] text-[var(--color-text-tertiary)]',
+          ].join(' ')}
+        >
+          {category.count}
+        </span>
+      </Link>
+    </m.div>
   );
 }
 

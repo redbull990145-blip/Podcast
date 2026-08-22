@@ -5,7 +5,12 @@ import { SKIP_BACK_SEC, SKIP_FORWARD_SEC } from '@cue/core';
 import { colorVarStyle, icon, stage } from '@cue/design';
 import { duration } from '@cue/motion';
 import { useQuery } from '@tanstack/react-query';
-import { AnimatePresence, useMotionValue, useTransform } from 'motion/react';
+import {
+  AnimatePresence,
+  useMotionValue,
+  useMotionValueEvent,
+  useTransform,
+} from 'motion/react';
 import * as m from 'motion/react-m';
 import { animate } from 'motion/react';
 import Link from 'next/link';
@@ -359,10 +364,25 @@ export function Player() {
   // The real box flexbox will hand each column, not half the window: the sheet
   // has padding on both edges and a gap down the middle, and all three come out
   // of the width before the split.
-  const columnWidth = twoColumn
-    ? (viewportWidth - SHEET_PAD * 2 - COLUMN_GAP) / 2
-    : viewportWidth;
-  const artFull = fullArt(twoColumn, columnWidth, viewportWidth, viewportHeight);
+  const splitWidth = (viewportWidth - SHEET_PAD * 2 - COLUMN_GAP) / 2;
+
+  /**
+   * Both layouts, always — rather than the one currently on screen.
+   *
+   * Showing the captions changes the cover's size, its centre and how far down
+   * the sheet it sits, and every one of those was recomputed as a plain number
+   * the instant the control was pressed. The result was a layout swap with no
+   * transition at all: a 460px cover became a 300px one, jumped several hundred
+   * pixels sideways, and a column of text appeared beside it, all on one frame.
+   *
+   * Keeping both sets of numbers in hand is what lets the change be *travelled*
+   * instead. `columns` below runs 0 → 1 on a spring and everything geometric
+   * reads from it, so the cover glides to its new size and place while the
+   * transcript opens beside it — the same technique the mini-to-full expansion
+   * has always used, applied to the axis that was missing it.
+   */
+  const artOne = fullArt(false, viewportWidth, viewportWidth, viewportHeight);
+  const artTwo = fullArt(true, splitWidth, viewportWidth, viewportHeight);
   const artMini = miniArt(sidebar, barWide);
 
   /**
@@ -384,7 +404,65 @@ export function Player() {
     return () => observer.disconnect();
   }, [episode?.id, twoColumn]);
 
-  const artFullTop = artTop(viewportHeight, artFull.size, controlsHeight);
+  const artOneTop = artTop(viewportHeight, artOne.size, controlsHeight);
+  const artTwoTop = artTop(viewportHeight, artTwo.size, controlsHeight);
+
+  /**
+   * 0 = one column, 1 = two. The captions axis, as a number.
+   *
+   * A second motion value beside `expansion` rather than something folded into
+   * it, because they are genuinely independent: the sheet can be opening while
+   * the transcript is closing, and either can be interrupted mid-flight without
+   * disturbing the other.
+   *
+   * `expressive` for the same reason the sheet uses it — this moves a
+   * screen-sized amount of content, and the snappier presets make a change that
+   * large read as a jump cut with easing applied rather than as one layout
+   * becoming another.
+   */
+  const columns = useMotionValue(twoColumn ? 1 : 0);
+  const columnSettle = useTransition('expressive');
+
+  useEffect(() => {
+    const controls = animate(columns, twoColumn ? 1 : 0, columnSettle);
+    return () => controls.stop();
+  }, [twoColumn, columns, columnSettle]);
+
+  /*
+    The full-state geometry, interpolated across that axis.
+
+    These are the numbers the cover would have snapped between; as motion values
+    they are the path between them instead.
+  */
+  const fullSize = useTransform(columns, [0, 1], [artOne.size, artTwo.size]);
+  const fullStart = useTransform(columns, [0, 1], [artOne.start, artTwo.start]);
+  const fullTop = useTransform(columns, [0, 1], [artOneTop, artTwoTop]);
+
+  /** How wide the transcript column is, and the gap that opens before it. */
+  const captionsWidth = useTransform(columns, [0, 1], [0, splitWidth]);
+  const captionsGap = useTransform(columns, [0, 1], [0, COLUMN_GAP]);
+  /* Held back until the column is wide enough to read a word in, so the text
+     is not briefly legible at forty pixels wide while the gap is still
+     opening. */
+  const captionsOpacity = useTransform(columns, [0.35, 0.85], [0, 1]);
+
+  /**
+   * Whether the column axis has any width on it at all.
+   *
+   * Follows the spring rather than the intent, which is the whole point: the
+   * transcript has to survive its own exit animation, and "the listener has
+   * turned it off" and "it has finished closing" are half a second apart.
+   *
+   * `setState` with an unchanged value is a no-op in React, so this is a
+   * per-frame comparison and a re-render only on the two frames that matter.
+   */
+  const [columnsSettled, setColumnsSettled] = useState(twoColumn);
+  useMotionValueEvent(columns, 'change', (value) => {
+    const open = value > 0.001;
+    setColumnsSettled((was) => (was === open ? was : open));
+  });
+
+  const captionsMounted = wide ? twoColumn || columnsSettled : captionsOpen;
 
   const sheetY = useTransform(expansion, [0, 1], [restY, 0]);
   const scrimOpacity = useTransform(expansion, [0, 1], [0, 1]);
@@ -398,15 +476,35 @@ export function Player() {
    * layout, so the browser rasterises the cover once and the compositor does
    * the rest.
    */
-  const artScale = useTransform(expansion, [0, 1], [artMini.size / artFull.size, 1]);
-  const artX = useTransform(
-    expansion,
-    [0, 1],
-    // Translation is physical, the layout is not: under Arabic the sheet is
-    // mirrored, so the same journey in inline terms runs the other way in px.
-    [(artMini.start - artFull.start) * (rtl ? -1 : 1), 0],
-  );
-  const artY = useTransform(expansion, [0, 1], [artMini.top - artFullTop, 0]);
+  /*
+    Two axes composed into one transform, and the element itself laid out at a
+    size that never changes.
+
+    The cover is laid out at the *one-column* geometry always, and both journeys
+    — mini→full and one-column→two — are expressed as scale and translate away
+    from it. Animating `width`/`height` across the column change instead would
+    have been simpler to write and would put an image resize on the layout and
+    raster path for every frame of a half-second animation, which is the exact
+    cost the note above `miniArt` exists to refuse. This keeps the whole thing
+    on the compositor.
+  */
+  const artScale = useTransform([expansion, fullSize], ([e, size]) => {
+    const mini = artMini.size / artOne.size;
+    const full = (size as number) / artOne.size;
+    return mini + (full - mini) * (e as number);
+  });
+  // Translation is physical, the layout is not: under Arabic the sheet is
+  // mirrored, so the same journey in inline terms runs the other way in px.
+  const artX = useTransform([expansion, fullStart], ([e, start]) => {
+    const mini = (artMini.start - artOne.start) * (rtl ? -1 : 1);
+    const full = ((start as number) - artOne.start) * (rtl ? -1 : 1);
+    return mini + (full - mini) * (e as number);
+  });
+  const artY = useTransform([expansion, fullTop], ([e, top]) => {
+    const mini = artMini.top - artOneTop;
+    const full = (top as number) - artOneTop;
+    return mini + (full - mini) * (e as number);
+  });
   /**
    * Corners, corrected for the scale they are being drawn at.
    *
@@ -415,7 +513,7 @@ export function Player() {
    * almost square. Dividing by the current scale asks for whatever radius
    * renders as the one the design system specified.
    */
-  const artRadiusWanted = useTransform(expansion, [0, 1], [artMini.radius, artFull.radius]);
+  const artRadiusWanted = useTransform(expansion, [0, 1], [artMini.radius, artOne.radius]);
   const artRadius = useTransform(
     [artRadiusWanted, artScale],
     ([radius, scale]) => `${(radius as number) / (scale as number)}px`,
@@ -490,10 +588,15 @@ export function Player() {
   */
   const loading = state.status === 'loading' || state.buffering;
 
-  /** Where the artwork rests, for the path that does not travel there. */
-  const art = expanded
-    ? { ...artFull, top: artFullTop }
-    : artMini;
+  /**
+   * Where the artwork rests, for the path that does not travel there.
+   *
+   * Reduced motion resolves the column axis the same way it resolves the
+   * expansion one — to whichever end it is currently at, with no journey — so
+   * this reads the layout that is on screen rather than an interpolation.
+   */
+  const artResting = twoColumn ? { ...artTwo, top: artTwoTop } : { ...artOne, top: artOneTop };
+  const art = expanded ? artResting : artMini;
   /**
    * Controls and metadata line up with the cover, as they do in Apple's window.
    *
@@ -501,8 +604,11 @@ export function Player() {
    * narrow screens gave the scrubber more room and cost the thing that makes
    * the layout read as one object — a scrubber that starts and ends past the
    * edges of the cover above it is a second column, not the same one.
+   *
+   * A motion value now, so it tracks the cover through the column change rather
+   * than snapping to the new width while the cover is still on its way there.
    */
-  const columnInner = artFull.size;
+  const columnInner = travel ? fullSize : artResting.size;
 
   return (
     <>
@@ -763,10 +869,10 @@ export function Player() {
             // this row, so the row has to begin exactly where the cover does —
             // the padding is derived from the same number rather than written
             // twice.
-            style={{ paddingTop: artFullTop - HEADER_H }}
+            style={{ paddingTop: (travel ? artOneTop : artResting.top) - HEADER_H }}
             className={[
               'flex min-h-0 flex-1 px-6 pb-8',
-              twoColumn ? 'flex-row items-stretch gap-8' : 'flex-col items-center',
+              wide ? 'flex-row items-stretch' : 'flex-col items-center',
             ].join(' ')}
           >
             {/* ------------------------------------------- artwork column -- */}
@@ -775,14 +881,21 @@ export function Player() {
             <div
               className={[
                 'flex min-w-0 flex-col items-center',
-                twoColumn ? 'flex-1 justify-start' : 'w-full',
-                !twoColumn && captionsOpen ? 'hidden' : '',
+                wide ? 'flex-1 justify-start' : 'w-full',
+                !wide && captionsOpen ? 'hidden' : '',
               ].join(' ')}
             >
-              {/* Artwork slot — the real artwork sits above this, travelling. */}
-              <div
+              {/* Artwork slot — the real artwork sits above this, travelling.
+                  Sized from the same motion value the cover is, so the column
+                  under it reflows in step with the cover rather than jumping to
+                  the new width a spring ahead of it. */}
+              <m.div
                 aria-hidden="true"
-                style={{ height: artFull.size, width: artFull.size }}
+                style={
+                  travel
+                    ? { height: fullSize, width: fullSize }
+                    : { height: artResting.size, width: artResting.size }
+                }
                 className="shrink-0"
               />
 
@@ -794,7 +907,7 @@ export function Player() {
                 scrubber, the transport and the volume all begin and end on the
                 cover's edges, so the eye has a single column to follow.
               */}
-              <div ref={controlsRef} className="mt-7 w-full" style={{ maxWidth: columnInner }}>
+              <m.div ref={controlsRef} className="mt-7 w-full" style={{ maxWidth: columnInner }}>
                 {/* Title on the start edge, not centred. Centred metadata under
                     a left-aligned column re-centres on every episode as the
                     title length changes, which is visible as drift. */}
@@ -867,7 +980,7 @@ export function Player() {
                     />
                   </div>
                 </div>
-              </div>
+              </m.div>
 
               <AnimatePresence>
                 {state.error ? (
@@ -889,17 +1002,39 @@ export function Player() {
             </div>
 
             {/* ------------------------------------------ captions column -- */}
-            {captionsOpen ? (
-              <div
+            {/*
+              Kept mounted through its own closing animation.
+
+              In two columns this column *is* the animation — its width is what
+              the cover is making room for — so unmounting it the instant the
+              control is pressed would collapse the layout on one frame and
+              leave the cover gliding into a space that had already closed.
+              `columnsSettled` follows the spring rather than the intent, so the
+              transcript leaves only once it has finished narrowing to nothing.
+            */}
+            {captionsMounted ? (
+              <m.div
                 className={[
                   'flex min-h-0 flex-col',
-                  twoColumn ? 'flex-1' : 'w-full flex-1',
+                  // Clipped while narrowing: the transcript keeps its own
+                  // reading measure, so without this the text would spill out
+                  // of a column that is on its way to zero.
+                  wide ? 'shrink-0 overflow-hidden' : 'w-full flex-1',
                 ].join(' ')}
+                style={
+                  wide && travel
+                    ? {
+                        width: captionsWidth,
+                        marginInlineStart: captionsGap,
+                        opacity: captionsOpacity,
+                      }
+                    : undefined
+                }
               >
                 {/* In one column the utility row is on the other screen, so the
                     way back has to be here. In two it is always visible below
                     the cover and a second copy would be clutter. */}
-                {!twoColumn ? (
+                {!wide ? (
                   <div className="mb-1 flex shrink-0 justify-end">
                     <IconButton
                       label={t.t('captions.hide')}
@@ -924,9 +1059,14 @@ export function Player() {
                 <Captions
                   key={episode.id}
                   episodeId={episode.id}
-                  className={['min-h-0 flex-1', twoColumn ? '' : 'mx-auto'].join(' ')}
+                  className={['min-h-0 flex-1', wide ? '' : 'mx-auto'].join(' ')}
+                  // Pinned to the column's final width while it animates, so
+                  // the lines inside do not re-wrap on every frame of the
+                  // opening — reflowing a transcript sixty times is both the
+                  // expensive way to do this and a visibly unsteady one.
+                  {...(wide ? { style: { width: splitWidth } } : {})}
                 />
-              </div>
+              </m.div>
             ) : null}
           </div>
         </m.div>
@@ -944,16 +1084,27 @@ export function Player() {
             // means hiding the artwork *column* does not hide it — it has to be
             // withdrawn explicitly, or it floats over the captions that just
             // took the screen.
-            !twoColumn && captionsOpen ? 'hidden' : '',
+            // `!wide`, not `!twoColumn`: in two columns the cover and the
+            // transcript coexist, so the only case that withdraws the cover is
+            // the narrow one where the transcript has taken the whole screen.
+            !wide && captionsOpen ? 'hidden' : '',
           ].join(' ')}
           style={
             travel
               ? {
-                  // Laid out once, at the full size, in the full position.
-                  width: artFull.size,
-                  height: artFull.size,
-                  insetInlineStart: artFull.start,
-                  top: artFullTop,
+                  /*
+                    Laid out once, at the *one-column* size and position, and
+                    never relaid out again.
+
+                    Both journeys — mini to full, and one column to two — are
+                    transforms away from this box, so the element's own layout
+                    is a constant for a given window size. That is what keeps
+                    the cover on the compositor through both animations.
+                  */
+                  width: artOne.size,
+                  height: artOne.size,
+                  insetInlineStart: artOne.start,
+                  top: artOneTop,
                   // Scaling about the inline-start corner is what makes the
                   // translate above a straight offset between the two corners
                   // rather than a scale-dependent one.
