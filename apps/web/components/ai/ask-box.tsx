@@ -122,7 +122,7 @@ export function AskBox({
                     <button
                       type="button"
                       onClick={() => onSeek(citation.startMs)}
-                      className="flex w-full cursor-pointer items-baseline gap-3 rounded-[var(--radius-sm)] border-0 bg-transparent px-2 py-1.5 text-start transition-colors hover:bg-[var(--color-surface-hover)]"
+                      className="flex w-full cursor-pointer items-baseline gap-3 rounded-[var(--radius-sm)] border-0 bg-transparent px-2 py-1.5 text-start transition-[transform,background-color] duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] active:scale-[0.98] motion-reduce:active:scale-100"
                     >
                       <span className="type-caption w-12 shrink-0 text-end text-[var(--color-accent-text)]">
                         {formatTimestamp(citation.startMs / 1000)}

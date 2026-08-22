@@ -24,7 +24,9 @@ import type {
   NumberedPage,
   Page,
   Playlist,
+  PlaylistColor,
   PlaylistDetail,
+  PlaylistKind,
   Podcast,
   PodcastSearchResult,
   QueueEntry,
@@ -116,10 +118,53 @@ type RequestOptions = {
   signal?: AbortSignal;
 };
 
+/**
+ * Whether a failure is "that playlist holds the other sort of thing".
+ *
+ * The server says so with a `conflict` plus a `kind` field naming what the
+ * playlist actually holds and an `expected` naming what it would have taken.
+ * Exported because the UI's answer to it is a whole flow — say no, then offer
+ * to make the right playlist — and every caller recognising it by hand would
+ * eventually recognise it differently.
+ */
+export function isWrongPlaylistKind(error: unknown): error is ApiClientError {
+  return (
+    error instanceof ApiClientError &&
+    error.code === 'conflict' &&
+    error.fields?.['kind'] !== undefined &&
+    error.fields['expected'] !== undefined
+  );
+}
+
+/** What the playlist should have been, from a `isWrongPlaylistKind` failure. */
+export function expectedPlaylistKind(error: ApiClientError): PlaylistKind {
+  return error.fields?.['expected'] === 'podcast' ? 'podcast' : 'episode';
+}
+
 export function createClient(options: ClientOptions) {
   const doFetch = options.fetchImpl ?? fetch;
   const baseUrl = options.baseUrl.replace(/\/$/, '');
   const sse = options.sse ?? fetchSse;
+
+  /**
+   * Turn the banner's server-relative path into a URL an `<img>` can use.
+   *
+   * The server deliberately does not know its own public origin — baking a
+   * deployment URL into a serialiser is how staging ends up handing out links
+   * to production. The client is the layer that already holds `baseUrl`, so it
+   * is the layer that can resolve one, and doing it here means no screen has to
+   * remember to.
+   */
+  function withAbsoluteBanner<T extends Playlist>(playlist: T): T {
+    const path = playlist.banner.imageUrl;
+    if (!path || path.startsWith('http')) return playlist;
+
+    return {
+      ...playlist,
+      banner: { ...playlist.banner, imageUrl: `${baseUrl}${path}` },
+    };
+  }
+
 
   async function request<T>(path: string, init: RequestOptions = {}): Promise<T> {
     const url = new URL(`${baseUrl}${path}`);
@@ -367,38 +412,112 @@ export function createClient(options: ClientOptions) {
     // ----------------------------------------------------------- playlists --
 
     listPlaylists(
-      params: { cursor?: Cursor | null; limit?: number } = {},
+      params: { cursor?: Cursor | null; limit?: number; kind?: PlaylistKind } = {},
     ): Promise<Page<Playlist>> {
-      return request('/me/playlists', {
-        query: { cursor: params.cursor, limit: params.limit },
-      });
+      return request<Page<Playlist>>('/me/playlists', {
+        query: { cursor: params.cursor, limit: params.limit, kind: params.kind },
+      }).then((page) => ({ ...page, items: page.items.map(withAbsoluteBanner) }));
     },
 
-    /** A playlist with its episodes, in order. */
+    /** A playlist with its contents, in order. */
     getPlaylist(id: string): Promise<{ playlist: PlaylistDetail }> {
-      return request(`/me/playlists/${id}`);
+      return request<{ playlist: PlaylistDetail }>(`/me/playlists/${id}`).then((result) => ({
+        playlist: withAbsoluteBanner(result.playlist),
+      }));
     },
 
     createPlaylist(input: {
       title: string;
+      /** Required: episodes or shows. The server has no default — see the type. */
+      kind: PlaylistKind;
       description?: string | null;
+      color?: PlaylistColor;
+      bannerText?: string | null;
     }): Promise<{ playlist: Playlist }> {
-      return request('/me/playlists', { method: 'POST', body: input });
+      return request<{ playlist: Playlist }>('/me/playlists', {
+        method: 'POST',
+        body: input,
+      }).then((result) => ({ playlist: withAbsoluteBanner(result.playlist) }));
     },
 
     /**
-     * Rename or re-describe. Both fields optional and independent — sending
-     * only a title must not blank a description that was already there.
+     * Rename, re-describe, or re-dress. Every field optional and independent —
+     * sending only a title must not blank a description that was already there.
      */
     updatePlaylist(
       id: string,
-      input: { title?: string; description?: string | null },
+      input: {
+        title?: string;
+        description?: string | null;
+        color?: PlaylistColor;
+        bannerKind?: 'color' | 'image';
+        bannerText?: string | null;
+        backgroundColor?: PlaylistColor | null;
+      },
     ): Promise<{ playlist: Playlist }> {
-      return request(`/me/playlists/${id}`, { method: 'PATCH', body: input });
+      return request<{ playlist: Playlist }>(`/me/playlists/${id}`, {
+        method: 'PATCH',
+        body: input,
+      }).then((result) => ({ playlist: withAbsoluteBanner(result.playlist) }));
     },
 
     deletePlaylist(id: string): Promise<{ deleted: boolean }> {
       return request(`/me/playlists/${id}`, { method: 'DELETE' });
+    },
+
+    /**
+     * Upload a banner.
+     *
+     * The file goes up as the whole body rather than in a multipart envelope —
+     * there is one file and no other fields, so a boundary would be ceremony.
+     * This is the one call that does not go through `request`, which serialises
+     * its body as JSON and would turn a Blob into `{}`.
+     */
+    async uploadPlaylistBanner(id: string, file: Blob): Promise<{ playlist: Playlist }> {
+      const headers: Record<string, string> = {
+        accept: 'application/json',
+        'content-type': file.type || 'application/octet-stream',
+      };
+
+      const token = await options.getAuthToken?.();
+      if (token) headers['authorization'] = `Bearer ${token}`;
+
+      let response: Response;
+      try {
+        response = await doFetch(`${baseUrl}/me/playlists/${id}/banner`, {
+          method: 'POST',
+          headers,
+          credentials: 'include',
+          body: file,
+        });
+      } catch (error) {
+        if (isAbortError(error)) throw error;
+        throw new ApiClientError(
+          { code: 'upstream_unavailable', message: 'Could not reach the server' },
+          0,
+        );
+      }
+
+      let payload: ApiResult<{ playlist: Playlist }>;
+      try {
+        payload = (await response.json()) as ApiResult<{ playlist: Playlist }>;
+      } catch {
+        throw new ApiClientError(
+          { code: 'internal', message: 'The server sent a response we could not read' },
+          response.status,
+        );
+      }
+
+      if (!payload.ok) throw new ApiClientError(payload.error, response.status);
+
+      return { playlist: withAbsoluteBanner(payload.data.playlist) };
+    },
+
+    /** Drop the picture; the playlist falls back to its colour. */
+    removePlaylistBanner(id: string): Promise<{ playlist: Playlist }> {
+      return request<{ playlist: Playlist }>(`/me/playlists/${id}/banner`, {
+        method: 'DELETE',
+      }).then((result) => ({ playlist: withAbsoluteBanner(result.playlist) }));
     },
 
     addToPlaylist(
@@ -424,6 +543,43 @@ export function createClient(options: ClientOptions) {
     },
 
     /**
+     * Put a whole show in a show playlist.
+     *
+     * Answers `conflict` when the playlist holds episodes. That is not a bug to
+     * paper over: it is the signal the UI turns into an offer to make the right
+     * kind of playlist instead. See `isWrongPlaylistKind`.
+     */
+    addPodcastToPlaylist(
+      playlistId: string,
+      podcastId: string,
+      position: 'start' | 'end' = 'end',
+    ): Promise<{ added: boolean }> {
+      return request(`/me/playlists/${playlistId}/podcasts`, {
+        method: 'POST',
+        body: { podcastId, position },
+      });
+    },
+
+    removePodcastFromPlaylist(
+      playlistId: string,
+      podcastId: string,
+    ): Promise<{ removed: boolean }> {
+      return request(`/me/playlists/${playlistId}/podcasts/${podcastId}`, {
+        method: 'DELETE',
+      });
+    },
+
+    reorderPlaylistPodcasts(
+      playlistId: string,
+      podcastIds: string[],
+    ): Promise<{ reordered: number }> {
+      return request(`/me/playlists/${playlistId}/podcasts/order`, {
+        method: 'PUT',
+        body: { podcastIds },
+      });
+    },
+
+    /**
      * Which playlists already hold this episode.
      *
      * One request for the whole answer, so an "add to playlist" sheet shows its
@@ -431,6 +587,11 @@ export function createClient(options: ClientOptions) {
      */
     playlistsContaining(episodeId: string): Promise<{ playlistIds: string[] }> {
       return request(`/me/playlists/containing/${episodeId}`);
+    },
+
+    /** The same question for a whole show. */
+    playlistsContainingPodcast(podcastId: string): Promise<{ playlistIds: string[] }> {
+      return request(`/me/playlists/containing-podcast/${podcastId}`);
     },
 
     /**

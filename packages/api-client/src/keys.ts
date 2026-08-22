@@ -34,7 +34,15 @@ export const queryKeys = {
 
   playlists: {
     all: ['playlists'] as const,
-    list: () => ['playlists', 'list'] as const,
+    /**
+     * The whole list, or one kind of it.
+     *
+     * The kind is part of the key because the Library's two tabs are two
+     * different server responses — sharing a key would let the shows tab render
+     * whatever the episodes tab fetched last.
+     */
+    list: (kind?: 'episode' | 'podcast') =>
+      kind ? (['playlists', 'list', kind] as const) : (['playlists', 'list'] as const),
     detail: (id: string) => ['playlists', id] as const,
     /**
      * Which playlists hold a given episode.
@@ -45,6 +53,9 @@ export const queryKeys = {
      * the membership queries individually.
      */
     containing: (episodeId: string) => ['playlists', 'containing', episodeId] as const,
+    /** The same question for a whole show. */
+    containingPodcast: (podcastId: string) =>
+      ['playlists', 'containing-podcast', podcastId] as const,
   },
 
   podcast: {

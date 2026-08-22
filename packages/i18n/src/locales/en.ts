@@ -137,6 +137,8 @@ export const en = {
   'library.searchShows': 'Search shows',
   'library.failed': 'Couldn’t load your library',
   'library.newEpisodes': '{count, plural, one {# new episode} other {# new episodes}}',
+  'library.tabShows': 'Following',
+  'library.tabPlaylists': 'Playlists',
   'library.groupUnplayed': 'Waiting for you',
   'library.groupActive': 'Still running',
   'library.groupQuiet': 'Gone quiet',
@@ -305,6 +307,54 @@ export const en = {
   'playlists.moveUp': 'Move {title} up',
   'playlists.moveDown': 'Move {title} down',
   'playlists.full': 'That playlist is full',
+  // The kind question, asked once and never again — see `PLAYLIST_KINDS`.
+  'playlists.forWhat': 'What goes in this one?',
+  'playlists.forWhatBody':
+    'This is fixed once the playlist exists, so the list always knows what it holds.',
+  'playlists.kindEpisode': 'Episodes',
+  'playlists.kindEpisodeBody': 'An ordered run you can play straight through.',
+  'playlists.kindPodcast': 'Shows',
+  'playlists.kindPodcastBody': 'A shelf of whole podcasts to come back to.',
+  'playlists.countShows': '{count, plural, =0 {Empty} one {# show} other {# shows}}',
+  'playlists.emptyShows': 'No show playlists yet',
+  'playlists.emptyShowsBody':
+    'A shelf for whole podcasts — the ones you keep meaning to start, kept in an order you chose.',
+  'playlists.noShows': 'No shows in here yet',
+  'playlists.noShowsBody':
+    'Add a show from its own page and it collects here, in the order you put it.',
+  'playlists.addShowTo': 'Add this show to a playlist',
+  'playlists.removeShowTitle': 'Remove {title} from this playlist',
+  'playlists.reorderShow': 'Reorder {title}',
+
+  // The refusal, and the way out of it.
+  'playlists.wrongKind': 'A whole show can’t go into an episode playlist',
+  'playlists.wrongKindBody': '“{title}” holds episodes. Shows need a playlist of their own.',
+  'playlists.wrongKindFix': 'Make a show playlist instead',
+  'playlists.wrongKindDone': 'Saved to “{title}”',
+  'playlists.shows': '{title} (shows)',
+
+  // Dressing one up.
+  'playlists.customise': 'Customise',
+  'playlists.customiseDone': 'Done',
+  'playlists.banner': 'Banner',
+  'playlists.bannerColor': 'Colour',
+  'playlists.bannerImage': 'Picture',
+  'playlists.bannerUpload': 'Choose a picture',
+  'playlists.bannerReplace': 'Choose another',
+  'playlists.bannerRemove': 'Remove picture',
+  'playlists.bannerText': 'Text on the banner',
+  'playlists.bannerTextPlaceholder': 'Vol. 3',
+  'playlists.background': 'Page colour',
+  'playlists.backgroundNone': 'None',
+  'playlists.uploading': 'Uploading…',
+  'playlists.imageTooBig': 'That picture is over {mb} MB',
+  'playlists.imageWrongType': 'That file isn’t a picture we can read',
+  // Adding content to a playlist from its own page.
+  'playlists.addEpisodes': 'Add episodes',
+  'playlists.addShows': 'Add shows',
+  'playlists.add': 'Add',
+  'playlists.added': 'Added',
+  'playlists.followFirst': 'Follow a show first, then its episodes show up here.',
 
   // ---------------------------------------------------------------- share --
   'share.action': 'Share',

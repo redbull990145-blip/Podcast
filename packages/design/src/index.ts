@@ -22,6 +22,14 @@ export {
   tintVars,
 } from './css.ts';
 
+export {
+  PLAYLIST_PALETTE_IDS,
+  playlistPalette,
+  playlistPalettes,
+  resolvePlaylistPalette,
+} from './tokens/playlist.ts';
+export type { PlaylistPalette, PlaylistPaletteId } from './tokens/playlist.ts';
+
 export { icon } from './tokens/icons.ts';
 export type { IconPath, IconToken } from './tokens/icons.ts';
 

@@ -2,22 +2,32 @@
 
 import { queryKeys } from '@cue/api-client';
 import { playableFromQueueEntry } from '@cue/core';
-import type { PlaylistEntry } from '@cue/types';
+import { resolvePlaylistPalette } from '@cue/design';
+import type { PlaylistEntry, PlaylistPodcastEntry } from '@cue/types';
 import { PLAYLIST_TITLE_MAX } from '@cue/validation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Route } from 'next';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslator } from '@/components/i18n/locale-provider';
-import { CoverStack } from '@/components/playlist/cover-stack';
+import { AddEpisodesToPlaylist } from '@/components/playlist/add-episodes-to-playlist';
+import { AddShowsToPlaylist } from '@/components/playlist/add-shows-to-playlist';
+import { PlaylistAppearance } from '@/components/playlist/playlist-appearance';
+import { PlaylistBanner } from '@/components/playlist/playlist-banner';
 import { Button } from '@/components/ui/button';
+import { ChromeTint } from '@/components/shell/chrome-tint';
 import { api } from '@/lib/api';
 import { usePlayerActions } from '@/lib/player/store';
 
-/** Carries the projection engine, so it arrives on demand — see `playlist-list.tsx`. */
+/** Both carry the projection engine, so they arrive on demand — see each file. */
 const PlaylistList = dynamic(() => import('./playlist-list'), {
+  ssr: false,
+  loading: () => <div className="min-h-40" aria-hidden="true" />,
+});
+
+const PlaylistShowList = dynamic(() => import('./playlist-show-list'), {
   ssr: false,
   loading: () => <div className="min-h-40" aria-hidden="true" />,
 });
@@ -28,6 +38,11 @@ const PlaylistList = dynamic(() => import('./playlist-list'), {
  * The order is content here, exactly as it is on the queue screen, so it is
  * edited by dragging rather than through a menu — and the same fractional keys
  * make that one write per drag instead of renumbering the list.
+ *
+ * Which list is dragged depends on `kind`, and only one of them is ever
+ * mounted: a show playlist has no episodes and an episode playlist has no
+ * shows, so rendering both and hiding one would mean shipping a projection
+ * engine twice to draw nothing.
  */
 export function PlaylistClient({ playlistId }: { playlistId: string }) {
   const t = useTranslator();
@@ -51,13 +66,36 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
    * invalidation below re-syncs when it answers.
    */
   const [order, setOrder] = useState<PlaylistEntry[]>([]);
+  const [showOrder, setShowOrder] = useState<PlaylistPodcastEntry[]>([]);
+  const [customising, setCustomising] = useState(false);
 
   useEffect(() => {
-    if (playlist) setOrder(playlist.items);
+    if (!playlist) return;
+    setOrder(playlist.items);
+    setShowOrder(playlist.podcasts);
   }, [playlist]);
+
+  // What the "add" pickers use to say "already in here" — recomputed only when
+  // the order they are drawn from actually changes, not on every keystroke
+  // elsewhere on the page.
+  const existingEpisodeIds = useMemo(
+    () => new Set(order.map((item) => item.episode.id)),
+    [order],
+  );
+  const existingPodcastIds = useMemo(
+    () => new Set(showOrder.map((item) => item.podcast.id)),
+    [showOrder],
+  );
 
   const reorder = useMutation({
     mutationFn: (episodeIds: string[]) => api.reorderPlaylist(playlistId, episodeIds),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.playlists.detail(playlistId) });
+    },
+  });
+
+  const reorderShows = useMutation({
+    mutationFn: (podcastIds: string[]) => api.reorderPlaylistPodcasts(playlistId, podcastIds),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.playlists.detail(playlistId) });
     },
@@ -75,7 +113,17 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
     },
   });
 
-  // Stable identities for the drag list below — see the call site. `mutate`
+  const removeShow = useMutation({
+    mutationFn: (podcastId: string) => api.removePodcastFromPlaylist(playlistId, podcastId),
+    onMutate: (podcastId) => {
+      setShowOrder((current) => current.filter((item) => item.podcast.id !== podcastId));
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.playlists.all });
+    },
+  });
+
+  // Stable identities for the drag lists below — see the call sites. `mutate`
   // is the stable half of a mutation object; the result object itself is not.
   const handleReorder = useCallback(
     (next: PlaylistEntry[]) => {
@@ -90,6 +138,19 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
     [remove.mutate],
   );
 
+  const handleReorderShows = useCallback(
+    (next: PlaylistPodcastEntry[]) => {
+      setShowOrder(next);
+      reorderShows.mutate(next.map((item) => item.podcast.id));
+    },
+    [reorderShows.mutate],
+  );
+
+  const handleRemoveShow = useCallback(
+    (podcastId: string) => removeShow.mutate(podcastId),
+    [removeShow.mutate],
+  );
+
   const destroy = useMutation({
     mutationFn: () => api.deletePlaylist(playlistId),
     onSuccess: () => {
@@ -100,15 +161,20 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
 
   if (error) {
     return (
-      <Notice heading={t.t('playlists.notFound')} body={t.t('common.checkConnection')}>
-        <Link href={'/playlists' as Route} className="no-underline">
-          <Button variant="secondary">{t.t('playlists.title')}</Button>
-        </Link>
-      </Notice>
+      <div className="mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
+        <Notice heading={t.t('playlists.notFound')} body={t.t('common.checkConnection')}>
+          <Link href={'/playlists' as Route} className="no-underline">
+            <Button variant="secondary">{t.t('playlists.title')}</Button>
+          </Link>
+        </Notice>
+      </div>
     );
   }
 
   if (isPending || !playlist) return null;
+
+  const isShows = playlist.kind === 'podcast';
+  const count = isShows ? showOrder.length : order.length;
 
   /**
    * Play the whole thing.
@@ -116,6 +182,10 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
    * The first episode starts and the rest queue behind it, which is what "play
    * all" means in every media app — replacing the queue outright would throw
    * away whatever someone had already lined up.
+   *
+   * Absent on show playlists. "Play all" over a shelf of podcasts would have to
+   * invent an order across thousands of episodes, and any answer it picked
+   * would be a guess about what someone wanted to hear.
    */
   const playAll = () => {
     const playables = order.map(playableFromQueueEntry);
@@ -126,61 +196,136 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
     if (rest.length > 0) actions.enqueue(...rest);
   };
 
+  /*
+    The seed for the page's own colour, when one is set.
+
+    Either gradient stop works: `tintedScheme` (behind `ChromeTint`) extracts
+    only the *hue* from this value and refits lightness and chroma per role and
+    per theme itself, so which stop is handed in cannot change the result.
+  */
+  const tintSeed = playlist.backgroundColor
+    ? resolvePlaylistPalette(playlist.backgroundColor).to
+    : null;
+
   return (
-    <div className="flex flex-col gap-8">
-      <header className="flex flex-wrap items-end gap-6">
-        <CoverStack artworkUrls={playlist.artworkUrls} title={playlist.title} size={160} />
+    /*
+      The playlist's own re-theme, done the same way a podcast page's is.
 
-        <div className="min-w-[240px] flex-1">
-          <PlaylistTitle playlistId={playlistId} title={playlist.title} />
+      This used to be a hand-rolled div with negative margins clawing back to
+      the page's own gutters and a `min-h-[100dvh]` guess — and it never
+      actually reached the real edges of the window, because the gutters it
+      was negating belong to an *inner* wrapper one level down, while the true
+      page edge is `<main>`'s, further up the tree, outside anything this
+      component can negatively-margin its way to. `ChromeTint` sidesteps the
+      whole problem: it repaints `--color-*` on every element carrying
+      `data-chrome-tint` — the sidebar, the tab bar, the player, and this page's
+      own root — from one stylesheet rule, so "reaches every edge" is true by
+      construction rather than by arithmetic against a padding value someone
+      might change.
 
-          <p className="type-callout mt-1 mb-0 text-[var(--color-text-tertiary)]">
-            {t.t('playlists.count', { count: playlist.episodeCount })}
-          </p>
+      `min-h-dvh` still matters here, for the same reason it matters on the
+      podcast page one directory up: without it, a two-episode playlist paints
+      a colour exactly as tall as two rows and stops in a hard line, which
+      reads as broken rather than as a short list on a tinted page.
+    */
+    <div className="relative min-h-dvh bg-[var(--color-bg)]" data-chrome-tint="">
+      <ChromeTint color={tintSeed} />
 
-          {playlist.description ? (
-            <p className="type-body mt-3 mb-0 max-w-[var(--measure-prose)] text-[var(--color-text-secondary)]">
-              {playlist.description}
+      <div className="relative mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
+        <div className="flex flex-col gap-8">
+          <PlaylistBanner banner={playlist.banner} title={playlist.title} height={200} />
+
+          <header className="flex flex-col gap-4">
+            <PlaylistTitle playlistId={playlistId} title={playlist.title} />
+
+            <p className="type-callout m-0 text-[var(--color-text-tertiary)]">
+              {isShows
+                ? t.t('playlists.countShows', { count })
+                : t.t('playlists.count', { count })}
             </p>
-          ) : null}
 
-          <div className="mt-5 flex flex-wrap items-center gap-3">
-            <Button onClick={playAll} disabled={order.length === 0}>
-              {t.t('playlists.playAll')}
-            </Button>
+            {playlist.description ? (
+              <p className="type-body m-0 max-w-[var(--measure-prose)] text-[var(--color-text-secondary)]">
+                {playlist.description}
+              </p>
+            ) : null}
 
-            <Button
-              variant="ghost"
-              busy={destroy.isPending}
-              onClick={() => {
-                // A native confirm rather than a bespoke dialog: this is the one
-                // destructive action in the app, it is rare, and a real modal
-                // here would be a focus trap and a scroll lock for a question
-                // the platform already asks well.
-                if (!window.confirm(t.t('playlists.deleteConfirm', { title: playlist.title }))) {
-                  return;
-                }
-                destroy.mutate();
-              }}
-            >
-              {t.t('playlists.delete')}
-            </Button>
-          </div>
+            {/*
+              The control this screen was missing: a way to put something in
+              the playlist from the playlist's own page. It goes first, before
+              Play all, because filling an empty list is the more likely reason
+              anyone is looking at the header — Play all is disabled until
+              there is something to play, but adding is always the live option.
+            */}
+            <div className="flex flex-wrap items-center gap-3">
+              {isShows ? (
+                <AddShowsToPlaylist playlistId={playlistId} existingIds={existingPodcastIds} />
+              ) : (
+                <AddEpisodesToPlaylist playlistId={playlistId} existingIds={existingEpisodeIds} />
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              {isShows ? null : (
+                <Button onClick={playAll} disabled={order.length === 0}>
+                  {t.t('playlists.playAll')}
+                </Button>
+              )}
+
+              <Button
+                variant="secondary"
+                onClick={() => setCustomising((current) => !current)}
+                aria-expanded={customising}
+              >
+                {customising ? t.t('playlists.customiseDone') : t.t('playlists.customise')}
+              </Button>
+
+              <Button
+                variant="ghost"
+                busy={destroy.isPending}
+                onClick={() => {
+                  // A native confirm rather than a bespoke dialog: this is the
+                  // one destructive action in the app, it is rare, and a real
+                  // modal here would be a focus trap and a scroll lock for a
+                  // question the platform already asks well.
+                  if (
+                    !window.confirm(t.t('playlists.deleteConfirm', { title: playlist.title }))
+                  ) {
+                    return;
+                  }
+                  destroy.mutate();
+                }}
+              >
+                {t.t('playlists.delete')}
+              </Button>
+            </div>
+          </header>
+
+          {customising ? <PlaylistAppearance playlist={playlist} /> : null}
+
+          {count === 0 ? (
+            <Notice
+              heading={isShows ? t.t('playlists.noShows') : t.t('playlists.noEpisodes')}
+              body={isShows ? t.t('playlists.noShowsBody') : t.t('playlists.noEpisodesBody')}
+            />
+          ) : isShows ? (
+            <PlaylistShowList
+              order={showOrder}
+              onReorder={handleReorderShows}
+              onRemove={handleRemoveShow}
+            />
+          ) : (
+            <PlaylistList
+              order={order}
+              // Stable identities: the list memoises its rows, and a fresh
+              // closure per render would silently un-memoise every one of them
+              // on every keystroke elsewhere in the component.
+              onReorder={handleReorder}
+              onRemove={handleRemove}
+            />
+          )}
         </div>
-      </header>
-
-      {order.length === 0 ? (
-        <Notice heading={t.t('playlists.noEpisodes')} body={t.t('playlists.noEpisodesBody')} />
-      ) : (
-        <PlaylistList
-          order={order}
-          // Stable identities: the list memoises its rows, and a fresh closure
-          // per render would silently un-memoise every one of them on every
-          // keystroke elsewhere in the component.
-          onReorder={handleReorder}
-          onRemove={handleRemove}
-        />
-      )}
+      </div>
     </div>
   );
 }

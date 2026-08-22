@@ -111,9 +111,24 @@ function Sheet({ episodeId }: { episodeId: string }) {
     },
   });
 
+  /**
+   * What the server said when it refused.
+   *
+   * Almost always "that playlist holds shows". Shown rather than swallowed,
+   * because the alternative is a tick that never appears and a tap that looks
+   * broken — and unlike the show sheet there is no one-tap fix worth offering
+   * here: an episode belongs in a playlist someone already has, not in a new
+   * one named after the one that would not take it.
+   */
+  const refusal = toggle.error?.message ?? null;
+
   const create = useMutation({
     mutationFn: async (title: string) => {
-      const { playlist } = await api.createPlaylist({ title });
+      // An episode playlist, with no question asked: a name typed while an
+      // episode is in hand is a name for a playlist of episodes. The kind
+      // question exists to stop a silent *default*, not to be asked when the
+      // answer is already in the person's hand.
+      const { playlist } = await api.createPlaylist({ title, kind: 'episode' });
       // Created *and* filled: someone typing a name while an episode is in hand
       // is naming a playlist for that episode.
       await api.addToPlaylist(playlist.id, episodeId);
@@ -142,6 +157,15 @@ function Sheet({ episodeId }: { episodeId: string }) {
       // nothing, so the sheet floated with no shadow at all.
       style={{ boxShadow: 'var(--elevation-lg)' }}
     >
+      {refusal ? (
+        <p
+          role="alert"
+          className="type-caption m-0 mb-2 rounded-[var(--radius-sm)] border border-[var(--color-danger)] px-3 py-2 text-[var(--color-text-primary)]"
+        >
+          {refusal}
+        </p>
+      ) : null}
+
       {playlists.isPending ? (
         <p className="type-caption m-0 px-3 py-2 text-[var(--color-text-tertiary)]">
           {t.t('common.loading')}
@@ -193,8 +217,14 @@ function Sheet({ episodeId }: { episodeId: string }) {
                     {playlist.title}
                   </span>
 
+                  {/* A show playlist cannot take an episode, and says so here
+                      rather than being hidden. See the note in
+                      `add-podcast-to-playlist.tsx`: a playlist that is simply
+                      absent from the list reads as a bug in the list. */}
                   <span className="type-caption shrink-0 text-[var(--color-text-tertiary)]">
-                    {playlist.episodeCount}
+                    {playlist.kind === 'podcast'
+                      ? t.t('playlists.kindPodcast')
+                      : playlist.itemCount}
                   </span>
                 </button>
               </li>

@@ -200,6 +200,16 @@ export function Player() {
   const travel = useCanTravel();
   const settle = useTransition('expressive');
 
+  /*
+    The strip you press to open the real thing. The shallowest squash the
+    system draws — this control is nearly the width of its bar, and a deep one
+    would read as the whole player flinching — but present, because on a phone
+    this is the most-pressed surface in the app and it used to answer with
+    nothing.
+  */
+  const openPress = usePressScale(0.985);
+  const openTransition = useTransition('responsive');
+
   /** 0 = mini, 1 = full. The single source of truth for the whole layout. */
   const expansion = useMotionValue(0);
 
@@ -720,12 +730,14 @@ export function Player() {
           ].join(' ')}
         >
           <div className="flex h-full items-center gap-3 px-4 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)] md:gap-8 md:px-6">
-            <button
+            <m.button
               type="button"
               onClick={() => setExpanded(true)}
               aria-label={t.t('player.open')}
               aria-expanded={expanded}
-              className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 border-0 bg-transparent p-0 text-start md:flex-none"
+              whileTap={{ scale: openPress }}
+              transition={openTransition}
+              className="flex min-w-0 flex-1 origin-left cursor-pointer items-center gap-3 border-0 bg-transparent p-0 text-start rtl:origin-right md:flex-none"
             >
               {/* Spacer: the artwork itself is rendered once, below, so it can
                   travel continuously between the two layouts. */}
@@ -742,7 +754,7 @@ export function Player() {
                   {episode.podcastTitle}
                 </span>
               </span>
-            </button>
+            </m.button>
 
             {/* --------------------------------------------- wide transport -- */}
             <div className="hidden min-w-0 flex-col items-center gap-1 md:flex">
@@ -795,7 +807,7 @@ export function Player() {
 
               <Link
                 href={'/queue' as Route}
-                className="flex h-9 shrink-0 items-center gap-2 rounded-full bg-[var(--color-surface-hover)] px-3.5 type-caption text-[var(--color-text-secondary)] no-underline transition-colors hover:text-[var(--color-text-primary)]"
+                className="flex h-9 shrink-0 items-center gap-2 rounded-full bg-[var(--color-surface-hover)] px-3.5 type-caption text-[var(--color-text-secondary)] no-underline transition-[transform,color] duration-[var(--duration-instant)] ease-standard hover:text-[var(--color-text-primary)] active:scale-[0.96] motion-reduce:active:scale-100"
               >
                 <svg
                   width="14"
@@ -887,9 +899,13 @@ export function Player() {
               type="button"
               onClick={() => setExpanded(false)}
               aria-label={t.t('player.close')}
-              className="flex h-8 w-16 cursor-pointer items-center justify-center border-0 bg-transparent"
+              className="group flex h-8 w-16 cursor-pointer items-center justify-center border-0 bg-transparent transition-transform duration-[var(--duration-instant)] ease-standard active:scale-y-[1.35] motion-reduce:active:scale-y-100"
             >
-              <span className="block h-1 w-10 rounded-full bg-[var(--color-border-strong)]" />
+              {/* The handle answers hover by widening and darkening a step —
+                  the same quiet invitation the scrubber gives when it thickens
+                  under the pointer. Pressing deepens it along its own axis, so
+                  even this smallest control says "held". */}
+              <span className="block h-1 w-10 rounded-full bg-[var(--color-border-strong)] transition-[width,background-color] duration-[var(--duration-fast)] ease-standard group-hover:w-12 group-hover:bg-[var(--color-text-tertiary)]" />
             </button>
           </div>
 
@@ -1189,12 +1205,17 @@ export function Player() {
  * recoverable — which is the only reason it can be this small.
  */
 function DismissButton({ onClick, label }: { onClick: () => void; label: string }) {
+  const press = usePressScale(0.88);
+  const transition = useTransition('responsive');
+
   return (
-    <button
+    <m.button
       type="button"
       onClick={onClick}
       aria-label={label}
       title={label}
+      whileTap={{ scale: press }}
+      transition={transition}
       className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-0 text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
     >
       <svg
@@ -1209,7 +1230,7 @@ function DismissButton({ onClick, label }: { onClick: () => void; label: string 
       >
         <path d="M6 6 18 18M18 6 6 18" />
       </svg>
-    </button>
+    </m.button>
   );
 }
 

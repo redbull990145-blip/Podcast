@@ -1,4 +1,10 @@
-export { ApiClientError, applyQueueMutation, createClient } from './client.ts';
+export {
+  ApiClientError,
+  applyQueueMutation,
+  createClient,
+  expectedPlaylistKind,
+  isWrongPlaylistKind,
+} from './client.ts';
 export type {
   AiGeneration,
   AiPanelState,

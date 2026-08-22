@@ -1,31 +1,24 @@
-import type { Metadata, Route } from 'next';
-import Link from 'next/link';
-import { getTranslator } from '@/lib/i18n';
-import { LibraryClient } from './library-client';
+import type { Metadata } from 'next';
+import { Suspense } from 'react';
+import { LibraryTabs } from './library-tabs';
 
 export const metadata: Metadata = { title: 'Library' };
 
-export default async function LibraryPage() {
-  const t = await getTranslator();
-
+export default function LibraryPage() {
   return (
     <div className="mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
-      <div className="mb-8 flex flex-wrap items-baseline justify-between gap-4">
-        <h1 className="type-display m-0 text-[var(--color-text-primary)]">Library</h1>
+      <h1 className="type-display mt-0 mb-8 text-[var(--color-text-primary)]">Library</h1>
 
-        {/* Playlists are reached from here rather than from the nav. The nav
-            holds four destinations on purpose — every extra one is a decision
-            somebody makes before they can listen to anything — and a playlist
-            is part of "your shows" rather than a fifth place to be. */}
-        <Link
-          href={'/playlists' as Route}
-          className="type-body-strong text-[var(--color-text-secondary)] no-underline decoration-transparent underline-offset-4 transition-colors hover:text-[var(--color-text-primary)] hover:underline hover:decoration-[var(--color-border-strong)]"
-        >
-          {t.t('nav.playlists')}
-        </Link>
-      </div>
-
-      <LibraryClient />
+      {/*
+        `useSearchParams` opts its whole subtree into client rendering, and Next
+        requires the boundary to be explicit — without it the build fails rather
+        than silently making the page dynamic. The fallback is nothing on
+        purpose: the tabs resolve in the same tick, and a skeleton that flashes
+        for one frame is worse than a frame of stillness.
+      */}
+      <Suspense fallback={null}>
+        <LibraryTabs />
+      </Suspense>
     </div>
   );
 }

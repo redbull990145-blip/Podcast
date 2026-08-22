@@ -315,7 +315,7 @@ function RailToggle({ collapsed }: { collapsed: boolean }) {
       aria-label={label}
       aria-expanded={!collapsed}
       title={label}
-      className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-[var(--radius-md)] border-0 bg-transparent p-0 text-[var(--color-text-tertiary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+      className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-[var(--radius-md)] border-0 bg-transparent p-0 text-[var(--color-text-tertiary)] transition-[transform,background-color,color] duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] active:scale-[0.92] motion-reduce:active:scale-100"
     >
       <svg
         width="18"
@@ -327,9 +327,11 @@ function RailToggle({ collapsed }: { collapsed: boolean }) {
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden="true"
+        className="transition-transform duration-[var(--duration-base)] ease-standard motion-reduce:transition-none"
         // Mirrored under RTL along with everything else, and mirrored *again*
         // when collapsed — the chevron means "toward the window edge", and
-        // which way that is depends on both.
+        // which way that is depends on both. Eased rather than swapped, so the
+        // glyph visibly turns instead of being replaced.
         style={{ transform: collapsed ? 'scaleX(-1)' : undefined }}
       >
         {/* A panel with its edge marked, and a chevron leaving through it. */}
@@ -488,7 +490,12 @@ function RailLink({
       title={collapsed ? label : undefined}
       data-nav-active={active ? 'true' : undefined}
       className={[
-        'relative flex items-center rounded-[var(--radius-md)] py-2 no-underline transition-colors',
+        'relative flex items-center rounded-[var(--radius-md)] py-2 no-underline',
+        // Colour for the hover, transform for the press — both instant to the
+        // finger, and neither waits on the navigation they trigger.
+        'transition-[transform,background-color,color]',
+        'duration-[var(--duration-instant)] ease-standard',
+        'active:scale-[0.97] motion-reduce:active:scale-100',
         collapsed ? 'justify-center px-0' : 'gap-3 px-3',
         active
           ? 'text-[var(--color-accent-text)]'
@@ -586,7 +593,9 @@ function ShowLink({ show, collapsed }: { show: LibraryPodcast; collapsed: boolea
       href={`/podcast/${show.id}` as never}
       title={collapsed ? show.title : undefined}
       className={[
-        'flex items-center rounded-[var(--radius-sm)] py-1.5 no-underline transition-colors',
+        'flex items-center rounded-[var(--radius-sm)] py-1.5 no-underline',
+        'transition-[transform,background-color,color] duration-[var(--duration-instant)] ease-standard',
+        'active:scale-[0.98] motion-reduce:active:scale-100',
         'hover:bg-[var(--color-surface-hover)]',
         collapsed ? 'justify-center px-0' : 'gap-2.5 px-3',
       ].join(' ')}
@@ -647,7 +656,9 @@ function AccountStrip({ collapsed }: { collapsed: boolean }) {
         href={'/signin' as never}
         title={collapsed ? t.t('common.signIn') : undefined}
         className={[
-          'mt-1 flex min-h-[44px] items-center rounded-[var(--radius-md)] no-underline transition-colors',
+          'mt-1 flex min-h-[44px] items-center rounded-[var(--radius-md)] no-underline',
+          'transition-[transform,background-color,color] duration-[var(--duration-instant)] ease-standard',
+          'active:scale-[0.98] motion-reduce:active:scale-100',
           'type-body-strong text-[var(--color-text-secondary)]',
           'hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]',
           collapsed ? 'justify-center px-0' : 'px-3',
@@ -711,7 +722,7 @@ function AccountStrip({ collapsed }: { collapsed: boolean }) {
         type="button"
         onClick={() => signOut.mutate()}
         disabled={signOut.isPending}
-        className="mt-1 cursor-pointer border-0 bg-transparent p-0 type-caption text-[var(--color-text-tertiary)] underline decoration-transparent underline-offset-4 transition-colors hover:text-[var(--color-text-secondary)] hover:decoration-[var(--color-border-strong)] disabled:cursor-not-allowed"
+        className="mt-1 cursor-pointer border-0 bg-transparent p-0 type-caption text-[var(--color-text-tertiary)] underline decoration-transparent underline-offset-4 transition-[color,text-decoration-color,transform] duration-[var(--duration-instant)] ease-standard hover:text-[var(--color-text-secondary)] hover:decoration-[var(--color-border-strong)] active:scale-[0.97] motion-reduce:active:scale-100 disabled:cursor-not-allowed"
       >
         {signOut.isPending ? t.t('settings.signingOut') : t.t('common.signOut')}
       </button>
@@ -771,7 +782,9 @@ function TabBar() {
                   // 64px tall: comfortably past the 44px minimum touch target,
                   // and the whole cell is tappable rather than just the label.
                   'flex h-16 flex-col items-center justify-center gap-1 no-underline',
-                  'type-caption transition-colors',
+                  'type-caption transition-[transform,background-color,color]',
+                  'duration-[var(--duration-instant)] ease-standard',
+                  'active:scale-[0.94] motion-reduce:active:scale-100',
                   active
                     ? 'text-[var(--color-accent-text)]'
                     : 'text-[var(--color-text-tertiary)]',

@@ -467,6 +467,42 @@ export type RecommendedPodcast = Podcast & {
 export type PlaylistId = string;
 
 /**
+ * What a playlist holds: an ordered listening session, or a shelf of shows.
+ *
+ * Fixed when the playlist is created. The two are different objects with
+ * different verbs — one plays, the other is browsed — and a list that held both
+ * would have a play-all button that could only play half of itself.
+ */
+export type PlaylistKind = 'episode' | 'podcast';
+
+/** One of the six palette ids in `@cue/design`. Never a raw colour. */
+export type PlaylistColor = 'ember' | 'ocean' | 'moss' | 'plum' | 'dusk' | 'sand';
+
+/**
+ * How a playlist's banner is drawn.
+ *
+ * `color` is the palette entry plus whatever line was written over it; `image`
+ * is a picture the owner uploaded. Both carry `text`, because someone who
+ * uploads a photo still often wants a word on it — and because switching
+ * between the two must not silently throw the caption away.
+ */
+export type PlaylistBanner = {
+  kind: 'color' | 'image';
+  /** The palette id. Present whichever kind is showing, so switching back is free. */
+  color: PlaylistColor;
+  /**
+   * The uploaded banner, if one was ever uploaded.
+   *
+   * Non-null while a picture exists even when `kind` is `color` — that is what
+   * makes trying a colour and changing your mind a reversible act rather than a
+   * reason to go and find the file again.
+   */
+  imageUrl: string | null;
+  /** The line set across the banner. Null when there is none. */
+  text: string | null;
+};
+
+/**
  * A playlist, as a list of them renders it.
  *
  * Private to its owner: there is no visibility, no author, and no share URL,
@@ -475,11 +511,27 @@ export type PlaylistId = string;
  */
 export type Playlist = {
   id: PlaylistId;
+  kind: PlaylistKind;
   title: string;
   description: string | null;
-  episodeCount: number;
   /**
-   * Covers of the first few episodes, in playlist order, for a stacked tile.
+   * How many things are in it — episodes or shows, according to `kind`.
+   *
+   * One field rather than two, because no playlist has both and a caller that
+   * had to pick between `episodeCount` and `podcastCount` would be re-deriving
+   * `kind` at every call site.
+   */
+  itemCount: number;
+  banner: PlaylistBanner;
+  /**
+   * The page wash for this playlist's own screen, or null to leave it alone.
+   *
+   * Separate from the banner colour: tinting a whole screen is a stronger
+   * appetite than colouring a card, and most people only want the second.
+   */
+  backgroundColor: PlaylistColor | null;
+  /**
+   * Covers of the first few items, in playlist order, for a stacked tile.
    *
    * On the wire rather than derived per row in the client, because deriving it
    * means either fetching every playlist's contents to draw a list of names, or
@@ -499,7 +551,22 @@ export type Playlist = {
  */
 export type PlaylistEntry = QueueEntry;
 
-/** A playlist with its contents. */
+/**
+ * One show in a podcast playlist.
+ *
+ * A plain `Podcast`, because a show needs nothing attached to render — it is
+ * already the whole object, where an episode is a fragment of one.
+ */
+export type PlaylistPodcastEntry = { podcast: Podcast };
+
+/**
+ * A playlist with its contents.
+ *
+ * The two item lists are separate fields rather than one polymorphic array, so
+ * a component that renders episodes never has to prove at runtime that it was
+ * not handed a show. Exactly one of them is ever non-empty, decided by `kind`.
+ */
 export type PlaylistDetail = Playlist & {
   items: PlaylistEntry[];
+  podcasts: PlaylistPodcastEntry[];
 };

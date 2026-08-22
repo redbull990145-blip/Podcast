@@ -30,8 +30,18 @@ export type { ProfileRow, SubscriptionRow } from './library.ts';
 export { playbackProgress, queueItems } from './playback.ts';
 export type { PlaybackProgressRow, QueueItemRow } from './playback.ts';
 
-export { playlistItems, playlists } from './playlist.ts';
-export type { PlaylistItemRow, PlaylistRow } from './playlist.ts';
+export {
+  playlistBanners,
+  playlistItems,
+  playlistPodcasts,
+  playlists,
+} from './playlist.ts';
+export type {
+  PlaylistBannerRow,
+  PlaylistItemRow,
+  PlaylistPodcastRow,
+  PlaylistRow,
+} from './playlist.ts';
 
 export { transcriptionJobs, transcripts } from './transcript.ts';
 export type {

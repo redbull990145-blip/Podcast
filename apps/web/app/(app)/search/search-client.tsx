@@ -431,8 +431,15 @@ function SearchField({
           enterKeyHint="search"
           className={[
             'min-h-[54px] w-full rounded-[var(--radius-lg)] border-0 bg-[var(--color-surface-raised)]',
-            'ps-13 pe-5 text-[var(--color-text-primary)] outline-none',
+            // No `outline-none` here, deliberately: the global :focus-visible
+            // ring is the only focus answer a keyboard user gets on a field
+            // with no border to recolour.
+            'ps-13 pe-5 text-[var(--color-text-primary)]',
             '[box-shadow:var(--elevation-sm)] placeholder:text-[var(--color-text-tertiary)]',
+            // Focusing raises the card one step rather than just ringing it —
+            // the field is the subject of this page, and the surface agrees.
+            'transition-[box-shadow] duration-[var(--duration-fast)] ease-standard',
+            'focus-visible:[box-shadow:var(--elevation-md)]',
             // The native clear button is an unstyleable cross belonging to no
             // palette we control, and `type="search"` is kept only for the
             // phone keyboard's Search key.

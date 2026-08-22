@@ -148,7 +148,7 @@ export default function PlaylistScreen() {
             {playlist.title}
           </Text>
           <Text style={[type('caption'), { color: theme.textTertiary, marginTop: space[1] }]}>
-            {t.t('playlists.count', { count: playlist.episodeCount })}
+            {t.t('playlists.count', { count: playlist.itemCount })}
           </Text>
 
           {playlist.description ? (

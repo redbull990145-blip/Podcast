@@ -32,8 +32,11 @@ export default function PlaylistsScreen() {
   const { isSignedIn, isLoading } = useSession();
 
   const { data, isPending, error } = useQuery({
-    queryKey: queryKeys.playlists.list(),
-    queryFn: () => api.listPlaylists({ limit: 100 }),
+    // Episode playlists only: this app has no screen that renders a shelf of
+    // shows, and listing one here would open a detail view that is empty by
+    // construction. Scoped on the server so the page size still means something.
+    queryKey: queryKeys.playlists.list('episode'),
+    queryFn: () => api.listPlaylists({ limit: 100, kind: 'episode' }),
     enabled: isSignedIn,
   });
 
@@ -112,7 +115,7 @@ function PlaylistRow({ playlist }: { playlist: Playlist }) {
             {playlist.title}
           </Text>
           <Text style={[type('caption'), { color: theme.textTertiary, marginTop: 2 }]}>
-            {t.t('playlists.count', { count: playlist.episodeCount })}
+            {t.t('playlists.count', { count: playlist.itemCount })}
           </Text>
         </View>
       </Pressable>
@@ -136,7 +139,11 @@ function CreatePlaylist() {
   const [title, setTitle] = useState('');
 
   const create = useMutation({
-    mutationFn: (name: string) => api.createPlaylist({ title: name }),
+    // Episode playlists only, for now. Native has no screen that can render a
+    // shelf of shows, and offering to make one here would create a playlist
+    // this app then shows as permanently empty. The web app asks the question;
+    // until this one has somewhere to put the answer, it does not.
+    mutationFn: (name: string) => api.createPlaylist({ title: name, kind: 'episode' }),
     onSuccess: () => {
       setTitle('');
       setOpen(false);

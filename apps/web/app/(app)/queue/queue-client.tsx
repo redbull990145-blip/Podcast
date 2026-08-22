@@ -54,7 +54,7 @@ export function QueueClient() {
           <button
             type="button"
             onClick={() => actions.clearQueue()}
-            className="type-callout cursor-pointer rounded-[var(--radius-md)] border border-[var(--color-border)] bg-transparent px-4 py-2 text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-primary)]"
+            className="type-callout cursor-pointer rounded-[var(--radius-md)] border border-[var(--color-border)] bg-transparent px-4 py-2 text-[var(--color-text-secondary)] transition-[transform,border-color,color] duration-[var(--duration-instant)] ease-standard hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-primary)] active:scale-[0.96] motion-reduce:active:scale-100"
           >
             Clear
           </button>

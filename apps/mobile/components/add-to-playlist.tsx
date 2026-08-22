@@ -68,8 +68,10 @@ function Sheet({ episodeId, onClose }: { episodeId: string; onClose: () => void 
   const [title, setTitle] = useState('');
 
   const playlists = useQuery({
-    queryKey: queryKeys.playlists.list(),
-    queryFn: () => api.listPlaylists({ limit: 100 }),
+    // Episode playlists only. A show playlist cannot take the episode in
+    // hand, so listing one would offer a row whose only outcome is a refusal.
+    queryKey: queryKeys.playlists.list('episode'),
+    queryFn: () => api.listPlaylists({ limit: 100, kind: 'episode' }),
   });
 
   const membership = useQuery({
@@ -95,7 +97,7 @@ function Sheet({ episodeId, onClose }: { episodeId: string; onClose: () => void 
 
   const create = useMutation({
     mutationFn: async (name: string) => {
-      const { playlist } = await api.createPlaylist({ title: name });
+      const { playlist } = await api.createPlaylist({ title: name, kind: 'episode' });
       // Created *and* filled: naming a playlist with an episode in hand is
       // naming it for that episode.
       await api.addToPlaylist(playlist.id, episodeId);
@@ -172,7 +174,7 @@ function Sheet({ episodeId, onClose }: { episodeId: string; onClose: () => void 
                   </Text>
 
                   <Text style={[type('caption'), { color: theme.textTertiary }]}>
-                    {playlist.episodeCount}
+                    {playlist.itemCount}
                   </Text>
                 </Pressable>
               );

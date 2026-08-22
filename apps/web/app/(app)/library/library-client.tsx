@@ -145,7 +145,7 @@ const ShowRow = memo(function ShowRow({ show }: { show: LibraryPodcast }) {
   return (
     <Link
       href={`/podcast/${show.id}` as never}
-      className="group relative flex items-center gap-4 rounded-[var(--radius-lg)] px-3 py-3 no-underline"
+      className="group relative flex items-center gap-4 rounded-[var(--radius-lg)] px-3 py-3 no-underline transition-transform duration-[var(--duration-instant)] ease-standard active:scale-[0.99] motion-reduce:active:scale-100"
       {...(tint ? { [TINT_ATTR]: '', style: tint as React.CSSProperties } : {})}
     >
       {/* The tint sits behind the row and only surfaces on hover. Painting it

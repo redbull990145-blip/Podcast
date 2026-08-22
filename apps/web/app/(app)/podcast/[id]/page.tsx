@@ -11,6 +11,7 @@ import { ShowNotice } from '@/components/podcast/show-notice';
 import { SubscribeButton } from '@/components/podcast/subscribe-button';
 import { EpisodeRow } from '@/components/episode/episode-row';
 import { EpisodePager } from '@/components/podcast/episode-pager';
+import { AddPodcastToPlaylist } from '@/components/playlist/add-podcast-to-playlist';
 import { api } from '@/lib/api';
 
 export const revalidate = 300;
@@ -221,6 +222,11 @@ export default async function PodcastPage({ params, searchParams }: Params) {
               podcastId={podcast.id}
               {...(fill ? { tint: fill } : {})}
             />
+
+            {/* Saving a whole show sits beside following it, because the two
+                are the same instinct with different lifetimes: Follow is "keep
+                sending me these", a show playlist is "I mean to get to this". */}
+            <AddPodcastToPlaylist podcastId={podcast.id} podcastTitle={podcast.title} />
 
             <ShowNotice
               podcastId={podcast.id}

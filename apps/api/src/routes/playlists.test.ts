@@ -11,6 +11,7 @@
 
 import { episodes, podcasts } from '@cue/db';
 import type { FastifyInstance } from 'fastify';
+import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../config.ts';
 import { buildServer } from '../server.ts';
@@ -18,6 +19,10 @@ import { buildServer } from '../server.ts';
 let app: FastifyInstance;
 let cookie: string;
 let episodeIds: string[];
+let showId: string;
+let otherShowId: string;
+/** A real show that is never added to anything, for the stale-reorder case. */
+let strangerShowId: string;
 
 async function signUp(email: string): Promise<string> {
   const response = await app.inject({
@@ -37,10 +42,43 @@ async function createPlaylist(title = 'Long drives', as: string = cookie): Promi
     method: 'POST',
     url: '/me/playlists',
     headers: { cookie: as },
-    payload: { title },
+    payload: { title, kind: 'episode' },
   });
 
   return response.json().data.playlist.id as string;
+}
+
+/** The other kind. Shows go in these; episodes are refused. */
+async function createShowPlaylist(title = 'Meaning to start'): Promise<string> {
+  const response = await app.inject({
+    method: 'POST',
+    url: '/me/playlists',
+    headers: { cookie },
+    payload: { title, kind: 'podcast' },
+  });
+
+  return response.json().data.playlist.id as string;
+}
+
+function addShow(playlistId: string, podcastId: string, position?: 'start' | 'end') {
+  return app.inject({
+    method: 'POST',
+    url: `/me/playlists/${playlistId}/podcasts`,
+    headers: { cookie },
+    payload: position ? { podcastId, position } : { podcastId },
+  });
+}
+
+async function showOrderOf(playlistId: string): Promise<string[]> {
+  const response = await app.inject({
+    method: 'GET',
+    url: `/me/playlists/${playlistId}`,
+    headers: { cookie },
+  });
+
+  return response
+    .json()
+    .data.playlist.podcasts.map((item: { podcast: { id: string } }) => item.podcast.id);
 }
 
 function addEpisode(playlistId: string, episodeId: string, position?: 'start' | 'end') {
@@ -83,6 +121,19 @@ beforeAll(async () => {
     })
     .returning({ id: podcasts.id });
 
+  showId = show!.id;
+
+  const [second, third] = await app.db
+    .insert(podcasts)
+    .values([
+      { feedUrl: 'https://example.com/other.xml', title: 'Other Show' },
+      { feedUrl: 'https://example.com/stranger.xml', title: 'Stranger Show' },
+    ])
+    .returning({ id: podcasts.id });
+
+  otherShowId = second!.id;
+  strangerShowId = third!.id;
+
   const rows = await app.db
     .insert(episodes)
     .values(
@@ -122,7 +173,7 @@ describe('creating and listing', () => {
       method: 'POST',
       url: '/me/playlists',
       headers: { cookie },
-      payload: { title: '  Long drives  ', description: 'For the M6' },
+      payload: { title: '  Long drives  ', kind: 'episode', description: 'For the M6' },
     });
 
     expect(response.statusCode).toBe(201);
@@ -130,7 +181,7 @@ describe('creating and listing', () => {
       // Trimmed by the shared schema, so the client and server agree.
       title: 'Long drives',
       description: 'For the M6',
-      episodeCount: 0,
+      itemCount: 0,
       artworkUrls: [],
     });
   });
@@ -154,7 +205,7 @@ describe('creating and listing', () => {
       method: 'POST',
       url: '/me/playlists',
       headers: { cookie },
-      payload: { title: 'Untitled', description: '' },
+      payload: { title: 'Untitled', kind: 'episode', description: '' },
     });
 
     expect(response.json().data.playlist.description).toBeNull();
@@ -185,7 +236,7 @@ describe('creating and listing', () => {
     });
 
     const playlist = response.json().data.items[0];
-    expect(playlist.episodeCount).toBe(3);
+    expect(playlist.itemCount).toBe(3);
     expect(playlist.artworkUrls).toEqual([
       'https://cdn.example.com/show.jpg',
       'https://cdn.example.com/ep-2.jpg',
@@ -204,7 +255,7 @@ describe('creating and listing', () => {
     });
 
     expect(response.json().data.items[0].artworkUrls).toHaveLength(4);
-    expect(response.json().data.items[0].episodeCount).toBe(5);
+    expect(response.json().data.items[0].itemCount).toBe(5);
   });
 
   it('sorts by what was last touched, contents included', async () => {
@@ -458,5 +509,319 @@ describe('editing', () => {
     // The episode itself survives — a playlist holds references, not episodes.
     const episode = await app.inject({ method: 'GET', url: `/episodes/${episodeIds[0]}` });
     expect(episode.statusCode).toBe(200);
+  });
+});
+
+/**
+ * The kind boundary.
+ *
+ * This is the one rule that is a *product* decision rather than a data one, and
+ * the one most likely to be quietly broken by a later refactor: both add routes
+ * look almost identical, so it is easy to fix a bug in one and leave the other
+ * accepting anything. Both directions are asserted for that reason.
+ */
+describe('what a playlist will hold', () => {
+  it('refuses a show in an episode playlist, and says what would have taken it', async () => {
+    const playlistId = await createPlaylist();
+
+    const response = await addShow(playlistId, showId);
+
+    expect(response.statusCode).toBe(409);
+    // The client turns exactly this into an offer to make a show playlist. It
+    // matches on the fields, never on the prose — so the fields are the contract.
+    expect(response.json().error).toMatchObject({
+      code: 'conflict',
+      fields: { kind: 'episode', expected: 'podcast' },
+    });
+  });
+
+  it('refuses an episode in a show playlist', async () => {
+    const playlistId = await createShowPlaylist();
+
+    const response = await addEpisode(playlistId, episodeIds[0]!);
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error).toMatchObject({
+      code: 'conflict',
+      fields: { kind: 'podcast', expected: 'episode' },
+    });
+  });
+
+  it('will not let the kind be edited out from under the items', async () => {
+    const playlistId = await createPlaylist();
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/me/playlists/${playlistId}`,
+      headers: { cookie },
+      // `kind` is not in the update schema at all, so this is an empty patch —
+      // which is refused rather than silently succeeding at nothing.
+      payload: { kind: 'podcast' },
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('lists only the kind that was asked for', async () => {
+    await createPlaylist('Episodes one');
+    await createShowPlaylist('Shows one');
+
+    const shows = await app.inject({
+      method: 'GET',
+      url: '/me/playlists?kind=podcast',
+      headers: { cookie },
+    });
+
+    const items = shows.json().data.items as { title: string; kind: string }[];
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ title: 'Shows one', kind: 'podcast' });
+  });
+});
+
+describe('shows in a show playlist', () => {
+  it('adds a show, counts it, and takes its cover for the tile', async () => {
+    const playlistId = await createShowPlaylist();
+
+    expect((await addShow(playlistId, showId)).statusCode).toBe(200);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/me/playlists/${playlistId}`,
+      headers: { cookie },
+    });
+
+    const playlist = response.json().data.playlist;
+    // `itemCount` counts shows here, not episodes — the field means whatever
+    // the playlist holds, which is the reason there is only one of it.
+    expect(playlist.itemCount).toBe(1);
+    expect(playlist.artworkUrls).toEqual(['https://cdn.example.com/show.jpg']);
+    expect(playlist.podcasts[0].podcast.id).toBe(showId);
+    expect(playlist.items).toEqual([]);
+  });
+
+  it('holds a show once however many times it is added', async () => {
+    const playlistId = await createShowPlaylist();
+
+    await addShow(playlistId, showId);
+    await addShow(playlistId, showId);
+
+    expect(await showOrderOf(playlistId)).toEqual([showId]);
+  });
+
+  it('reorders shows, and ignores ids that are not in the playlist', async () => {
+    const playlistId = await createShowPlaylist();
+
+    await addShow(playlistId, showId);
+    await addShow(playlistId, otherShowId);
+
+    expect(await showOrderOf(playlistId)).toEqual([showId, otherShowId]);
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: `/me/playlists/${playlistId}/podcasts/order`,
+      headers: { cookie },
+      // A stale order computed against a list that has since changed is the
+      // normal case, not an error — the unknown id is dropped, not rejected.
+      payload: { podcastIds: [otherShowId, showId, strangerShowId] },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.reordered).toBe(2);
+    expect(await showOrderOf(playlistId)).toEqual([otherShowId, showId]);
+  });
+
+  it('refuses to touch a stranger playlist', async () => {
+    const strangerCookie = await signUp(`stranger-${Math.random().toString(36).slice(2)}@x.com`);
+    const theirs = await app.inject({
+      method: 'POST',
+      url: '/me/playlists',
+      headers: { cookie: strangerCookie },
+      payload: { title: 'Theirs', kind: 'podcast' },
+    });
+    const theirId = theirs.json().data.playlist.id as string;
+
+    // 404, not 403: a distinct "exists but is not yours" turns the id space
+    // into an oracle anyone can enumerate.
+    expect((await addShow(theirId, showId)).statusCode).toBe(404);
+  });
+});
+
+describe('how a playlist looks', () => {
+  it('starts on a palette colour with no picture', async () => {
+    const playlistId = await createPlaylist();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/me/playlists/${playlistId}`,
+      headers: { cookie },
+    });
+
+    expect(response.json().data.playlist).toMatchObject({
+      banner: { kind: 'color', color: 'ember', imageUrl: null, text: null },
+      backgroundColor: null,
+    });
+  });
+
+  it('takes a colour, a caption and a page wash', async () => {
+    const playlistId = await createPlaylist();
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/me/playlists/${playlistId}`,
+      headers: { cookie },
+      payload: { color: 'ocean', bannerText: '  Vol. 3  ', backgroundColor: 'ocean' },
+    });
+
+    expect(response.json().data.playlist).toMatchObject({
+      banner: { kind: 'color', color: 'ocean', text: 'Vol. 3' },
+      backgroundColor: 'ocean',
+    });
+  });
+
+  it('refuses a colour it does not have', async () => {
+    const playlistId = await createPlaylist();
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/me/playlists/${playlistId}`,
+      headers: { cookie },
+      payload: { color: '#ff0000' },
+    });
+
+    // A closed palette is the whole point: a free hex field is how someone
+    // ends up with an unreadable title on their own banner.
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('will not switch to a picture that was never uploaded', async () => {
+    const playlistId = await createPlaylist();
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/me/playlists/${playlistId}`,
+      headers: { cookie },
+      payload: { bannerKind: 'image' },
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('rejects a body that is not an image', async () => {
+    const playlistId = await createPlaylist();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/me/playlists/${playlistId}/banner`,
+      headers: { cookie, 'content-type': 'image/png' },
+      payload: Buffer.from('this is not a PNG, whatever the header says'),
+    });
+
+    // Re-encoding is the check. Something that only claims to be a PNG does
+    // not survive being decoded and written back out.
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('stores an uploaded banner and serves it from its versioned URL', async () => {
+    const playlistId = await createPlaylist();
+
+    const png = await sharp({
+      create: { width: 40, height: 20, channels: 3, background: '#336699' },
+    })
+      .png()
+      .toBuffer();
+
+    const upload = await app.inject({
+      method: 'POST',
+      url: `/me/playlists/${playlistId}/banner`,
+      headers: { cookie, 'content-type': 'image/png' },
+      payload: png,
+    });
+
+    expect(upload.statusCode).toBe(200);
+
+    const banner = upload.json().data.playlist.banner;
+    // Uploading a picture is asking to see it — no second step.
+    expect(banner.kind).toBe('image');
+    expect(banner.imageUrl).toMatch(/^\/playlists\/[\da-f-]+\/banner\/[\da-f-]+$/);
+
+    const served = await app.inject({ method: 'GET', url: banner.imageUrl });
+
+    expect(served.statusCode).toBe(200);
+    // Re-encoded, never stored as sent: that is what strips EXIF and what
+    // guarantees the bytes really are an image.
+    expect(served.headers['content-type']).toBe('image/webp');
+    expect(served.headers['x-content-type-options']).toBe('nosniff');
+    expect(served.rawPayload.length).toBeGreaterThan(0);
+  });
+
+  it('does not serve a banner from a stale version', async () => {
+    const playlistId = await createPlaylist();
+
+    const png = await sharp({
+      create: { width: 40, height: 20, channels: 3, background: '#336699' },
+    })
+      .png()
+      .toBuffer();
+
+    const first = await app.inject({
+      method: 'POST',
+      url: `/me/playlists/${playlistId}/banner`,
+      headers: { cookie, 'content-type': 'image/png' },
+      payload: png,
+    });
+    const firstUrl = first.json().data.playlist.banner.imageUrl as string;
+
+    const second = await app.inject({
+      method: 'POST',
+      url: `/me/playlists/${playlistId}/banner`,
+      headers: { cookie, 'content-type': 'image/png' },
+      payload: png,
+    });
+    const secondUrl = second.json().data.playlist.banner.imageUrl as string;
+
+    // The version is what makes a replacement visible through every cache
+    // between the database and the screen.
+    expect(secondUrl).not.toBe(firstUrl);
+    expect((await app.inject({ method: 'GET', url: firstUrl })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: secondUrl })).statusCode).toBe(200);
+  });
+
+  it('keeps the picture when the banner switches back to a colour', async () => {
+    const playlistId = await createPlaylist();
+
+    const png = await sharp({
+      create: { width: 40, height: 20, channels: 3, background: '#336699' },
+    })
+      .png()
+      .toBuffer();
+
+    await app.inject({
+      method: 'POST',
+      url: `/me/playlists/${playlistId}/banner`,
+      headers: { cookie, 'content-type': 'image/png' },
+      payload: png,
+    });
+
+    const back = await app.inject({
+      method: 'PATCH',
+      url: `/me/playlists/${playlistId}`,
+      headers: { cookie },
+      payload: { bannerKind: 'color' },
+    });
+
+    // Trying a colour and changing your mind must not cost you the file.
+    expect(back.json().data.playlist.banner).toMatchObject({ kind: 'color' });
+    expect(back.json().data.playlist.banner.imageUrl).not.toBeNull();
+
+    const dropped = await app.inject({
+      method: 'DELETE',
+      url: `/me/playlists/${playlistId}/banner`,
+      headers: { cookie },
+    });
+
+    expect(dropped.json().data.playlist.banner).toMatchObject({
+      kind: 'color',
+      imageUrl: null,
+    });
   });
 });

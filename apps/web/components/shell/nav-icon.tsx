@@ -56,6 +56,10 @@ export function NavIcon({
       aria-hidden="true"
       // Decorative: the accessible name lives on the link's text.
       focusable="false"
+      // The weight change is the active cue, so let it arrive rather than cut:
+      // a 1.7→2.2 swap reads as a repaint, an eased one reads as ink thickening.
+      // SVG geometry properties transition in every engine this app ships to.
+      style={{ transition: 'stroke-width var(--duration-fast) var(--ease-standard)' }}
     >
       <path d={path} />
     </svg>

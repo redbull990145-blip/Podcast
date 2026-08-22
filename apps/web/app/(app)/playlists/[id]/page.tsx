@@ -15,9 +15,10 @@ type Params = { params: Promise<{ id: string }> };
 export default async function PlaylistPage({ params }: Params) {
   const { id } = await params;
 
-  return (
-    <div className="mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
-      <PlaylistClient playlistId={id} />
-    </div>
-  );
+  // No wrapper here: `PlaylistClient` owns its own outer element now, because
+  // a playlist with a page colour has to repaint `<main>`'s own background —
+  // see `ChromeTint` in that file — which only works from the element that is
+  // actually going to carry `data-chrome-tint`, not from a div a level above it
+  // that has already decided the page's padding and can't be un-decided later.
+  return <PlaylistClient playlistId={id} />;
 }
