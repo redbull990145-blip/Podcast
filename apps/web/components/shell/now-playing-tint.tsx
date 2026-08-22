@@ -210,31 +210,60 @@ export function NowPlayingTint() {
  */
 function TintBloom({ color, onDone }: { color: string; onDone: () => void }) {
   return (
-    <m.div
-      aria-hidden="true"
-      className="pointer-events-none fixed inset-0 z-[60]"
-      initial={{ opacity: 0, scale: 1.15 }}
-      /*
-        Up and back down in one keyframed run, so the whole gesture is a single
-        animation with one completion rather than an enter that has to be told
-        when to leave. The peak sits at 0.22 — present enough to read as a
-        sweep of colour, far from enough to obscure what anybody is reading.
-      */
-      animate={{ opacity: [0, 0.22, 0.16, 0], scale: [1.15, 1, 1, 1] }}
-      exit={{ opacity: 0 }}
-      transition={{
-        duration: TINT_MS / 1000,
-        times: [0, 0.28, 0.6, 1],
-        ease: 'easeInOut',
-        opacity: { duration: TINT_MS / 1000, times: [0, 0.28, 0.6, 1] },
-      }}
-      onAnimationComplete={onDone}
-      style={{
-        background: `radial-gradient(120% 80% at 50% 100%, ${color}, transparent 70%)`,
-        // Lightens rather than covers, so text underneath keeps its contrast
-        // instead of being veiled for two seconds.
-        mixBlendMode: 'soft-light',
-      }}
-    />
+    <>
+      {/*
+        The bloom proper: colour rising from the player and filling the window.
+
+        This was a single `soft-light` layer peaking at 0.22, and it was too
+        polite to notice — soft-light against an already-dark ground barely
+        moves a pixel, so the two seconds of palette interpolation happened
+        under an effect nobody could see. `screen` genuinely adds light, and
+        the peak is nearly triple, which is what makes the repaint read as an
+        event rather than as a colour that was somehow always there.
+      */}
+      <m.div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 z-[60]"
+        initial={{ opacity: 0, scale: 1.35 }}
+        animate={{ opacity: [0, 0.62, 0.4, 0], scale: [1.35, 1, 1, 1.04] }}
+        exit={{ opacity: 0 }}
+        transition={{
+          duration: TINT_MS / 1000,
+          times: [0, 0.22, 0.55, 1],
+          ease: 'easeInOut',
+        }}
+        onAnimationComplete={onDone}
+        style={{
+          background: `radial-gradient(130% 95% at 50% 100%, ${color}, transparent 72%)`,
+          mixBlendMode: 'screen',
+        }}
+      />
+
+      {/*
+        A second, faster pass across the top.
+
+        One gradient rising from one edge reads as a glow; two moving against
+        each other read as light travelling through the room. This one is
+        smaller, brighter and gone in half the time, so it registers as the
+        leading edge of the change rather than as a second wash competing with
+        the first.
+      */}
+      <m.div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 z-[60]"
+        initial={{ opacity: 0, y: '-18%' }}
+        animate={{ opacity: [0, 0.34, 0], y: ['-18%', '0%', '10%'] }}
+        exit={{ opacity: 0 }}
+        transition={{
+          duration: TINT_MS / 1000,
+          times: [0, 0.3, 0.72],
+          ease: 'easeOut',
+        }}
+        style={{
+          background: `radial-gradient(90% 55% at 22% 0%, ${color}, transparent 68%)`,
+          mixBlendMode: 'screen',
+        }}
+      />
+    </>
   );
 }

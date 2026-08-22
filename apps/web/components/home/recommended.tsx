@@ -6,6 +6,7 @@ import type { Translator } from '@cue/i18n';
 import { useQuery } from '@tanstack/react-query';
 import type { Route } from 'next';
 import Link from 'next/link';
+import type { CSSProperties } from 'react';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { Artwork } from '@/components/media/artwork';
 import { SectionHeader } from '@/components/ui/section-header';
@@ -13,19 +14,23 @@ import { api } from '@/lib/api';
 import { useSession } from '@/lib/session';
 
 /**
- * Three, and only three.
+ * A shortlist, not a listing.
  *
- * This section used to be the whole catalogue re-ordered — eighteen covers in
- * a five-column grid, which is a *listing*, and a listing cannot recommend
- * anything. Eighteen equally-sized tiles ask the reader to do the choosing,
- * which is the job the ranking was supposed to have already done.
+ * This section was once the whole catalogue re-ordered — eighteen covers in a
+ * five-column grid, which is a *listing*, and a listing cannot recommend
+ * anything: eighteen equally-sized tiles ask the reader to do the choosing,
+ * which is the job the ranking was supposed to have already done. That is
+ * still the rule, and it is why this is capped rather than paged.
  *
- * Three cards at editorial size can each carry a reason, a title people can
- * read from across the desk, and enough artwork to recognise a show by. The
- * catalogue still exists further down the page for anyone who does want to
- * browse; it just is not pretending to be advice.
+ * The number was three, on the reasoning that three cards *at editorial size*
+ * could each carry a reason and enough artwork to recognise a show by. The
+ * size is what moved: at three across, a cover on a desktop window was very
+ * nearly the 400px this app reserves for the expanded player, spent on a
+ * suggestion. Smaller covers make five a scannable row rather than a wall —
+ * the thing that would make this a listing is equal weight and no reason
+ * attached, not the count.
  */
-const RAIL = 3;
+const RAIL = 5;
 
 /**
  * Roughly how many episodes it takes before the ranker stops guessing.
@@ -103,18 +108,37 @@ export function Recommended({ fallback }: { fallback: Podcast[] }) {
         // that this was shaped by their listening is the kind of small lie
         // that makes the whole feature read as decoration.
         note={personalized ? t.t('home.recommendedNote') : t.t('home.recommendedGeneric')}
+        action={{ href: '/search', label: t.t('home.viewMore'), variant: 'icon' }}
       />
 
       {/*
-        Three equal columns, matching Latest episodes directly below.
+        Equal columns, matching Latest episodes directly below.
 
         The design draws this row as a wide lead and two followers, and that
         does not survive contact with square artwork: a wider column is a
         taller cover, so the lead card's caption sits on a different baseline
         from its neighbours' and the row reads as broken rather than ranked.
         Sequence already carries the ranking.
+
+        Five across on a desktop rather than three. At three, a cover on a
+        1440px window is very nearly 400px square — the size this app reserves
+        for the *expanded player*, spent on a suggestion. A recommendation rail
+        is something you scan across, and covers that each take a third of the
+        width make it something you scroll down instead.
       */}
-      <ul className="m-0 grid list-none grid-cols-1 gap-x-5 gap-y-9 p-0 sm:grid-cols-3">
+      {/*
+        The desktop column count follows however many the ranker actually
+        returned, capped at `RAIL`.
+
+        Hard-coding five would leave a two-column hole on any account the
+        ranker can only find three shows for — which is every new account, so
+        the empty half of the row would be the first thing a new listener sees
+        this section do. A grid that fits its contents cannot have that bug.
+      */}
+      <ul
+        className="m-0 grid list-none grid-cols-2 gap-x-5 gap-y-7 p-0 sm:grid-cols-3 lg:[grid-template-columns:repeat(var(--rail-cols),minmax(0,1fr))]"
+        style={{ '--rail-cols': Math.min(shows.length, RAIL) } as CSSProperties}
+      >
         {shows.map((podcast) => (
           <li key={podcast.id}>
             <RecommendationCard podcast={podcast} />
@@ -183,10 +207,12 @@ function RecommendationCard({ podcast }: { podcast: RecommendedPodcast }) {
         <Artwork
           src={podcast.artworkUrl}
           alt={podcast.title}
-          size={320}
+          size={220}
           priority
           responsive
-          sizes="(min-width: 640px) 33vw, 92vw"
+          // Kept in step with the grid above, so the browser is not asked for a
+          // 33vw file to paint into a 20vw box.
+          sizes="(min-width: 1024px) 20vw, (min-width: 640px) 33vw, 46vw"
         />
       </div>
 

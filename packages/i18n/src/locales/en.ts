@@ -95,6 +95,10 @@ export const en = {
   // publisher cannot take the whole section — and a heading that did not say
   // so would be quietly lying about the ordering.
   'home.latestNote': 'The newest from each show',
+  /* The accessible name for a section's chevron. Never rendered as text — a
+     visible "View more" beside every heading is four of the same two words
+     down one page. */
+  'home.viewMore': 'View more',
   'home.catalogue': 'Everything on Cue',
   /* The same grid as the catalogue, ordered by what someone actually listens
      to. The note matters more than usual here: a personalised order that does
@@ -208,6 +212,13 @@ export const en = {
   'player.mute': 'Mute',
   'player.unmute': 'Unmute',
   'player.openQueue': 'Open the queue',
+  'player.closeQueue': 'Close the queue',
+  /* The queue panel inside the player. `player.upNext` heads the panel;
+     `up-next.tsx`'s countdown card uses `player.upNextIn`, which is a different
+     sentence about a different moment. */
+  'player.upNext': 'Up next',
+  'player.queueManage': 'Manage',
+  'player.nowPlayingLabel': 'Now playing',
   // Plural-aware: "in 1 second" reads as broken English, and this string is on
   // screen counting down through exactly that value every single time.
   'player.upNextIn': 'Up next in {seconds, plural, one {# second} other {# seconds}}',

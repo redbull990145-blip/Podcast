@@ -26,6 +26,7 @@ import { Captions } from './captions';
 import { PlayPauseButton, SkipButton } from './controls';
 import { SpeedControl } from './speed-control';
 import { ProgressBar } from './progress-bar';
+import { QueuePanel } from './queue-panel';
 import { useSheetDrag } from './use-sheet-drag';
 import { VolumeSlider } from './volume-slider';
 import { useTranslator } from '@/components/i18n/locale-provider';
@@ -348,8 +349,21 @@ export function Player() {
    * touches the control their answer holds at either width; a preference that
    * resets when you resize the window is not a preference.
    */
-  const [captionsChoice, setCaptionsChoice] = useState<boolean | null>(null);
-  const captionsOpen = captionsChoice ?? wide;
+  /**
+   * Which panel the side column is showing, if any.
+   *
+   * Was a boolean for the transcript alone. It is a choice of *panel* now
+   * because the queue moved in beside it: the queue button used to navigate to
+   * `/queue`, which closed the player and left the page you were on to answer
+   * a question people ask at a glance. One column, two answers, and pressing
+   * the button for the panel already open closes it.
+   */
+  const [panelChoice, setPanelChoice] = useState<'captions' | 'queue' | null>(null);
+  const panel = panelChoice ?? (wide ? 'captions' : null);
+  const captionsOpen = panel !== null;
+
+  const togglePanel = (next: 'captions' | 'queue') =>
+    setPanelChoice(panel === next ? null : next);
 
   /**
    * Whether the sheet is *actually* in two columns right now.
@@ -966,17 +980,19 @@ export function Player() {
                         way to turn the transcript off, which left anyone who
                         just wanted to look at the cover stuck with it. */}
                     <IconButton
-                      label={captionsOpen ? t.t('captions.hide') : t.t('captions.show')}
+                      label={panel === 'captions' ? t.t('captions.hide') : t.t('captions.show')}
                       path={icon.captions}
-                      pressed={captionsOpen}
-                      onClick={() => setCaptionsChoice(!captionsOpen)}
+                      pressed={panel === 'captions'}
+                      onClick={() => togglePanel('captions')}
                     />
 
+                    {/* Opens the panel beside the cover now instead of
+                        navigating away — see `panelChoice` above. */}
                     <IconButton
                       label={t.t('player.openQueue')}
                       path={icon.queue}
-                      href={'/queue' as Route}
-                      onClick={() => setExpanded(false)}
+                      pressed={panel === 'queue'}
+                      onClick={() => togglePanel('queue')}
                     />
                   </div>
                 </div>
@@ -1037,10 +1053,10 @@ export function Player() {
                 {!wide ? (
                   <div className="mb-1 flex shrink-0 justify-end">
                     <IconButton
-                      label={t.t('captions.hide')}
-                      path={icon.captions}
+                      label={panel === 'queue' ? t.t('player.closeQueue') : t.t('captions.hide')}
+                      path={panel === 'queue' ? icon.queue : icon.captions}
                       pressed
-                      onClick={() => setCaptionsChoice(false)}
+                      onClick={() => setPanelChoice(null)}
                     />
                   </div>
                 ) : null}
@@ -1056,16 +1072,23 @@ export function Player() {
                     that failed to fill rather than one that was placed. Beside
                     the artwork it stays on the start edge, which is where the
                     eye arrives from. */}
-                <Captions
-                  key={episode.id}
-                  episodeId={episode.id}
-                  className={['min-h-0 flex-1', wide ? '' : 'mx-auto'].join(' ')}
-                  // Pinned to the column's final width while it animates, so
-                  // the lines inside do not re-wrap on every frame of the
-                  // opening — reflowing a transcript sixty times is both the
-                  // expensive way to do this and a visibly unsteady one.
-                  {...(wide ? { style: { width: splitWidth } } : {})}
-                />
+                {/* Both panels are pinned to the column's final width while it
+                    animates, so their contents do not re-wrap on every frame
+                    of the opening — reflowing a transcript sixty times is both
+                    the expensive way to do this and a visibly unsteady one. */}
+                {panel === 'queue' ? (
+                  <QueuePanel
+                    className={['min-h-0 flex-1', wide ? '' : 'mx-auto w-full max-w-[var(--measure-prose)]'].join(' ')}
+                    {...(wide ? { style: { width: splitWidth } } : {})}
+                  />
+                ) : (
+                  <Captions
+                    key={episode.id}
+                    episodeId={episode.id}
+                    className={['min-h-0 flex-1', wide ? '' : 'mx-auto'].join(' ')}
+                    {...(wide ? { style: { width: splitWidth } } : {})}
+                  />
+                )}
               </m.div>
             ) : null}
           </div>

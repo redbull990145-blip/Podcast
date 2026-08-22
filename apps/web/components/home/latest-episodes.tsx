@@ -9,7 +9,8 @@ import { getTranslator } from '@/lib/i18n';
 
 /** How many shows to ask, and how many picks to keep. */
 const SOURCES = 8;
-const PICKS = 3;
+/** Four, to fill the row the grid now draws at desktop width. */
+const PICKS = 4;
 
 type Pick = { episode: Episode; podcast: Podcast };
 
@@ -56,9 +57,14 @@ export async function LatestEpisodes({ podcasts }: { podcasts: Podcast[] }) {
         id="latest-heading"
         label={t.t('home.latest')}
         note={t.t('home.latestNote')}
+        action={{ href: '/library', label: t.t('home.viewMore'), variant: 'icon' }}
       />
 
-      <ul className="m-0 grid list-none grid-cols-1 gap-x-5 gap-y-6 p-0 md:grid-cols-3">
+      {/* Four across rather than three — see the note on Recommended's grid.
+          One fewer column than that rail because each of these carries an
+          episode title as well as a show name, and five columns of two-line
+          titles is a wall of text under a row of stamps. */}
+      <ul className="m-0 grid list-none grid-cols-1 gap-x-5 gap-y-6 p-0 sm:grid-cols-2 lg:grid-cols-4">
         {picks.map(({ episode, podcast }) => (
           <li key={episode.id}>
             <LatestPick episode={episode} podcast={podcast} />
@@ -120,19 +126,25 @@ async function LatestPick({ episode, podcast }: Pick) {
   const duration = t.duration(episode.durationSec);
   const date = t.episodeDate(episode.publishedAt);
 
+  /*
+    `sm`, matching the grid above. These two have to switch on the same
+    breakpoint: the grid going to two columns while this was still a
+    72px-thumbnail row left each cell laid out as a phone row inside half a
+    desktop column, with the cover stranded beside a column of white space.
+  */
   return (
-    <article className="flex items-center gap-4 md:block">
+    <article className="flex items-center gap-4 sm:block">
       <Link
         href={`/podcast/${podcast.id}` as Route}
         aria-label={podcast.title}
-        className="block w-[72px] shrink-0 no-underline transition-opacity hover:opacity-90 md:mb-3.5 md:w-full"
+        className="block w-[72px] shrink-0 no-underline transition-opacity hover:opacity-90 sm:mb-3.5 sm:w-full"
       >
         <Artwork
           src={episode.artworkUrl ?? podcast.artworkUrl}
           alt=""
-          size={260}
+          size={200}
           responsive
-          sizes="(min-width: 768px) 340px, 72px"
+          sizes="(min-width: 1024px) 22vw, (min-width: 640px) 44vw, 72px"
         />
       </Link>
 
@@ -168,7 +180,7 @@ async function LatestPick({ episode, podcast }: Pick) {
       {/* On a phone the control sits at the end of the row; on a desktop it
           would be a lone circle under a paragraph, and the cover above is
           already a link into the show. */}
-      <div className="shrink-0 md:hidden">
+      <div className="shrink-0 sm:hidden">
         <PlayButton
           episode={episode}
           podcastTitle={podcast.title}
@@ -198,10 +210,13 @@ export function LatestEpisodesSkeleton() {
         <span className="mt-2 block h-3 w-52 rounded-[var(--radius-xs)] bg-[var(--color-skeleton)]" />
       </div>
 
-      <div className="grid grid-cols-1 gap-x-5 gap-y-6 md:grid-cols-3">
+      {/* Shaped like the real grid above, breakpoint for breakpoint — a
+          placeholder reserving a different amount of space than the content it
+          stands in for is a layout shift with extra steps. */}
+      <div className="grid grid-cols-1 gap-x-5 gap-y-6 sm:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: PICKS }, (_, index) => (
-          <div key={index} className="flex items-center gap-4 md:block">
-            <div className="aspect-square w-[72px] shrink-0 rounded-[var(--radius-md)] bg-[var(--color-skeleton)] md:mb-3.5 md:w-full" />
+          <div key={index} className="flex items-center gap-4 sm:block">
+            <div className="aspect-square w-[72px] shrink-0 rounded-[var(--radius-md)] bg-[var(--color-skeleton)] sm:mb-3.5 sm:w-full" />
             <div className="min-w-0 flex-1">
               <span className="block h-3 w-24 rounded-[var(--radius-xs)] bg-[var(--color-skeleton)]" />
               <span className="mt-2 block h-4 w-2/3 rounded-[var(--radius-xs)] bg-[var(--color-skeleton)]" />
@@ -209,7 +224,7 @@ export function LatestEpisodesSkeleton() {
             </div>
             {/* The control takes real width on a phone, so its absence would
                 make every title look longer than it will be. */}
-            <div className="h-11 w-11 shrink-0 rounded-full bg-[var(--color-skeleton)] md:hidden" />
+            <div className="h-11 w-11 shrink-0 rounded-full bg-[var(--color-skeleton)] sm:hidden" />
           </div>
         ))}
       </div>

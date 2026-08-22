@@ -511,21 +511,25 @@ const CategoryBrowse = memo(function CategoryBrowse() {
         ))}
       </ul>
 
+      {/*
+        Every remaining category gets a tile too, rather than a row in a list.
+
+        The list they replace was the honest layout when only four categories
+        could be given artwork — but each of these carries a colour borrowed
+        from a show inside it, so there was never a category that *could not*
+        be drawn, only a decision that most of them would not be. That decision
+        made the browse screen read as four categories and nineteen footnotes.
+
+        Short rather than 4:3. A category is a destination, not a cover, and
+        nineteen more square-ish tiles would push Trending off the bottom of
+        the screen entirely — the exact failure the note on `CategoryTile`'s
+        aspect ratio warns about, at six times the scale.
+      */}
       {rest.length > 0 ? (
-        <ul className="m-0 mt-4 grid list-none grid-cols-1 gap-x-10 p-0 sm:grid-cols-2 lg:grid-cols-3">
+        <ul className="m-0 mt-3.5 grid list-none grid-cols-2 gap-3.5 p-0 sm:grid-cols-3 lg:grid-cols-4">
           {rest.map((category) => (
             <li key={category.slug}>
-              <Link
-                href={`/search?category=${category.slug}` as Route}
-                className="flex items-baseline justify-between gap-4 border-b border-[var(--color-border)] py-3 no-underline"
-              >
-                <span className="type-body-strong clamp-1 text-[var(--color-text-primary)]">
-                  {category.name}
-                </span>
-                <span className="type-caption shrink-0 text-[var(--color-text-tertiary)]">
-                  {category.count}
-                </span>
-              </Link>
+              <CategoryTile category={category} compact />
             </li>
           ))}
         </ul>
@@ -548,7 +552,21 @@ const CategoryBrowse = memo(function CategoryBrowse() {
  * the deeper reason is that these are not covers, and giving them a cover's
  * shape is how a reader ends up clicking a category expecting a show.
  */
-function CategoryTile({ category }: { category: Category }) {
+function CategoryTile({
+  category,
+  /**
+   * The same tile, short.
+   *
+   * Used for every category past the featured few. Same colour, same
+   * watermark, same press behaviour — only the height and the type scale
+   * change, so the grid below reads as more of the same thing rather than as a
+   * second, lesser treatment.
+   */
+  compact = false,
+}: {
+  category: Category;
+  compact?: boolean;
+}) {
   const cover = category.accentColor ? deriveCover(category.accentColor) : null;
   const settle = useTransition('standard');
   const travel = useCanTravel();
@@ -581,8 +599,10 @@ function CategoryTile({ category }: { category: Category }) {
       <Link
         href={`/search?category=${category.slug}` as Route}
         className={[
-          'group relative flex aspect-4/3 flex-col justify-between overflow-hidden',
-          'rounded-[var(--radius-lg)] p-4 no-underline',
+          'group relative flex flex-col justify-between overflow-hidden no-underline',
+          compact
+            ? 'h-[86px] rounded-[var(--radius-md)] p-3'
+            : 'aspect-4/3 rounded-[var(--radius-lg)] p-4',
           cover ? '' : 'border border-[var(--color-border)]',
         ].join(' ')}
         style={{
@@ -616,9 +636,10 @@ function CategoryTile({ category }: { category: Category }) {
         <span
           aria-hidden="true"
           className={[
-            'pointer-events-none absolute -end-2 -bottom-8 leading-none font-semibold select-none',
-            'text-[7rem] transition-transform duration-[var(--duration-slow)] ease-standard',
+            'pointer-events-none absolute leading-none font-semibold select-none',
+            'transition-transform duration-[var(--duration-slow)] ease-standard',
             'group-hover:-translate-y-1 motion-reduce:group-hover:translate-y-0',
+            compact ? '-end-1 -bottom-5 text-[4.5rem]' : '-end-2 -bottom-8 text-[7rem]',
             cover ? 'text-white/10' : 'text-[var(--color-text-primary)]/5',
           ].join(' ')}
         >
@@ -627,7 +648,8 @@ function CategoryTile({ category }: { category: Category }) {
 
         <span
           className={[
-            'relative type-title3 clamp-2',
+            'relative clamp-2',
+            compact ? 'type-body-strong' : 'type-title3',
             cover ? 'text-white' : 'text-[var(--color-text-primary)]',
           ].join(' ')}
         >

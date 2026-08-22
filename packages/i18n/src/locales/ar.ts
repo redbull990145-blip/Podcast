@@ -87,6 +87,7 @@ export const ar: Catalog = {
   'home.startOver': 'البدء من الأول',
   'home.latest': 'أحدث الحلقات',
   'home.latestNote': 'الأحدث من كل برنامج',
+  'home.viewMore': 'عرض المزيد',
   'home.catalogue': 'كل ما في Cue',
   'home.recommended': 'مقترَح لك',
   'home.recommendedNote': 'بناءً على ما تستمع إليه',
@@ -185,6 +186,10 @@ export const ar: Catalog = {
   'player.mute': 'كتم الصوت',
   'player.unmute': 'إلغاء كتم الصوت',
   'player.openQueue': 'فتح قائمة التشغيل',
+  'player.closeQueue': 'إغلاق قائمة الانتظار',
+  'player.upNext': 'التالي',
+  'player.queueManage': 'إدارة',
+  'player.nowPlayingLabel': 'قيد التشغيل',
   'player.upNextIn':
     'التالي بعد {seconds, plural, zero {# ثانية} one {ثانية} two {ثانيتين} few {# ثوانٍ} many {# ثانية} other {# ثانية}}',
   'player.playNow': 'تشغيل الآن',

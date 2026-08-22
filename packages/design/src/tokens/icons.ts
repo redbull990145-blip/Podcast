@@ -51,6 +51,15 @@ export const icon = {
   skipForward: 'M9.93 4.27A8 8 0 1 0 14.07 4.27M14.07 4.27 11 2.4M14.07 4.27 11 6.2',
 
   chevronDown: 'M6 9.5 12 15.5l6-6',
+  /**
+   * The same chevron on its side, for "there is more this way".
+   *
+   * Drawn rather than produced by rotating `chevronDown` in CSS, because the
+   * one place it points the other way is under Arabic — and a transform that
+   * has to be undone by a second transform for RTL is how an arrow ends up
+   * pointing back at the content it came from.
+   */
+  chevronRight: 'M9.5 6 15.5 12l-6 6',
   check: 'M5 12.5 9.5 17 19 7.5',
   plus: 'M12 5v14M5 12h14',
 
