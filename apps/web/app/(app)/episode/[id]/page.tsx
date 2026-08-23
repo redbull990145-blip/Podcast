@@ -13,9 +13,22 @@ import { SharedTimestamp } from '@/components/episode/shared-timestamp';
 import { ShowNotes } from '@/components/episode/show-notes';
 import { TranscriptPanel } from '@/components/transcript/transcript-panel';
 import { Artwork } from '@/components/media/artwork';
-import { api } from '@/lib/api';
+import { catalogue } from '@/lib/api';
 
-export const revalidate = 300;
+/*
+  No `export const revalidate` here, deliberately.
+
+  These pages carried one — 300 seconds — and it never took effect. Route-level
+  revalidation needs a route Next can render without a request, and every route
+  in this app is dynamic because app/layout.tsx reads the CSP nonce off a
+  request header (and `resolveLocale()` reads cookies). Both are per-request by
+  definition, so the segment config was inert and the page re-fetched the
+  catalogue on every single visit.
+
+  The 300 seconds now lives on the `catalogue` client in lib/api.ts, which
+  caches at the fetch layer instead. That layer is not affected by the route
+  being dynamic, so the caching the number always described actually happens.
+*/
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -29,8 +42,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { id } = await params;
 
   try {
-    const { episode } = await api.getEpisode(id);
-    const { podcast } = await api.getPodcast(episode.podcastId);
+    const { episode } = await catalogue.getEpisode(id);
+    const { podcast } = await catalogue.getPodcast(episode.podcastId);
     const summary = episode.description?.slice(0, 160) ?? undefined;
 
     return {
@@ -54,9 +67,9 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 export default async function EpisodePage({ params }: Params) {
   const { id } = await params;
 
-  let episode: Awaited<ReturnType<typeof api.getEpisode>>['episode'];
+  let episode: Awaited<ReturnType<typeof catalogue.getEpisode>>['episode'];
   try {
-    ({ episode } = await api.getEpisode(id));
+    ({ episode } = await catalogue.getEpisode(id));
   } catch (error) {
     // A missing episode is a 404, not a 500 — publishers delete episodes, and
     // a stale shared link should say so with the right status.
@@ -64,7 +77,7 @@ export default async function EpisodePage({ params }: Params) {
     throw error;
   }
 
-  const { podcast } = await api.getPodcast(episode.podcastId);
+  const { podcast } = await catalogue.getPodcast(episode.podcastId);
 
   /**
    * The episode's own colour, falling back to the show's.

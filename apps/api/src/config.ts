@@ -96,6 +96,31 @@ const envSchema = z.object({
    */
   API_KEY_ENCRYPTION_SECRET: blankAsUnset(z.string().min(16).optional()),
 
+  /**
+   * Shared secret that identifies our own web app's server-side calls.
+   *
+   * The catalogue endpoints are rate limited per caller, and a caller is
+   * identified by session or by IP. The web app's server components break that
+   * assumption: they call this API from a Cloudflare Worker, so *every*
+   * server-rendered page view in the world arrives from a handful of Cloudflare
+   * egress addresses and shares one IP-keyed budget. One home page render is
+   * seven calls (the catalogue plus a latest-episode read per show), so a
+   * per-IP limit tight enough to stop a scraper would start refusing our own
+   * front page at roughly seventeen views a minute — globally.
+   *
+   * A request carrying this token is billed as `svc:web` instead, and exempt.
+   * It is a trust marker between two services we own, not an authorisation
+   * check: it grants no data access, and every one of these routes is public
+   * anyway. Someone who steals it gains the ability to read public podcast
+   * metadata quickly, which Cloudflare's own limits still sit in front of.
+   *
+   * Optional, and its absence is fail-open by design: with no token set the
+   * catalogue rate limit is skipped entirely rather than applied to traffic it
+   * cannot tell apart. A limiter that cannot distinguish our own renderer from
+   * an attacker would take the app down more reliably than the attacker.
+   */
+  INTERNAL_API_TOKEN: blankAsUnset(z.string().min(16).optional()),
+
   /** Operator-key requests per user per UTC day. */
   AI_DAILY_QUOTA: z.coerce.number().int().min(0).default(20),
 
@@ -146,6 +171,11 @@ export type Config = {
   trustProxy: number | false;
   authSecret: string;
   authUrl: string;
+  /**
+   * Null disables catalogue rate limiting rather than applying it blindly —
+   * see INTERNAL_API_TOKEN above for why that is the safe direction.
+   */
+  internalToken: string | null;
   ai: {
     /** The operator's key, or null when only BYOK is available. */
     operatorKey: string | null;
@@ -257,6 +287,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     // 0 means "nothing in front of me" — express it as `false` so Fastify
     // ignores forwarding headers rather than trusting zero hops of them.
     trustProxy: value.TRUST_PROXY_HOPS === 0 ? false : value.TRUST_PROXY_HOPS,
+    internalToken: value.INTERNAL_API_TOKEN ?? null,
     authSecret: value.BETTER_AUTH_SECRET ?? DEV_AUTH_SECRET,
     authUrl: value.BETTER_AUTH_URL ?? `http://localhost:${value.PORT}`,
     ai: {

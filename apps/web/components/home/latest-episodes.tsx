@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { Artwork } from '@/components/media/artwork';
 import { PlayButton } from '@/components/episode/play-button';
 import { PagedRail } from '@/components/ui/paged-rail';
-import { api } from '@/lib/api';
+import { catalogue } from '@/lib/api';
 import { getTranslator } from '@/lib/i18n';
 
 /** How many shows to ask, and how many picks to keep. */
@@ -89,7 +89,7 @@ async function latestPerShow(podcasts: Podcast[]): Promise<Pick[]> {
   const sources = podcasts.slice(0, SOURCES);
 
   const results = await Promise.allSettled(
-    sources.map((podcast) => api.getEpisodes(podcast.id, { limit: 1 })),
+    sources.map((podcast) => catalogue.getEpisodes(podcast.id, { limit: 1 })),
   );
 
   const picks: Pick[] = [];

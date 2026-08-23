@@ -9,12 +9,14 @@
  * address otherwise. See `rateLimitIdentity` for why that order matters.
  */
 
+import { createHash, timingSafeEqual } from 'node:crypto';
+
 import { Ratelimit } from '@upstash/ratelimit';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Cache } from './cache.ts';
 import { AppError } from './errors.ts';
 
-export type RateLimitTier = 'default' | 'search' | 'expensive' | 'auth';
+export type RateLimitTier = 'default' | 'catalogue' | 'search' | 'expensive' | 'auth';
 
 /**
  * `search` is tighter because each miss costs an upstream call to PodcastIndex,
@@ -30,6 +32,13 @@ export type RateLimitTier = 'default' | 'search' | 'expensive' | 'auth';
  */
 const TIERS: Record<RateLimitTier, { tokens: number; window: `${number} ${'s' | 'm'}` }> = {
   default: { tokens: 120, window: '1 m' },
+  /**
+   * Public catalogue reads. Generous, because these are cheap, cacheable and
+   * the ordinary way the app is used: opening Home is seven of them, and a
+   * listener clicking through shows spends two per page. 300 leaves room for
+   * that and still refuses a scraper walking the catalogue.
+   */
+  catalogue: { tokens: 300, window: '1 m' },
   search: { tokens: 20, window: '1 m' },
   expensive: { tokens: 10, window: '1 m' },
   auth: { tokens: 10, window: '1 m' },
@@ -108,5 +117,52 @@ export function rateLimitIdentity(request: FastifyRequest): string {
 export function rateLimit(app: FastifyInstance, tier: RateLimitTier) {
   return async (request: FastifyRequest, _reply: FastifyReply): Promise<void> => {
     await app.rateLimiter.check(rateLimitIdentity(request), tier);
+  };
+}
+
+/**
+ * Whether a request is our own web app rendering a page, rather than a client.
+ *
+ * Compared in constant time. A plain `===` on a secret leaks its length and
+ * then its content to anyone who can time the response — impractical over the
+ * public internet, but the correct comparison costs one function call and
+ * removes the need to argue about how impractical.
+ *
+ * Both operands are hashed to a fixed width first, because `timingSafeEqual`
+ * throws on length mismatch — and a thrown exception on the *first* differing
+ * byte length would itself be the timing oracle the function exists to close.
+ */
+function isInternalCaller(request: FastifyRequest, token: string): boolean {
+  const presented = request.headers['x-cue-internal'];
+  if (typeof presented !== 'string') return false;
+
+  const a = createHash('sha256').update(presented).digest();
+  const b = createHash('sha256').update(token).digest();
+
+  return timingSafeEqual(a, b);
+}
+
+/**
+ * The guard for public catalogue reads.
+ *
+ * Two things separate this from `rateLimit`:
+ *
+ * It exempts our own server-side renderer, which would otherwise share a single
+ * IP-keyed budget across every page view in the world. See INTERNAL_API_TOKEN
+ * in config.ts for the arithmetic — the short version is that a limit tight
+ * enough to be worth having would take the front page down first.
+ *
+ * And it does nothing at all when no token is configured. That is deliberate
+ * and it is the safe direction: without a token this process cannot tell its
+ * own renderer from a stranger, and guessing wrong in the other direction
+ * fails the app closed for everyone. An unconfigured deployment therefore
+ * behaves exactly as it did before this existed.
+ */
+export function catalogueRateLimit(app: FastifyInstance, token: string | null) {
+  if (!token) return undefined;
+
+  return async (request: FastifyRequest, _reply: FastifyReply): Promise<void> => {
+    if (isInternalCaller(request, token)) return;
+    await app.rateLimiter.check(rateLimitIdentity(request), 'catalogue');
   };
 }

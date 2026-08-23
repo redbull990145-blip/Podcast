@@ -23,7 +23,7 @@ import { extractArtworkColor } from '../feed/artwork-color.ts';
 import { ingestFeed } from '../feed/ingest.ts';
 import { normalizeFeedUrl } from '../feed/url-guard.ts';
 import { badRequest, notFound, ok } from '../errors.ts';
-import { rateLimit } from '../rate-limit.ts';
+import { catalogueRateLimit, rateLimit } from '../rate-limit.ts';
 
 const SEARCH_CANDIDATES = 50;
 
@@ -252,6 +252,17 @@ function rankSearchResults(
 
 export function podcastRoutes(app: FastifyInstance): void {
   /**
+   * The guard on every public catalogue read below.
+   *
+   * Built once here rather than per route so all five share one decision about
+   * whether limiting is on at all — `catalogueRateLimit` returns undefined when
+   * no internal token is configured, and Fastify treats an undefined
+   * `preHandler` as absent, which is exactly the fail-open behaviour that case
+   * wants.
+   */
+  const catalogue = catalogueRateLimit(app, app.config.internalToken);
+
+  /**
    * Search. Hits PodcastIndex rather than our own table, because the catalog
    * is only what users have already added — searching it would mean an empty
    * app for the first person to look for anything.
@@ -362,7 +373,7 @@ export function podcastRoutes(app: FastifyInstance): void {
    * one that released this morning. Nulls sort last — a feed we have not read
    * yet has no claim on the top of the page.
    */
-  app.get('/podcasts', async (request) => {
+  app.get('/podcasts', { preHandler: catalogue }, async (request) => {
     const query = catalogueQuery.parse(request.query);
     const limit = clampLimit(query.limit);
 
@@ -431,7 +442,7 @@ export function podcastRoutes(app: FastifyInstance): void {
    * for them — a browse screen offering an empty shelf is worse than a shorter
    * one.
    */
-  app.get('/categories', async () => {
+  app.get('/categories', { preHandler: catalogue }, async () => {
     const rows = await app.db
       .select({
         slug: categories.slug,
@@ -448,7 +459,7 @@ export function podcastRoutes(app: FastifyInstance): void {
     return ok({ items: rows });
   });
 
-  app.get('/podcasts/:id', async (request) => {
+  app.get('/podcasts/:id', { preHandler: catalogue }, async (request) => {
     const { id } = uuidParam.parse(request.params);
 
     const [row] = await app.db.select().from(podcasts).where(eq(podcasts.id, id)).limit(1);
@@ -495,7 +506,7 @@ function hasPageParam(query: unknown): boolean {
   return typeof query === 'object' && query !== null && 'page' in query;
 }
 
-  app.get('/podcasts/:id/episodes', async (request) => {
+  app.get('/podcasts/:id/episodes', { preHandler: catalogue }, async (request) => {
     const { id } = uuidParam.parse(request.params);
     const mine = eq(episodes.podcastId, id);
     const newestFirst = [desc(episodes.publishedAt), desc(episodes.id)] as const;
@@ -566,7 +577,7 @@ function hasPageParam(query: unknown): boolean {
     });
   });
 
-  app.get('/episodes/:id', async (request) => {
+  app.get('/episodes/:id', { preHandler: catalogue }, async (request) => {
     const { id } = uuidParam.parse(request.params);
 
     const [row] = await app.db.select().from(episodes).where(eq(episodes.id, id)).limit(1);

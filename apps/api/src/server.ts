@@ -88,6 +88,12 @@ export async function buildServer(config: Config): Promise<FastifyInstance> {
   if (!config.ai.operatorKey) {
     app.log.warn('GROQ_API_KEY not set — AI features will require each user to add their own key');
   }
+  if (!config.internalToken) {
+    // Not fatal, and not a default worth flipping: catalogue limiting stays off
+    // until this process can tell our own renderer from a stranger. Said out
+    // loud because "off" and "on and working" look identical from outside.
+    app.log.warn('INTERNAL_API_TOKEN not set — catalogue rate limiting is disabled');
+  }
   if (!config.ai.encryptionSecret) {
     // Refusing to store keys is the correct behaviour, but silently offering a
     // Settings field that always fails is not — so this is said out loud.

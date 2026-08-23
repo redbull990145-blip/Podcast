@@ -5,12 +5,19 @@ import doQueue from '@opennextjs/cloudflare/overrides/queue/do-queue';
  * How this app's Next.js output is adapted to run on Cloudflare Workers.
  *
  * `incrementalCache` is deliberately not set here yet — see the R2 note in
- * wrangler.jsonc for why, and its cost is zero right now regardless: the
- * `revalidate` exports on the three ISR pages are already inert (open task on
- * the `no-store` default in apps/web/lib/api.ts), so there is nothing this
- * app currently relies on that an unconfigured cache would break. Without an
- * override the adapter falls back to an in-memory cache, which is fine for a
- * cache nothing is populating.
+ * wrangler.jsonc for why — but its cost is no longer zero, and two things this
+ * comment used to say were wrong.
+ *
+ * It said the app relied on nothing a missing cache would break. That was true
+ * while the three `revalidate` exports were inert; they have since been removed
+ * and replaced by the `catalogue` client in lib/api.ts, which requests
+ * `next: { revalidate: 300 }` on every public catalogue read. Those requests
+ * are live and are currently being thrown away.
+ *
+ * It also said the fallback is an in-memory cache. It is not: `defineCloudflareConfig`
+ * defaults `incrementalCache` to `"dummy"`, whose `get` and `set` both throw
+ * `IgnorableError` and store nothing at all. An in-memory cache would at least
+ * serve repeat requests within one isolate; this serves none.
  *
  * `queue` stays wired up regardless — it costs nothing to declare and there is
  * no reason to unwind it later. See wrangler.jsonc for the binding it maps to.

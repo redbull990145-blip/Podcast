@@ -8,10 +8,10 @@
  * tier that gates transcription and LLM calls.
  */
 
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from './config.ts';
-import { rateLimitIdentity } from './rate-limit.ts';
+import { catalogueRateLimit, rateLimitIdentity } from './rate-limit.ts';
 import { buildServer } from './server.ts';
 
 const BASE_ENV = {
@@ -110,5 +110,69 @@ describe('rateLimitIdentity', () => {
     expect(rateLimitIdentity(request({ user: { id: '10.0.0.1' }, ip: '203.0.113.1' }))).toBe(
       'u:10.0.0.1',
     );
+  });
+});
+
+/**
+ * The internal-caller bypass.
+ *
+ * Catalogue reads are limited per caller, and our own server components are not
+ * a caller in the sense that limit means: they run on a Cloudflare Worker, so
+ * every server-rendered page view in the world arrives from a handful of egress
+ * addresses and would share one IP-keyed budget. These cover the two ways that
+ * can go wrong — the bypass failing open to strangers, and the bypass failing
+ * closed on us.
+ */
+describe('catalogue rate limiting', () => {
+  const TOKEN = 'an-internal-token-long-enough';
+
+  it('does nothing when no token is configured', () => {
+    // Fail-open by design: a process that cannot tell its own renderer from a
+    // stranger must not guess, because guessing closed takes the app down.
+    expect(catalogueRateLimit({} as FastifyInstance, null)).toBeUndefined();
+  });
+
+  it('builds a guard when a token is configured', () => {
+    expect(catalogueRateLimit({} as FastifyInstance, TOKEN)).toBeTypeOf('function');
+  });
+
+  it('exempts a caller presenting the token, and bills everyone else', async () => {
+    const billed: string[] = [];
+    const app = {
+      rateLimiter: {
+        check: async (identity: string) => {
+          billed.push(identity);
+        },
+      },
+    } as unknown as FastifyInstance;
+
+    const guard = catalogueRateLimit(app, TOKEN)!;
+    const req = (headers: Record<string, string>) =>
+      ({ headers, ip: '198.51.100.7', user: null }) as unknown as FastifyRequest;
+
+    // Our renderer: not billed at all.
+    await guard(req({ 'x-cue-internal': TOKEN }), {} as FastifyReply);
+    expect(billed).toEqual([]);
+
+    // A stranger, including one guessing at the header: billed as an address.
+    await guard(req({}), {} as FastifyReply);
+    await guard(req({ 'x-cue-internal': 'wrong' }), {} as FastifyReply);
+    expect(billed).toEqual(['ip:198.51.100.7', 'ip:198.51.100.7']);
+  });
+
+  it('does not accept a token that merely shares a prefix', async () => {
+    // A length-only or prefix-only comparison would pass this.
+    const billed: string[] = [];
+    const app = {
+      rateLimiter: { check: async (id: string) => void billed.push(id) },
+    } as unknown as FastifyInstance;
+
+    const guard = catalogueRateLimit(app, TOKEN)!;
+    await guard(
+      { headers: { 'x-cue-internal': TOKEN.slice(0, -1) }, ip: '1.2.3.4', user: null } as unknown as FastifyRequest,
+      {} as FastifyReply,
+    );
+
+    expect(billed).toEqual(['ip:1.2.3.4']);
   });
 });

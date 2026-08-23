@@ -11,7 +11,7 @@ import {
 } from '@/components/home/latest-episodes';
 import { RecentlyPlayed } from '@/components/home/recently-played';
 import { Recommended } from '@/components/home/recommended';
-import { api, ApiClientError } from '@/lib/api';
+import { catalogue, ApiClientError } from '@/lib/api';
 import { getTranslator } from '@/lib/i18n';
 
 /**
@@ -21,8 +21,9 @@ import { getTranslator } from '@/lib/i18n';
  * a skeleton that resolves a moment later — the fastest loading state is the
  * one that never appears.
  *
- * Revalidated rather than rendered per request: podcast metadata changes when
- * a publisher edits it, which is rarely, so serving a cached page and
+ * The render itself is per-request — see the note above `HomePage` — but the
+ * catalogue read behind it is cached for five minutes. Podcast metadata changes
+ * when a publisher edits it, which is rarely, so reusing a recent response and
  * refreshing it in the background is both faster and cheaper than querying on
  * every visit.
  *
@@ -45,7 +46,20 @@ import { getTranslator } from '@/lib/i18n';
  * why the rule above Recently played is the only one on the page: it is where
  * Home stops offering and starts recording.
  */
-export const revalidate = 300;
+/*
+  No `export const revalidate` here, deliberately.
+
+  These pages carried one — 300 seconds — and it never took effect. Route-level
+  revalidation needs a route Next can render without a request, and every route
+  in this app is dynamic because app/layout.tsx reads the CSP nonce off a
+  request header (and `resolveLocale()` reads cookies). Both are per-request by
+  definition, so the segment config was inert and the page re-fetched the
+  catalogue on every single visit.
+
+  The 300 seconds now lives on the `catalogue` client in lib/api.ts, which
+  caches at the fetch layer instead. That layer is not affected by the route
+  being dynamic, so the caching the number always described actually happens.
+*/
 
 export default async function HomePage() {
   const t = await getTranslator();
@@ -57,7 +71,7 @@ export default async function HomePage() {
     // Feeds two sections now that the catalogue grid is gone: Latest episodes
     // reads a newest episode per show, and the recommendation fallback takes
     // the front of it for anyone the ranker cannot speak to yet.
-    const page = await api.getPodcasts({ limit: 18 });
+    const page = await catalogue.getPodcasts({ limit: 18 });
     podcasts = page.items;
   } catch (error) {
     // The API being down is a state to render, not a crash. A blank screen

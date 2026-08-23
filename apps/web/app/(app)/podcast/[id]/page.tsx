@@ -12,9 +12,22 @@ import { SubscribeButton } from '@/components/podcast/subscribe-button';
 import { EpisodeRow } from '@/components/episode/episode-row';
 import { EpisodePager } from '@/components/podcast/episode-pager';
 import { AddPodcastToPlaylist } from '@/components/playlist/add-podcast-to-playlist';
-import { api } from '@/lib/api';
+import { catalogue } from '@/lib/api';
 
-export const revalidate = 300;
+/*
+  No `export const revalidate` here, deliberately.
+
+  These pages carried one — 300 seconds — and it never took effect. Route-level
+  revalidation needs a route Next can render without a request, and every route
+  in this app is dynamic because app/layout.tsx reads the CSP nonce off a
+  request header (and `resolveLocale()` reads cookies). Both are per-request by
+  definition, so the segment config was inert and the page re-fetched the
+  catalogue on every single visit.
+
+  The 300 seconds now lives on the `catalogue` client in lib/api.ts, which
+  caches at the fetch layer instead. That layer is not affected by the route
+  being dynamic, so the caching the number always described actually happens.
+*/
 
 /**
  * Ten to a page.
@@ -47,7 +60,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { id } = await params;
 
   try {
-    const { podcast } = await api.getPodcast(id);
+    const { podcast } = await catalogue.getPodcast(id);
     return {
       title: podcast.title,
       description: podcast.description?.slice(0, 160) ?? undefined,
@@ -66,9 +79,9 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 export default async function PodcastPage({ params, searchParams }: Params) {
   const { id } = await params;
 
-  let data: Awaited<ReturnType<typeof api.getPodcast>>;
+  let data: Awaited<ReturnType<typeof catalogue.getPodcast>>;
   try {
-    data = await api.getPodcast(id);
+    data = await catalogue.getPodcast(id);
   } catch (error) {
     // A missing show is a 404, not a 500 — it renders the real not-found page
     // and returns the right status to crawlers.
@@ -326,7 +339,7 @@ async function EpisodeArchive({
   if (requested !== undefined && (!valid || parsed === 1)) redirect(basePath as Route);
 
   const page = valid ? parsed : 1;
-  const archive = await api.getEpisodePage(podcast.id, { page, limit: EPISODES_PER_PAGE });
+  const archive = await catalogue.getEpisodePage(podcast.id, { page, limit: EPISODES_PER_PAGE });
 
   // Past the end. The API answers with the last real page, which is what tells
   // us where this URL should have pointed.
