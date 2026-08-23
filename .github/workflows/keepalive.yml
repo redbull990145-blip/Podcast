@@ -28,10 +28,25 @@ jobs:
         env:
           API_URL: ${{ secrets.API_URL }}
         run: |
+          # Fails the run rather than skipping it.
+          #
+          # This used to `exit 0` with a note, which meant a keepalive with no
+          # `API_URL` secret reported success on every one of its runs while
+          # doing nothing at all — the one failure mode you cannot notice,
+          # because the workflow's whole job is to be invisible when it works.
+          # Measured 2026-08-23: the API answered its first request in 52.9s,
+          # a cold start this workflow exists to prevent, with a green tick on
+          # every scheduled run behind it.
+          #
+          # A red X on a repository you own is the cheapest possible alarm. If
+          # you are reading this in a fork and do not want the noise, delete
+          # the workflow rather than restore the silent pass.
           if [ -z "$API_URL" ]; then
-            echo "API_URL secret is not set — skipping."
-            echo "Without it, a free Supabase project will pause after 7 idle days."
-            exit 0
+            echo "::error::API_URL secret is not set — this keepalive is doing nothing."
+            echo "Set it to the API's base URL (no trailing slash), e.g. https://podcast-68rl.onrender.com"
+            echo "Without it: Render sleeps after ~15 idle minutes (~50s cold start for the"
+            echo "next visitor), and a free Supabase project pauses after 7 idle days."
+            exit 1
           fi
 
           # /health/ready runs a real query, which is what counts as activity.
