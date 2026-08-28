@@ -756,6 +756,26 @@ export function createClient(options: ClientOptions) {
       return request(`/episodes/${episodeId}/transcribe`, { method: 'POST' });
     },
 
+    /**
+     * Re-time a publisher transcript onto the audio being served.
+     *
+     * Usually answers with the outcome, because sampling a few seconds of audio
+     * in three places takes about half a minute. `outcome: null` means it is
+     * still working and the answer will appear on the transcript itself — which
+     * is where the corrected cues live in either case, so a caller that refetches
+     * the transcript afterwards does not need to distinguish the two.
+     */
+    alignTranscript(
+      episodeId: string,
+    ): Promise<{
+      started: boolean;
+      outcome: { status: string; detail?: string } | null;
+      detail?: string;
+      quota: AiQuota;
+    }> {
+      return request(`/episodes/${episodeId}/align`, { method: 'POST' });
+    },
+
     generateBrief(episodeId: string, params: { language?: string } = {}): Promise<AiGeneration> {
       return request(`/episodes/${episodeId}/ai/brief`, {
         method: 'POST',

@@ -68,6 +68,38 @@ Scott Tolinski: That is wild.
     expect(segment).toMatchObject({ speaker: 'Scott Tolinski', text: 'That is wild.' });
   });
 
+  it('lifts a numbered `Speaker N:` label, which is what diarisers emit', () => {
+    const segments = parseTranscript(`WEBVTT
+
+00:00:04.960 --> 00:00:06.200
+Speaker 1: Hey, this is Steven Furtick.
+
+00:00:06.240 --> 00:00:09.320
+Speaker 2: I'm the pastor of Elevation Church.
+`);
+
+    expect(segments[0]).toMatchObject({
+      speaker: 'Speaker 1',
+      text: 'Hey, this is Steven Furtick.',
+    });
+    expect(segments[1]).toMatchObject({
+      speaker: 'Speaker 2',
+      text: "I'm the pastor of Elevation Church.",
+    });
+  });
+
+  it('still refuses a lowercase run of words before a colon', () => {
+    // The numeric alternation must not become a general one: this is ordinary
+    // speech, and reading it as a speaker would delete the first four words.
+    const [segment] = parseTranscript(`WEBVTT
+
+00:00:00.000 --> 00:00:02.000
+but here's the thing: we were wrong
+`);
+    expect(segment!.speaker).toBeNull();
+    expect(segment!.text).toBe("but here's the thing: we were wrong");
+  });
+
   it('does not mistake mid-sentence punctuation for a speaker', () => {
     const [segment] = parseTranscript(`WEBVTT
 

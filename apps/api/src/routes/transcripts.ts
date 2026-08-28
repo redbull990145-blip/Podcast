@@ -14,9 +14,9 @@
  */
 
 import { episodes, transcripts } from '@cue/db';
-import type { Transcript } from '@cue/types';
+import type { Transcript, TranscriptAlignment } from '@cue/types';
 import { uuidParam } from '@cue/validation';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { fetchFeed } from '../feed/fetch.ts';
 import {
@@ -25,6 +25,8 @@ import {
   parseHtmlTranscript,
   parseTranscript,
 } from '../feed/transcript.ts';
+import { insertedAudio, readAudioShape } from '../ai/align/detect.ts';
+import { applyOffsetMap } from '../ai/align/map.ts';
 import { notFound, ok } from '../errors.ts';
 import { rateLimit } from '../rate-limit.ts';
 
@@ -36,6 +38,53 @@ import { rateLimit } from '../rate-limit.ts';
  * reader — and the answer, an empty state, is the same every time.
  */
 const FAILURE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How long the audio measurement may hold up a transcript request.
+ *
+ * The download path this borrows from allows ten minutes, which is right for
+ * pulling three hundred megabytes and catastrophic here: this runs inside a
+ * request a reader is waiting on, and the three reads it makes are a few hundred
+ * bytes each. Anything past a few seconds is a CDN that is not going to answer,
+ * and the correct outcome then is an unmeasured transcript rather than a request
+ * that hangs until a proxy somewhere gives up on it.
+ *
+ * One budget across all three reads, not one each — the question is how long the
+ * reader waits, not how long any single request took.
+ */
+const MEASURE_TIMEOUT_MS = 8000;
+
+/**
+ * How long the response will actually wait for that measurement.
+ *
+ * The enclosure URL is a redirect walk — `podtrac.com` to `traffic.omny.fm` to
+ * `tritondigital.com` on the show this was built for — and each hop runs ad
+ * decisioning rather than serving a file, so the first ranged read measured 5.1s
+ * against 0.5s for the transcript itself. Blocking on that would make the reader
+ * wait six seconds for the thing they asked for in order to populate a label
+ * about it.
+ *
+ * So the measurement gets a short window to be useful *now*, and if it misses it
+ * the request goes out without it and the row is updated when it lands. The
+ * reader gets their transcript immediately; the drift warning appears on their
+ * next visit, which is soon enough for something they will not have noticed yet.
+ */
+const MEASURE_SETTLE_MS = 2500;
+
+/**
+ * The generation of this file's parsing and measurement.
+ *
+ * Bump it whenever a change here would produce a different row from the same
+ * publisher file, and cached rows below it are re-derived once on next read.
+ * Without this a parser fix reaches only episodes nobody had opened yet, which
+ * is the reverse of what is wanted — the popular ones are exactly the ones
+ * already cached.
+ *
+ * History:
+ *   1 — lift `Speaker N:` labels out of the caption text, and record what the
+ *       cues were timed against so drift can be detected at all.
+ */
+const TRANSCRIPT_REVISION = 1;
 
 export function transcriptRoutes(app: FastifyInstance): void {
   app.get(
@@ -58,9 +107,21 @@ export function transcriptRoutes(app: FastifyInstance): void {
         .where(eq(transcripts.episodeId, id))
         .limit(1);
 
+      /**
+       * Two reasons to go back to the publisher.
+       *
+       * The revision check is deliberately limited to `feed` rows. A generated
+       * transcript cost minutes of Whisper time and is not re-derivable from the
+       * publisher at all — re-fetching one would replace real work with an empty
+       * result, or with the publisher's own transcript, which is not the same
+       * thing and is not what anyone asked for.
+       */
+      const outdated = cached?.source === 'feed' && cached.revision < TRANSCRIPT_REVISION;
+
       const stale =
-        cached?.status === 'failed' &&
-        Date.now() - cached.fetchedAt.getTime() > FAILURE_TTL_MS;
+        outdated ||
+        (cached?.status === 'failed' &&
+          Date.now() - cached.fetchedAt.getTime() > FAILURE_TTL_MS);
 
       if (cached && !stale) {
         return ok({ transcript: toWire(cached), detail: cached.detail });
@@ -70,7 +131,40 @@ export function transcriptRoutes(app: FastifyInstance): void {
       // empty state says something different for each.
       if (!episode.transcriptUrl) return ok({ transcript: null, detail: null });
 
+      /**
+       * Fetch the transcript and measure the audio at the same time.
+       *
+       * They are independent — one reads the publisher's caption file, the other
+       * reads three ranges of the enclosure — and both are round trips to CDNs
+       * reached through a redirect walk. Run in sequence they cost the reader
+       * the sum; run together they cost the slower of the two. Measured on
+       * Elevation, sequential was 8.2s.
+       *
+       * The measurement is started before it is known whether the cues are timed,
+       * which is the price of overlapping them, and a cheap one: an untimed HTML
+       * transcript wastes two ranged reads that are thrown away below.
+       */
+      const startedAt = Date.now();
+      const measurement = measureAudio(episode);
       const outcome = await fetchFeed(episode.transcriptUrl);
+
+      /**
+       * Whatever the measurement has managed by the deadline.
+       *
+       * The window is counted from when the measurement *started*, not from when
+       * the transcript fetch finished, because the budget being spent is the
+       * reader's patience and the two ran concurrently. Waiting the full window
+       * again after a two-second fetch would make the response take four and a
+       * half seconds to deliver nothing extra — measured, before this was a
+       * deadline rather than a duration.
+       *
+       * Null covers both "it failed" and "it is still going"; the row is written
+       * the same way for both.
+       */
+      const measured = await settled(
+        measurement,
+        Math.max(0, MEASURE_SETTLE_MS - (Date.now() - startedAt)),
+      );
 
       if (outcome.status !== 'ok') {
         const detail =
@@ -101,10 +195,116 @@ export function transcriptRoutes(app: FastifyInstance): void {
         return ok({ transcript: toWire(row), detail });
       }
 
-      const row = await store(app, id, segments, 'ready', null, null);
+      /**
+       * Only cues that claim a timeline get the measurement recorded. An HTML
+       * transcript has no timings to be wrong, and a column saying what its
+       * non-existent timings were measured against would be noise.
+       */
+      const row = await store(
+        app,
+        id,
+        segments,
+        'ready',
+        null,
+        null,
+        isTimed(segments) ? measured : null,
+      );
+
+      /**
+       * Finish the measurement after the reader has gone.
+       *
+       * Deliberately not awaited, and deliberately guarded on `revision` in the
+       * update below: by the time this resolves the row may have been replaced by
+       * a generated transcript or re-derived by a newer parser, and a late write
+       * must not overwrite either.
+       */
+      if (!measured && isTimed(segments)) {
+        void measurement
+          .then((late) => (late ? recordMeasurement(app, id, late) : undefined))
+          .catch(() => undefined);
+      }
+
       return ok({ transcript: toWire(row), detail: null });
     },
   );
+}
+
+/**
+ * What the cues were timed against, or null if it could not be established.
+ *
+ * Deliberately fail-soft, and deliberately not awaited into anything that can
+ * fail the request. This is a measurement that makes a *warning* possible; the
+ * transcript is perfectly readable without it, and a publisher whose CDN refuses
+ * ranged requests must not therefore lose their transcript. Every unhappy path
+ * here — no enclosure length, variable bitrate, a CDN that will not report a
+ * size, an outright network failure — returns null and is treated downstream as
+ * "not measured", which is already a state the column has to represent.
+ */
+async function measureAudio(episode: {
+  audioUrl: string;
+  audioLengthBytes: number | null;
+}): Promise<{ audioDurationMs: number; audioBytes: number } | null> {
+  try {
+    const shape = await readAudioShape(episode.audioUrl, {
+      signal: AbortSignal.timeout(MEASURE_TIMEOUT_MS),
+    });
+    if (shape.status !== 'ok') return null;
+
+    const inserted = insertedAudio(shape, episode.audioLengthBytes);
+    if (!inserted) return null;
+
+    return {
+      // The master's length, not the served copy's — the column means "the audio
+      // these cues describe", and the entire point is that the two differ.
+      audioDurationMs: inserted.declaredDurationMs,
+      audioBytes: episode.audioLengthBytes!,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `promise`, if it resolves within `ms`; null if it is still running.
+ *
+ * The promise is not cancelled — the caller still holds it and wants it to
+ * finish. This only decides how long to stand there watching.
+ */
+async function settled<T>(promise: Promise<T | null>, ms: number): Promise<T | null> {
+  let timer: NodeJS.Timeout | undefined;
+
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+    // Do not hold the process open for a label. `unref` is the difference
+    // between a fast shutdown and one that waits out every pending timer.
+    timer.unref?.();
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Write a measurement that arrived after its request had already been answered. */
+async function recordMeasurement(
+  app: FastifyInstance,
+  episodeId: string,
+  measured: { audioDurationMs: number; audioBytes: number },
+): Promise<void> {
+  await app.db
+    .update(transcripts)
+    .set(measured)
+    .where(
+      and(
+        eq(transcripts.episodeId, episodeId),
+        // Only the row this measurement was taken for. A generated transcript
+        // that landed in the meantime describes different audio entirely.
+        eq(transcripts.source, 'feed'),
+        eq(transcripts.revision, TRANSCRIPT_REVISION),
+      ),
+    );
 }
 
 async function store(
@@ -114,6 +314,7 @@ async function store(
   status: 'ready' | 'failed',
   detail: string | null,
   language: string | null,
+  measured: { audioDurationMs: number; audioBytes: number } | null = null,
 ) {
   const values = {
     episodeId,
@@ -122,6 +323,9 @@ async function store(
     detail,
     language: language ?? 'en',
     segments,
+    audioDurationMs: measured?.audioDurationMs ?? null,
+    audioBytes: measured?.audioBytes ?? null,
+    revision: TRANSCRIPT_REVISION,
     fetchedAt: new Date(),
   };
 
@@ -136,7 +340,7 @@ async function store(
   return row!;
 }
 
-function toWire(row: {
+export function toWire(row: {
   episodeId: string;
   source: string;
   status: string;
@@ -147,6 +351,7 @@ function toWire(row: {
    * keeps "we did not measure" and "we measured zero" distinct.
    */
   audioDurationMs?: number | null;
+  alignment?: TranscriptAlignment | null;
   segments: Transcript['segments'];
 }): Transcript {
   /**
@@ -164,19 +369,42 @@ function toWire(row: {
    * Indices are reassigned to match, because the client uses them both as React
    * keys and to find a line in the DOM.
    */
-  const segments = [...row.segments]
+  const ordered = [...row.segments]
     .sort((a, b) => a.startMs - b.startMs)
     .map((segment, index) => ({ ...segment, index }));
+
+  /**
+   * Apply the correction here rather than at write time.
+   *
+   * `segments` in the database stays exactly as the publisher sent it, so an
+   * alignment that turns out to be wrong is one column to clear rather than a
+   * re-fetch, and a better one can replace it without touching the cues. The
+   * cost is an O(n) walk per read over an array that was being copied and sorted
+   * on this path anyway.
+   *
+   * Re-sorted *after* mapping as well as before. A step boundary falling inside a
+   * cue stretches that cue rather than moving it, so ordering is preserved in
+   * practice — but `activeSegmentIndex` is a binary search, and over an unsorted
+   * array it does not fail at the bad element, it returns wrong answers across a
+   * whole region of the episode. Cheap insurance against a map nobody predicted.
+   */
+  const aligned = row.alignment
+    ? applyOffsetMap(ordered, row.alignment)
+        .sort((a, b) => a.startMs - b.startMs)
+        .map((segment, index) => ({ ...segment, index }))
+    : ordered;
 
   return {
     episodeId: row.episodeId,
     source: row.source as Transcript['source'],
     status: row.status as Transcript['status'],
     language: row.language,
-    timed: isTimed(segments),
+    timed: isTimed(aligned),
     // What the cues were timed against, so the player can notice it is playing
     // a different cut — see `Transcript.audioDurationMs`.
     audioDurationMs: row.audioDurationMs ?? null,
-    segments,
+    aligned: Boolean(row.alignment),
+    alignedAgainstDurationMs: row.alignment?.audioDurationMs ?? null,
+    segments: aligned,
   };
 }

@@ -352,8 +352,13 @@ export const es: Catalog = {
   'captions.syncEarlier': 'Mostrar los subtítulos antes',
   'captions.syncLater': 'Mostrar los subtítulos después',
   'captions.syncReset': 'Restablecer',
+  'captions.fix': 'Corregir automáticamente',
+  'captions.fixing': 'Buscando los anuncios…',
+  'captions.fixed': 'Ajustado a esta versión del audio.',
+  'captions.fixFailed': 'No se pudo averiguar dónde están los anuncios. El ajuste manual sigue disponible.',
+
   'captions.differentCut':
-    'Este episodio se transcribió de una copia con otros anuncios, así que los tiempos se desvían. Ajústalos.',
+    'Estos tiempos se hicieron sobre una copia de este episodio con otros anuncios, así que se desvían. Ajústalos.',
 
   'transcript.title': 'Transcripción',
   'transcript.read': 'Leer la transcripción',

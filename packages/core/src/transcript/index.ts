@@ -1,3 +1,6 @@
+export { canAlign, shouldOfferAlignment } from './alignment.ts';
+export type { AlignableTranscript } from './alignment.ts';
+
 export {
   activeSegmentIndex,
   searchSegments,

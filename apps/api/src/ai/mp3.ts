@@ -42,6 +42,18 @@ export type Mp3Frame = {
   offset: number;
   length: number;
   durationMs: number;
+  /**
+   * The declared bitrate and sample rate, carried rather than re-derivable.
+   *
+   * They cannot be recovered from `length` and `durationMs` afterwards, which is
+   * the reason they are here. MPEG-1 at 44.1kHz and MPEG-2 at 22.05kHz produce
+   * *identical* frame durations — 1152/44100 and 576/22050 are both 26.122ms —
+   * so a caller working backwards from duration cannot tell which version it is
+   * holding, and picks the wrong samples-per-frame half the time. Reading it off
+   * the header, where it is unambiguous, is the only correct answer.
+   */
+  kbps: number;
+  sampleRate: number;
 };
 
 /**
@@ -89,7 +101,7 @@ export function readFrameHeader(bytes: Uint8Array, offset: number): Mp3Frame | n
   // Shorter than its own header means the arithmetic met a corrupt byte.
   if (length < 4) return null;
 
-  return { offset, length, durationMs: (samplesPerFrame / sampleRate) * 1000 };
+  return { offset, length, durationMs: (samplesPerFrame / sampleRate) * 1000, kbps, sampleRate };
 }
 
 /**
@@ -101,7 +113,29 @@ export function readFrameHeader(bytes: Uint8Array, offset: number): Mp3Frame | n
  * hunting for the first frame inside it.
  */
 export function audioStart(bytes: Uint8Array): number {
-  if (bytes.length < 10) return 0;
+  const end = tagEndFromHeader(bytes);
+  if (end === null) return 0;
+  return Math.min(bytes.length, end);
+}
+
+/**
+ * Where the ID3v2 tag ends, according to its own header, ignoring how much of
+ * the file is actually in hand.
+ *
+ * The one piece of this every caller needs and each was computing itself. It is
+ * separate from `audioStart` and `resolveTagEnd` because those two answer
+ * different questions about the same number — one clamps to the buffer, the
+ * other refuses until the buffer reaches it — and a third caller wants it raw:
+ * `detect.ts` reads exactly ten bytes over the network and needs to know where
+ * audio begins in a file it has not downloaded. Podcast tags run to hundreds of
+ * kilobytes of cover art, so "fetch enough to contain it" is not an option
+ * there.
+ *
+ * Returns 0 when there is no tag, and null only when fewer than ten bytes were
+ * given — too little to tell the two apart.
+ */
+export function tagEndFromHeader(bytes: Uint8Array): number | null {
+  if (bytes.length < 10) return null;
   if (bytes[0] !== 0x49 || bytes[1] !== 0x44 || bytes[2] !== 0x33) return 0; // 'ID3'
 
   /**
@@ -117,7 +151,7 @@ export function audioStart(bytes: Uint8Array): number {
 
   const footer = (bytes[5]! & 0x10) !== 0 ? 10 : 0;
 
-  return Math.min(bytes.length, 10 + size + footer);
+  return 10 + size + footer;
 }
 
 /**
@@ -235,18 +269,8 @@ export function durationMs(bytes: Uint8Array): number {
  * to wait for more and ask again, not to guess.
  */
 export function resolveTagEnd(bytes: Uint8Array): number | null {
-  if (bytes.length < 10) return null;
-  if (bytes[0] !== 0x49 || bytes[1] !== 0x44 || bytes[2] !== 0x33) return 0; // 'ID3'
-
-  const size =
-    ((bytes[6]! & 0x7f) << 21) |
-    ((bytes[7]! & 0x7f) << 14) |
-    ((bytes[8]! & 0x7f) << 7) |
-    (bytes[9]! & 0x7f);
-
-  const footer = (bytes[5]! & 0x10) !== 0 ? 10 : 0;
-  const end = 10 + size + footer;
-
+  const end = tagEndFromHeader(bytes);
+  if (end === null) return null;
   return end <= bytes.length ? end : null;
 }
 

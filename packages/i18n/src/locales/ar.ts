@@ -358,8 +358,13 @@ export const ar: Catalog = {
   'captions.syncEarlier': 'إظهار النص مبكرًا',
   'captions.syncLater': 'إظهار النص متأخرًا',
   'captions.syncReset': 'إعادة الضبط',
+  'captions.fix': 'إصلاح تلقائي',
+  'captions.fixing': 'جارٍ البحث عن الإعلانات…',
+  'captions.fixed': 'جرى ضبطها على هذه النسخة من الصوت.',
+  'captions.fixFailed': 'تعذّر تحديد مواضع الإعلانات. الضبط اليدوي ما زال متاحًا.',
+
   'captions.differentCut':
-    'فُرِّغت هذه الحلقة من نسخة بإعلانات مختلفة، لذا تنحرف التوقيتات. اضبطها يدويًا.',
+    'ضُبطت هذه التوقيتات على نسخة من الحلقة بإعلانات مختلفة، لذا تنحرف. اضبطها يدويًا.',
 
   'transcript.title': 'النص',
   'transcript.read': 'اقرأ النص',

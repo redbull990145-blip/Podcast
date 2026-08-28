@@ -248,11 +248,58 @@ export type Transcript = {
    * actually playing and offer to correct the difference.
    *
    * Null when nothing was measured: transcripts written before this was
-   * recorded, and publisher-supplied ones, whose audio we never fetch. Null
-   * means "unknown", never "they match".
+   * recorded, audio that is not constant-bitrate MP3, and feeds that declare no
+   * enclosure length. Null means "unknown", never "they match".
    */
   audioDurationMs: number | null;
+  /**
+   * Whether the timings below have already been corrected onto the served audio.
+   *
+   * When true the cues are no longer the publisher's own numbers: samples of the
+   * real file were located in the transcript and every cue shifted onto the
+   * timeline a listener actually hears. The manual nudge stays available, because
+   * the correction was derived from *this server's* copy and ad stitching is per
+   * request — but it is a nudge over a second or two rather than over the nine
+   * that were there before.
+   */
+  aligned: boolean;
+  /**
+   * The length of the copy that correction was measured against, in ms.
+   *
+   * Carried so the player can tell whether it is playing that same copy. When
+   * its own duration disagrees with this, the alignment was computed from a
+   * different ad load and some residual drift is expected — which is exactly
+   * when the nudge is worth offering. Null when nothing has been aligned.
+   */
+  alignedAgainstDurationMs: number | null;
   segments: TranscriptSegment[];
+};
+
+/** One tread of a correction: from `fromTranscriptMs` onward, add `offsetMs`. */
+export type TranscriptOffsetStep = {
+  fromTranscriptMs: number;
+  offsetMs: number;
+  /** The window the insertion is known to lie within, in publisher time. */
+  bracketMs: [number, number];
+};
+
+/**
+ * A stored correction from publisher time onto served-audio time.
+ *
+ * Kept beside the cues rather than baked into them, so the publisher's own
+ * numbers survive: a correction that turns out to be wrong can be dropped
+ * without re-fetching anything, and a better one can replace it.
+ */
+export type TranscriptAlignment = {
+  steps: TranscriptOffsetStep[];
+  anchors: { audioMs: number; transcriptMs: number; similarity: number }[];
+  /** Mean match quality of the samples it was fitted to, 0..1. */
+  confidence: number;
+  /** How many audio samples were transcribed to reach it. */
+  probes: number;
+  /** Duration of the copy it was measured against. */
+  audioDurationMs: number;
+  at: string;
 };
 
 export type Chapter = {

@@ -18,6 +18,7 @@
  * which is a different migration than the one avoided here.
  */
 
+import type { TranscriptAlignment } from '@cue/types';
 import { sql } from 'drizzle-orm';
 import { index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { episodes } from './catalog.ts';
@@ -91,9 +92,21 @@ export const transcripts = pgTable(
      * derived from the last cue either, which undershoots by however much
      * trailing music the episode ends on.
      *
-     * Null for transcripts written before this existed, and for publisher-supplied
-     * ones — we never fetch their audio, so we have measured nothing and must
-     * not imply otherwise.
+     * **Publisher transcripts fill this in too, by a different route.** We never
+     * fetch their audio and still do not, but we no longer have to: the feed's
+     * own `<enclosure length>` describes the master — publishers write it once
+     * at publication and no ad server revises it on the way past — and an MP3's
+     * first frame header says how many bytes it spends per second. Dividing one
+     * by the other gives the master's playing time for three ranged reads of a
+     * few hundred bytes, without downloading the episode. On the measured
+     * Elevation episode that arrives at 3,008,274ms against an
+     * `<itunes:duration>` of 3008s, which is the arithmetic agreeing with the
+     * publisher to a quarter of a second. See `ai/align/detect.ts`.
+     *
+     * Null for transcripts written before this existed, for audio that is not
+     * constant-bitrate MP3 (where bytes and seconds are not proportional and any
+     * figure here would be invented), and for feeds that declare no enclosure
+     * length.
      */
     audioDurationMs: integer('audio_duration_ms'),
 
@@ -104,8 +117,50 @@ export const transcripts = pgTable(
      * length are not the same audio. Bytes are the cheaper and stricter check,
      * and together the pair is a serviceable fingerprint for "is this the file
      * we transcribed" without storing the file — which this project does not do.
+     *
+     * Both halves describe the *same* file, which is worth stating because for a
+     * publisher transcript that file is the master and not the copy anyone was
+     * served. Storing the served size here instead would make the pair describe
+     * two different files and quietly break the fingerprint it exists to be.
      */
     audioBytes: integer('audio_bytes'),
+
+    /**
+     * The correction from the publisher's timeline onto the served audio.
+     *
+     * Stored *beside* `segments` rather than applied to them, and that is the
+     * whole design. The publisher's numbers are the only thing that cannot be
+     * recovered — the audio can be re-measured and re-sampled at any time, but a
+     * cue overwritten with a bad correction is gone unless the whole file is
+     * fetched again. Keeping the two apart means an alignment can be replaced,
+     * improved, or dropped entirely, and the read path decides whether to apply
+     * it. See `ai/align/map.ts` for the shape and `ai/align/run.ts` for how it is
+     * arrived at.
+     *
+     * Null for everything not yet aligned, which is the overwhelming majority:
+     * most episodes are in sync, and the ones that are not are only corrected
+     * when somebody asks.
+     */
+    alignment: jsonb('alignment').$type<TranscriptAlignment>(),
+
+    /**
+     * Which generation of the parsing and measurement code produced this row.
+     *
+     * Publisher transcripts are fetched once and cached forever — the whole point
+     * of the table — which means a fix to the parser reaches nobody who already
+     * has a row. That is not hypothetical: rows written before the speaker-label
+     * fix carry `Speaker 1:` inside the caption text and no measured duration, and
+     * nothing in the read path would ever have looked at them again.
+     *
+     * So the reader compares this against the constant in `routes/transcripts.ts`
+     * and re-derives anything older, once, on next access. Bump that constant in
+     * the same commit as any change to how a publisher transcript is parsed or
+     * measured.
+     *
+     * Only meaningful for `source: 'feed'`. A generated transcript cost minutes of
+     * Whisper time and must never be thrown away because a *parser* moved on.
+     */
+    revision: integer('revision').notNull().default(0),
 
     fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
   },

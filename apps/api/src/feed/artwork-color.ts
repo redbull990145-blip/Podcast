@@ -10,10 +10,20 @@
  * every image with a bright subject on a dark ground averages to grey-brown.
  * What we want is the colour a person would *name* if asked what colour the
  * cover is, which is the most chromatic region that occupies real area.
+ *
+ * Three stages, each doing the thing it is good at. Sharp decodes and samples.
+ * node-vibrant's median-cut quantiser reduces those samples to a handful of
+ * colours that genuinely exist in the image, each with how much of it it
+ * covers. Then `pickAccent` — the part that is ours, and the part with an
+ * opinion in it — decides which of them is *the* colour, scored in OKLab so
+ * the ranking follows how the eye weighs a cover rather than how sRGB
+ * arithmetic happens to fall out.
  */
 
-import sharp from 'sharp';
+import { hexToRgb, rgbToHex, rgbToOklab } from '@cue/design';
+import type { Palette, Swatch } from '@vibrant/color';
 import { checkUrl } from './url-guard.ts';
+import { SharpImage, Vibrant } from './vibrant.ts';
 
 /** Artwork is small; anything larger is not a cover. */
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -23,29 +33,14 @@ const TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 5;
 const USER_AGENT = 'Cue/0.1';
 
-/** Sample grid. 16×16 is enough to find a dominant region and costs nothing. */
-const GRID = 16;
-
-type Bucket = { r: number; g: number; b: number; count: number; score: number };
-
 /**
- * Score a pixel by how much it would read as "the colour of this cover".
+ * How many colours median-cut is allowed to resolve the cover into.
  *
- * Saturation dominates, because a cover that is 70% near-black and 30% orange
- * is an orange cover to everyone who looks at it. Extremes are pushed down:
- * near-white and near-black carry no hue worth keeping.
+ * Vibrant's own default. Fewer, and a cover's two related reds collapse into
+ * one averaged red; many more, and the populations get thin enough that the
+ * area term in the score stops meaning much.
  */
-function vibrance(r: number, g: number, b: number): number {
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const saturation = max === 0 ? 0 : (max - min) / max;
-  const lightness = max / 255;
-
-  // Peaks around mid-lightness and falls off at both ends.
-  const lightnessWeight = 1 - Math.abs(lightness - 0.55) * 1.6;
-
-  return saturation * Math.max(0, lightnessWeight);
-}
+const COLOR_COUNT = 64;
 
 export type ExtractOptions = { fetchImpl?: typeof fetch };
 
@@ -66,6 +61,9 @@ export type ExtractOptions = { fetchImpl?: typeof fetch };
  * by the same server we are declining to trust: a tiny declared length in front
  * of a multi-gigabyte body would otherwise exhaust the container's memory before
  * the old post-hoc size check ever ran.
+ *
+ * Vibrant is handed the bytes this returns and never the URL. Its own loader
+ * would fetch an `http://` source quite happily, and knows none of the above.
  */
 async function fetchArtwork(url: string, doFetch: typeof fetch): Promise<Buffer | null> {
   let currentUrl = url;
@@ -149,6 +147,105 @@ async function readCappedImage(response: Response): Promise<Buffer | null> {
   return merged;
 }
 
+// ------------------------------------------------------ picking a swatch ---
+
+/**
+ * The lightness band where a swatch's hue is worth trusting.
+ *
+ * Not a band the tint has to *land* in — `deriveTint` re-fits lightness to
+ * whatever surface the colour is going on, so a dark swatch gets lifted and a
+ * pale one dropped regardless. This is about stability: hue read off a
+ * near-black or a blown-out swatch sits a couple of quantisation steps away
+ * from being a different hue entirely, and a page whose colour changes because
+ * a publisher re-encoded their cover looks accidental.
+ */
+const PEAK_LOW = 0.5;
+const PEAK_HIGH = 0.7;
+const FALLOFF = 1.2;
+const FALLOFF_FLOOR = 0.2;
+
+/**
+ * Below this, a swatch is not a colour — it is a shade of grey the cover
+ * happens to contain, and it is not eligible to be the answer.
+ *
+ * Deliberately just above `refit`'s own 0.02 grey cutoff in `@cue/design`:
+ * anything under that is flattened to neutral downstream anyway, so storing it
+ * would be recording a colour the product will never paint.
+ */
+const MIN_CHROMA = 0.025;
+
+/** Plateau across the trustworthy band, linear falloff outside it. */
+function lightnessFit(L: number): number {
+  if (L >= PEAK_LOW && L <= PEAK_HIGH) return 1;
+  const distance = L < PEAK_LOW ? PEAK_LOW - L : L - PEAK_HIGH;
+  return Math.max(FALLOFF_FLOOR, 1 - distance * FALLOFF);
+}
+
+/**
+ * Choose the one colour that reads as this cover's, from Vibrant's six.
+ *
+ * Vibrant returns `Vibrant` and `Muted` plus light and dark variants of each.
+ * Those are names, not a ranking — it holds no opinion about which one a
+ * product should wear, and its own notion of "vibrant" is HSL saturation,
+ * which overrates yellows and underrates blues by roughly the amount that
+ * makes a tinted UI look inconsistent from show to show. So the ranking is
+ * ours, in two steps.
+ *
+ * **Chroma decides who is eligible, not who wins.** Every swatch under
+ * `MIN_CHROMA` is dropped outright: it is a grey the cover contains, not a
+ * colour it has. This is the whole reason a cover that is 70% near-black and
+ * 30% orange comes out orange — the black was never a candidate, so it does
+ * not matter that it covers twice as much of the image.
+ *
+ * **Among real colours, area leads.**
+ *
+ *     score = population share × √chroma × lightnessFit(L)
+ *
+ * The square root is the point of the shape: it lets a vivid colour outrank a
+ * muted one of similar size while flattening the difference enough that it can
+ * never outrank one *much* larger. Ranking on chroma directly, however damped
+ * by area, hands a whole page to sixty pixels of neon — and every failure of
+ * this function is of that kind, because the wrong answer is always the tiny
+ * loud thing rather than the big quiet one.
+ *
+ * Exported because this is the part with judgement in it, and judgement is
+ * worth testing directly rather than through a decoder and a quantiser.
+ */
+export function pickAccent(palette: Palette): string | null {
+  const swatches = Object.values(palette).filter((swatch): swatch is Swatch => swatch !== null);
+  if (swatches.length === 0) return null;
+
+  // Share is of the whole cover, greys included: a colour occupying a fifth of
+  // the artwork occupies a fifth of it whatever the other four fifths are.
+  const totalPopulation = swatches.reduce((sum, swatch) => sum + swatch.population, 0);
+  if (totalPopulation === 0) return null;
+
+  let best: { hex: string; score: number } | null = null;
+
+  for (const swatch of swatches) {
+    const rgb = hexToRgb(swatch.hex);
+    if (!rgb) continue;
+
+    const lab = rgbToOklab(rgb);
+    const chroma = Math.hypot(lab.a, lab.b);
+    if (chroma < MIN_CHROMA) continue;
+
+    const share = swatch.population / totalPopulation;
+    const score = share * Math.sqrt(chroma) * lightnessFit(lab.L);
+
+    if (!best || score > best.score) {
+      // The swatch's own colour, never a blend. A quantised swatch is a colour
+      // that is actually in the image; an average of several is a colour that
+      // is in none of them, and reliably muddier than all of them.
+      best = { hex: rgbToHex(rgb), score };
+    }
+  }
+
+  // Nothing cleared MIN_CHROMA, so the cover is genuinely greyscale — and
+  // giving it a hue would be inventing one.
+  return best?.hex ?? null;
+}
+
 /**
  * Returns `#RRGGBB`, or null when there is nothing usable.
  *
@@ -171,57 +268,13 @@ export async function extractArtworkColor(
   if (!buffer) return null;
 
   try {
-    const { data } = await sharp(buffer)
-      // Ignore the alpha channel: a transparent PNG's empty corners are not
-      // part of the cover's colour.
-      .flatten({ background: '#000000' })
-      .resize(GRID, GRID, { fit: 'fill' })
-      .raw()
-      .toBuffer({ resolveWithObject: true });
+    const palette = await new Vibrant(buffer, {
+      ImageClass: SharpImage,
+      colorCount: COLOR_COUNT,
+      quality: 1,
+    }).getPalette();
 
-    // Quantise into coarse buckets so near-identical pixels group together.
-    const buckets = new Map<number, Bucket>();
-
-    for (let i = 0; i + 2 < data.length; i += 3) {
-      const r = data[i]!;
-      const g = data[i + 1]!;
-      const b = data[i + 2]!;
-
-      const score = vibrance(r, g, b);
-      const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
-
-      const existing = buckets.get(key);
-      if (existing) {
-        existing.r += r;
-        existing.g += g;
-        existing.b += b;
-        existing.count += 1;
-        existing.score += score;
-      } else {
-        buckets.set(key, { r, g, b, count: 1, score });
-      }
-    }
-
-    if (buckets.size === 0) return null;
-
-    // Rank by total vibrance: area × how colourful. A large dull region loses
-    // to a smaller vivid one, which is how people actually read a cover.
-    let best: Bucket | null = null;
-    for (const bucket of buckets.values()) {
-      if (!best || bucket.score > best.score) best = bucket;
-    }
-
-    if (!best) return null;
-
-    // A cover with no chromatic region anywhere is genuinely greyscale, and
-    // giving it a hue would be inventing one.
-    if (best.score / best.count < 0.05) return null;
-
-    const r = Math.round(best.r / best.count);
-    const g = Math.round(best.g / best.count);
-    const b = Math.round(best.b / best.count);
-
-    return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0').toUpperCase()}`;
+    return pickAccent(palette);
   } catch {
     // A corrupt or unsupported image is not an ingest failure.
     return null;

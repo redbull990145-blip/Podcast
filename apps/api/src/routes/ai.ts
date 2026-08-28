@@ -26,6 +26,7 @@ import { encryptSecret, keyHint } from '../ai/crypto.ts';
 import { cached, generateBrief, generateChapters } from '../ai/generate.ts';
 import { chatStream } from '../ai/groq.ts';
 import { isTranscribing, startTranscription, transcribeProgress } from '../ai/transcribe.ts';
+import { requestAlignment } from '../ai/align/service.ts';
 import { rateLimit } from '../rate-limit.ts';
 
 const DEFAULT_LANGUAGE = 'en';
@@ -106,6 +107,33 @@ export function aiRoutes(app: FastifyInstance): void {
       const { started, detail } = await startTranscription(app, id, user.id);
 
       return ok({ started, detail, quota: await quotaFor(app, user.id) });
+    },
+  );
+
+  /**
+   * Correct a publisher transcript onto the audio this listener is served.
+   *
+   * Separate from `/transcribe` because it is a different and far cheaper job:
+   * transcription writes a transcript that does not exist, alignment re-times one
+   * that does, and it does so by sampling a few seconds of audio rather than all
+   * of it. On the episode this was built against, three samples of twenty-four
+   * seconds replaced fifty minutes of Whisper.
+   *
+   * Answers with the outcome when the work finishes quickly, which it usually
+   * does, and with `outcome: null` when it is still going — the correction is
+   * written to the transcript row either way, so a client that polls the
+   * transcript endpoint sees it land regardless of which branch it got.
+   */
+  app.post(
+    '/episodes/:id/align',
+    { preHandler: rateLimit(app, 'expensive') },
+    async (request) => {
+      const user = requireUser(request);
+      const { id } = uuidParam.parse(request.params);
+
+      const result = await requestAlignment(app, id, user.id);
+
+      return ok({ ...result, quota: await quotaFor(app, user.id) });
     },
   );
 

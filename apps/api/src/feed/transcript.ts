@@ -37,7 +37,26 @@ const CUE_RANGE = new RegExp(`^\\s*${TIMESTAMP.source}\\s*-->\\s*${TIMESTAMP.sou
  * most human-edited files use instead.
  */
 const VOICE_TAG = /^<v\s+([^>]+)>\s*/i;
-const SPEAKER_PREFIX = /^([A-Z][\w.'-]*(?: [A-Z][\w.'-]*){0,2}):\s+/;
+
+/**
+ * `Alice:`, `Jerod Santo:`, `Steven Furtick Jr.:` — and `Speaker 1:`.
+ *
+ * The trailing tokens allow a bare number as well as a capitalised word, which
+ * is the whole point of the alternation. Diarising transcribers label unnamed
+ * voices `Speaker 1` / `Speaker 2`, and requiring every token after the first to
+ * begin with `[A-Z]` matched a name but not a number — so on the feeds that use
+ * them, and Omny's are one, the label was never recognised as a label. It stayed
+ * in the caption body, and every line rendered as `Speaker 2: of Elevation,
+ * click the link…` with the speaker column empty.
+ *
+ * Numbers are admitted; arbitrary lowercase words are not, and that restraint is
+ * load-bearing rather than incidental. This runs against the first line of every
+ * cue, and ordinary speech contains colons — "but here's the thing: we were
+ * wrong" would be read as a speaker named "but here's the thing" and have its
+ * first four words deleted. Requiring capitals (or digits) is what keeps a
+ * label distinguishable from a sentence.
+ */
+const SPEAKER_PREFIX = /^([A-Z][\w.'-]*(?: (?:[A-Z][\w.'-]*|\d+)){0,2}):\s+/;
 
 /** Any remaining markup. VTT allows `<i>`, `<b>`, `<c.classname>` and friends. */
 const TAGS = /<\/?[^>]+>/g;

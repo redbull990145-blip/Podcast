@@ -74,6 +74,7 @@ async function resolveAudioResponse(
   url: string,
   doFetch: typeof fetch,
   signal: AbortSignal | undefined,
+  extraHeaders: Record<string, string> = {},
 ): Promise<{ status: 'ok'; response: Response; finalUrl: URL } | AudioError> {
   let currentUrl = url;
 
@@ -84,7 +85,7 @@ async function resolveAudioResponse(
     let response: Response;
     try {
       response = await doFetch(check.url.href, {
-        headers: { 'user-agent': USER_AGENT, accept: 'audio/*, */*;q=0.8' },
+        headers: { 'user-agent': USER_AGENT, accept: 'audio/*, */*;q=0.8', ...extraHeaders },
         redirect: 'manual',
         signal: signal ?? AbortSignal.timeout(TIMEOUT_MS),
       });
@@ -102,6 +103,9 @@ async function resolveAudioResponse(
       continue;
     }
 
+    // `response.ok` is 200-299, which already covers the 206 a ranged request
+    // gets back — spelled out here only because the ranged reader below depends
+    // on 206 reaching it rather than being classified as a publisher error.
     if (!response.ok) {
       return {
         status: 'error',
@@ -270,4 +274,122 @@ export async function streamAudioChunks(
   }
 
   return { status: 'ok', audioDurationMs: chunker.totalDurationMs, audioBytes: total };
+}
+
+// ------------------------------------------------------------------ ranged --
+
+export type AudioRange = {
+  status: 'ok';
+  bytes: Uint8Array;
+  /**
+   * Size of the *whole* file, read from `Content-Range`.
+   *
+   * Null when the publisher ignored the range request, because then there is no
+   * `Content-Range` to read and `Content-Length` describes the body we truncated
+   * rather than the file. Guessing in that case would produce a confident number
+   * that is wrong by however much we chose not to download.
+   */
+  totalBytes: number | null;
+  /** Whether the range was honoured (206) or the whole file was offered (200). */
+  ranged: boolean;
+};
+
+/**
+ * Read one byte range of an episode, without downloading the rest.
+ *
+ * This is what makes checking a transcript's alignment affordable. `streamAudioChunks`
+ * above is the right tool when the whole episode has to be transcribed; it is
+ * absurdly the wrong one for answering "how long is this file really" or "what
+ * is being said at 22 minutes", which need a few kilobytes from a known offset.
+ *
+ * **A 200 is handled rather than refused.** Some publishers, and more CDNs than
+ * you would hope, ignore `Range` and start sending the entire file. Treating
+ * that as an error would give up on hosts that are actually working fine, so the
+ * body is read only as far as the requested end and then cancelled — the
+ * connection closes, the remaining bytes are never transferred, and the caller
+ * gets what it asked for. `ranged: false` tells it the offsets came from a
+ * whole-file read, which matters because only a `Content-Range` can report the
+ * true total.
+ */
+export async function fetchAudioRange(
+  url: string,
+  from: number,
+  to: number,
+  options: { fetchImpl?: typeof fetch; signal?: AbortSignal } = {},
+): Promise<AudioRange | AudioError> {
+  if (to < from) return { status: 'error', detail: 'Empty byte range', permanent: true };
+
+  const want = to - from + 1;
+  if (want > MAX_BYTES) {
+    return { status: 'error', detail: 'Range is too large', permanent: true };
+  }
+
+  const resolved = await resolveAudioResponse(
+    url,
+    options.fetchImpl ?? fetch,
+    options.signal,
+    { range: `bytes=${from}-${to}` },
+  );
+  if (resolved.status === 'error') return resolved;
+
+  const { response } = resolved;
+  const ranged = response.status === 206;
+
+  /**
+   * `bytes 0-100/48320613` — the total is the part after the slash.
+   *
+   * `*` is legal there and means the server will not say, so it is read as
+   * unknown rather than coerced to zero.
+   */
+  let totalBytes: number | null = null;
+  const contentRange = response.headers.get('content-range');
+  if (ranged && contentRange) {
+    const total = /\/\s*(\d+)\s*$/.exec(contentRange)?.[1];
+    if (total) totalBytes = Number(total);
+  }
+  if (!ranged) {
+    const length = Number(response.headers.get('content-length') ?? '');
+    if (Number.isFinite(length) && length > 0) totalBytes = length;
+  }
+
+  if (!response.body) {
+    return { status: 'error', detail: 'The publisher sent no audio', permanent: true };
+  }
+
+  // The range we asked for starts at `from`; a server that ignored the request
+  // is sending from zero, so that much has to be skipped on the way past.
+  const skip = ranged ? 0 : from;
+  const need = skip + want;
+
+  const parts: Uint8Array[] = [];
+  let read = 0;
+  const reader = response.body.getReader();
+
+  try {
+    while (read < need) {
+      let next: Awaited<ReturnType<typeof reader.read>>;
+      try {
+        next = await reader.read();
+      } catch (error) {
+        return {
+          status: 'error',
+          detail: error instanceof Error ? error.message : 'The download failed',
+        };
+      }
+
+      if (next.done) break;
+      parts.push(next.value);
+      read += next.value.byteLength;
+    }
+  } finally {
+    // Cancel rather than drain: on the 200 path the file may have hundreds of
+    // megabytes still to come, and every one of them is bytes nobody wanted.
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+
+  if (read === 0) return { status: 'error', detail: 'The publisher sent an empty range' };
+
+  const joined = concatAllForFallback(parts);
+  return { status: 'ok', bytes: joined.subarray(skip, need), totalBytes, ranged };
 }

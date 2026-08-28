@@ -408,12 +408,36 @@ export const en = {
 
     The cues are correct; they are correct about a different copy of this
     episode. Ads are stitched in per request, so the version this listener was
-    served is a different length from the one that was transcribed. Saying
-    "captions are wrong" would be both inaccurate and unactionable, where naming
-    the cause explains why a fix has to be a nudge rather than a repair.
+    served is a different length from the one the timings were made against.
+    Saying "captions are wrong" would be both inaccurate and unactionable, where
+    naming the cause explains why a fix has to be a nudge rather than a repair.
+
+    Says "timed against" rather than "transcribed from" because this now fires
+    for publisher transcripts too, and we did not transcribe those — the
+    publisher timed them against their own master before any ad was stitched in.
+    Both cases are the same fact about the file, and one sentence should cover
+    both without claiming work we did not do.
   */
+  /*
+    The automatic correction, offered next to the manual one.
+
+    "Fix" rather than "align" or "sync": the reader's complaint is that the
+    words are in the wrong place, and the word for that is fix. The progress
+    label names what the server is actually doing — sampling the audio to
+    find the advertisements — because "working…" on a job that takes half a
+    minute reads as hung, where a specific claim reads as work.
+
+    The failure says the nudge still works, because it does, and because a
+    dead end with no next step is the thing that makes people conclude a
+    feature is broken rather than unlucky.
+  */
+  'captions.fix': 'Fix automatically',
+  'captions.fixing': 'Listening for the ads…',
+  'captions.fixed': 'Corrected onto this cut of the audio.',
+  'captions.fixFailed': 'Couldn’t work out where the ads are. The nudge still works.',
+
   'captions.differentCut':
-    'This episode was transcribed from a copy with different ads, so the timings drift. Nudge them into place.',
+    'These timings were made against a copy of this episode with different ads, so they drift. Nudge them into place.',
 
   // ----------------------------------------------------------- transcript --
   'transcript.title': 'Transcript',
