@@ -13,6 +13,7 @@ import {
 } from '@cue/core';
 import { useCallback, useRef, useSyncExternalStore } from 'react';
 import { api } from '@/lib/api';
+import { currentFrameStamp } from './frame-clock';
 import { readPreferences, writePreferences } from './preferences';
 import { WebAudioEngine } from './web-engine';
 
@@ -490,15 +491,29 @@ const clock = new PlaybackClock();
 /**
  * The last answer, and the instant it was computed for.
  *
- * Reading the clock *advances* it — one easing step per call — so the number of
- * components that happen to be mounted would otherwise change how smooth the
- * motion is. Three consumers on the same frame (scrubber, captions, transcript
- * panel) took three steps instead of one, which both over-smoothed the model
- * and handed the three of them different answers for the same moment.
+ * Reading the clock used to *advance* it — one easing step per call — so the
+ * number of components that happen to be mounted changed how smooth the motion
+ * was. Three consumers on the same frame (scrubber, captions, transcript panel)
+ * took three steps instead of one, which both over-smoothed the model and
+ * handed the three of them different answers for the same moment.
  *
  * Memoising on the frame's timestamp makes the read idempotent within a frame:
  * everything painted together sees one position, and the model advances once
  * per frame no matter who is watching.
+ *
+ * **The instant has to come from the frame, not from `performance.now()`.**
+ * That is what this originally did, and it meant the memo never once hit: two
+ * callers on the same frame observe two different sub-millisecond readings, so
+ * every consumer took the slow path and advanced the model again. The timestamp
+ * now comes from `currentFrameStamp()`, which is a single value for the whole
+ * of one animation frame and null outside one — so in-frame reads collapse to
+ * one and an out-of-frame read (a one-shot after a seek while paused) still
+ * gets a fresh answer rather than a stale cached one.
+ *
+ * `PlaybackClock` was also made idempotent from its own side, by rescaling its
+ * slew to elapsed time; a repeated read advances it by nothing regardless of
+ * what happens here. Both, deliberately: this one saves the work, that one
+ * guarantees the result.
  */
 let lastReadAtMs = -1;
 let lastReadSec = 0;
@@ -515,7 +530,7 @@ let lastReadSec = 0;
 export function readPosition(): number {
   if (!engine) return 0;
 
-  const nowMs = performance.now();
+  const nowMs = currentFrameStamp() ?? performance.now();
   if (nowMs === lastReadAtMs) return lastReadSec;
 
   const state = machine?.getState();

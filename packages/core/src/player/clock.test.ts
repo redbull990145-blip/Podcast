@@ -119,6 +119,100 @@ describe('PlaybackClock', () => {
     clock.reset();
     expect(clock.read(0, { playing: true, rate: 1, nowMs: 5000 })).toBe(0);
   });
+
+  /**
+   * The refresh rate must not change the physics.
+   *
+   * The smoothing used to be applied once per call, which made the settle time
+   * a function of the display: a 144Hz panel ran the same fraction 2.4x more
+   * often and pulled the error out that much faster, so the fast display got
+   * the *worse* sweep. These pin the behaviour to wall-clock time instead.
+   */
+  it('settles over the same wall time at any refresh rate', () => {
+    /**
+     * Settle *time* is the thing that must not move, not the instantaneous
+     * reading. Two rates sampling the same 40ms staircase land on different
+     * points of a step, which is phase, not physics — asserting on it would
+     * pin a number that means nothing.
+     *
+     * So: anchor the model, hand it a 200ms discontinuity too small to trip
+     * the jump threshold, and count the wall time it takes to come back within
+     * 20ms of the truth. Before this was rescaled by elapsed time the answer
+     * ran 467ms at 60Hz and 117ms at 240Hz — the same model behaving four
+     * different ways on four different displays.
+     */
+    const settleMs = (hz: number) => {
+      const clock = new PlaybackClock();
+      const dt = 1 / hz;
+
+      // A second of ordinary playback, so the model is tracking before the
+      // discontinuity arrives.
+      for (let i = 0; i < hz; i += 1) {
+        clock.read(i * dt, { playing: true, rate: 1, nowMs: i * dt * 1000 });
+      }
+
+      const startMs = hz * dt * 1000;
+      for (let i = 1; i < hz * 3; i += 1) {
+        const trueSec = 1 + 0.2 + i * dt;
+        const value = clock.read(trueSec, {
+          playing: true,
+          rate: 1,
+          nowMs: startMs + i * dt * 1000,
+        });
+        if (Math.abs(value - trueSec) < 0.02) return i * dt * 1000;
+      }
+
+      return Infinity;
+    };
+
+    const sixty = settleMs(60);
+    expect(sixty).toBeLessThan(1000);
+
+    for (const hz of [100, 140, 240]) {
+      // Within a tenth of the 60Hz figure at every rate this app can be shown
+      // on. The old per-call slew was out by a factor of four.
+      expect(Math.abs(settleMs(hz) - sixty)).toBeLessThan(sixty * 0.1);
+    }
+  });
+
+  it('tracks the true position just as closely at 140Hz as at 60Hz', () => {
+    const { reported, truth } = run(new PlaybackClock(), { frames: 560, hz: 140, step: 0.04 });
+
+    for (let i = 70; i < reported.length; i += 1) {
+      expect(Math.abs(reported[i]! - truth[i]!)).toBeLessThan(0.06);
+    }
+  });
+
+  it('stays smooth at 140Hz against a coarse clock', () => {
+    // The whole point of the class, at the rate this app targets: no frame may
+    // repeat a value, and none may lurch.
+    const { reported } = run(new PlaybackClock(), { frames: 280, hz: 140, step: 0.25 });
+
+    for (let i = 100; i < reported.length; i += 1) {
+      const delta = reported[i]! - reported[i - 1]!;
+      expect(delta).toBeGreaterThan(0);
+      // One frame at 140Hz is ~7.1ms; allow generous headroom but nothing
+      // that would read as a jump.
+      expect(delta).toBeLessThan(0.02);
+    }
+  });
+
+  it('does not advance when read more than once in the same frame', () => {
+    /**
+     * Every extra consumer used to take its own easing step, so mounting the
+     * transcript panel beside the captions changed how the captions moved.
+     * A repeated read at the same instant must be free and identical.
+     */
+    const clock = new PlaybackClock();
+    run(clock, { frames: 60, hz: 60, step: 0.04 });
+
+    const first = clock.read(1.0, { playing: true, rate: 1, nowMs: 1016 });
+    const second = clock.read(1.0, { playing: true, rate: 1, nowMs: 1016 });
+    const third = clock.read(1.0, { playing: true, rate: 1, nowMs: 1016 });
+
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+  });
 });
 
 describe('CAPTION_LEAD_MS', () => {

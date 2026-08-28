@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { Artwork } from '@/components/media/artwork';
+import { useFrameLoop } from '@/lib/player/frame-clock';
 import {
   readPosition,
   usePlayerActions,
@@ -96,41 +97,33 @@ export function UpNext() {
   const progress = useMotionValue(0);
   const [seconds, setSeconds] = useState(LEAD_SEC);
 
-  useEffect(() => {
-    if (!due || durationSec === null) return;
+  const lastLabelRef = useRef(0);
 
-    let frame = 0;
-    let lastLabel = 0;
+  useFrameLoop(due && durationSec !== null, (timestamp) => {
+    if (durationSec === null) return;
 
-    const tick = (timestamp: number) => {
-      const left = Math.max(0, durationSec - readPosition());
+    const left = Math.max(0, durationSec - readPosition());
 
-      // Drains rather than fills: the bar *is* the time remaining, so it should
-      // be shortening. A filling bar at the end of an episode reads as loading.
-      progress.set(Math.max(0, Math.min(1, left / LEAD_SEC)));
+    // Drains rather than fills: the bar *is* the time remaining, so it should
+    // be shortening. A filling bar at the end of an episode reads as loading.
+    progress.set(Math.max(0, Math.min(1, left / LEAD_SEC)));
 
-      if (timestamp - lastLabel >= 250) {
-        lastLabel = timestamp;
-        /*
-          Clamped to the lead, not just to zero.
+    if (timestamp - lastLabelRef.current >= 250) {
+      lastLabelRef.current = timestamp;
+      /*
+        Clamped to the lead, not just to zero.
 
-          The playhead is read through the smoothing model, and for one frame
-          after a seek that model can still be anchored to where the playhead
-          *was* — so the very first sample after the card appears is occasionally
-          a fraction of a second rather than ten. Unclamped, that rendered "Up
-          next in 1 second" for a frame and then jumped back to ten, which reads
-          as the countdown running backwards at the exact moment somebody starts
-          watching it. The bar is clamped for the same reason a line below.
-        */
-        setSeconds(Math.max(0, Math.min(LEAD_SEC, Math.ceil(left))));
-      }
-
-      frame = requestAnimationFrame(tick);
-    };
-
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [due, durationSec, progress]);
+        The playhead is read through the smoothing model, and for one frame
+        after a seek that model can still be anchored to where the playhead
+        *was* — so the very first sample after the card appears is occasionally
+        a fraction of a second rather than ten. Unclamped, that rendered "Up
+        next in 1 second" for a frame and then jumped back to ten, which reads
+        as the countdown running backwards at the exact moment somebody starts
+        watching it. The bar is clamped for the same reason a line below.
+      */
+      setSeconds(Math.max(0, Math.min(LEAD_SEC, Math.ceil(left))));
+    }
+  });
 
   /**
    * Forget the dismissal once it can no longer apply.

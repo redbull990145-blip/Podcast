@@ -14,7 +14,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { usePrefersReducedMotion } from '@/lib/motion';
-import { readPosition, usePlayerActions, usePlayerState } from '@/lib/player/store';
+import { useOnScreen } from '@/lib/on-screen';
+import { useFrameLoop } from '@/lib/player/frame-clock';
+import { readPosition, usePlayerActions, usePlayerSelector } from '@/lib/player/store';
 
 /**
  * The transcript, following along.
@@ -44,7 +46,20 @@ export function TranscriptPanel({
   accentColor: string | null;
 }) {
   const t = useTranslator();
-  const state = usePlayerState();
+  /**
+   * Primitives rather than the whole snapshot — the same reasoning as the note
+   * in `captions.tsx`. This panel renders one element per cue and the player
+   * re-emits several times a second, so subscribing to everything made every
+   * tick a re-render of the entire transcript.
+   */
+  const isCurrent = usePlayerSelector((s) => s.current?.id === episode.id);
+  const playing = usePlayerSelector(
+    (s) => s.current?.id === episode.id && s.status === 'playing',
+  );
+  /** Position only while paused, so a seek still moves the highlight. */
+  const pausedPositionSec = usePlayerSelector((s) =>
+    s.status === 'playing' ? 0 : s.positionSec,
+  );
   const { seek, play } = usePlayerActions();
   const reduced = usePrefersReducedMotion();
 
@@ -76,8 +91,6 @@ export function TranscriptPanel({
   const timed = transcript?.timed ?? false;
 
   /** Whether the player is on *this* episode — a transcript only follows its own. */
-  const isCurrent = state.current?.id === episode.id;
-  const playing = isCurrent && state.status === 'playing';
 
   /**
    * Follow the audio.
@@ -89,23 +102,26 @@ export function TranscriptPanel({
    */
   const lastRef = useRef(-1);
 
-  useEffect(() => {
-    if (!timed || !isCurrent || segments.length === 0) return;
+  /**
+   * Where this panel is, so it can stop working when nobody is looking at it.
+   *
+   * The episode page renders this *and* the player's caption column, and both
+   * follow the same playhead through the same transcript. Whichever one is off
+   * screen is spending a frame loop, a state update per spoken line, and a
+   * re-render of every cue to move a highlight nobody can see. Measured with
+   * audio playing on an 824-cue episode, the two together held the main thread
+   * at 85% busy; paused, it was 0%.
+   */
+  const panelRef = useRef<HTMLElement>(null);
+  const onScreen = useOnScreen(panelRef);
 
-    let frame = 0;
-
-    const tick = () => {
-      const next = activeSegmentIndex(segments, readPosition() * 1000);
-      if (next !== lastRef.current) {
-        lastRef.current = next;
-        setActiveIndex(next);
-      }
-      frame = requestAnimationFrame(tick);
-    };
-
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [timed, isCurrent, segments]);
+  useFrameLoop(onScreen && timed && isCurrent && segments.length > 0, () => {
+    const next = activeSegmentIndex(segments, readPosition() * 1000);
+    if (next !== lastRef.current) {
+      lastRef.current = next;
+      setActiveIndex(next);
+    }
+  });
 
   // Paused, the position still moves on a seek, so read it once when playback
   // settles rather than leaving the highlight where the loop last left it.
@@ -114,7 +130,7 @@ export function TranscriptPanel({
     const next = activeSegmentIndex(segments, readPosition() * 1000);
     lastRef.current = next;
     setActiveIndex(next);
-  }, [timed, isCurrent, playing, segments, state.positionSec]);
+  }, [timed, isCurrent, playing, segments, pausedPositionSec]);
 
   /**
    * Keep the active line in view — but only while it is moving on its own.
@@ -127,11 +143,13 @@ export function TranscriptPanel({
   const listRef = useRef<HTMLOListElement>(null);
 
   useEffect(() => {
-    if (!playing || activeIndex < 0) return;
+    if (!onScreen || !playing || activeIndex < 0) return;
 
     const line = listRef.current?.querySelector<HTMLElement>(`[data-line="${activeIndex}"]`);
+    // Smooth `scrollIntoView` on a list this long is not cheap, and off screen
+    // it is not anything at all.
     line?.scrollIntoView({ block: 'center', behavior: reduced ? 'auto' : 'smooth' });
-  }, [activeIndex, playing, reduced]);
+  }, [onScreen, activeIndex, playing, reduced]);
 
   const matches = useMemo(
     () => (query.trim() ? searchSegments(segments, query) : null),
@@ -187,7 +205,7 @@ export function TranscriptPanel({
   }
 
   return (
-    <section aria-label={t.t('transcript.title')}>
+    <section ref={panelRef} aria-label={t.t('transcript.title')}>
       <div className="mb-4 flex items-center gap-3">
         <label className="block flex-1">
           <span className="sr-only">{t.t('transcript.searchLabel')}</span>

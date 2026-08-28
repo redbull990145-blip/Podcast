@@ -4,6 +4,7 @@ import { formatTimestamp } from '@cue/core';
 import { useMotionValue } from 'motion/react';
 import * as m from 'motion/react-m';
 import { useEffect, useRef, useState } from 'react';
+import { useFrameLoop } from '@/lib/player/frame-clock';
 import { readPosition, usePlayerActions } from '@/lib/player/store';
 
 /**
@@ -53,33 +54,26 @@ export function ProgressBar({
   /**
    * Drive the bar from the audio clock, not from React.
    *
-   * rAF pauses automatically in a background tab, so a hidden page costs
-   * nothing — and it matches the display's refresh rate rather than fighting a
-   * fixed interval against it.
+   * The frame loop is shared with everything else that follows the playhead
+   * rather than owned here — see `useFrameLoop`. It pauses automatically in a
+   * background tab, so a hidden page costs nothing, and it matches the
+   * display's refresh rate rather than fighting a fixed interval against it.
    */
-  useEffect(() => {
-    if (!isPlaying || durationSec === null || durationSec <= 0) return;
+  const lastLabelRef = useRef(0);
 
-    let frame = 0;
-    let lastLabel = 0;
+  useFrameLoop(isPlaying && durationSec !== null && durationSec > 0, (timestamp) => {
+    if (durationSec === null || durationSec <= 0) return;
 
-    const tick = (timestamp: number) => {
-      const position = readPosition();
-      progress.set(Math.min(1, position / durationSec));
+    const position = readPosition();
+    progress.set(Math.min(1, position / durationSec));
 
-      // The label can only change once a second; updating it faster is
-      // re-rendering to produce identical pixels.
-      if (timestamp - lastLabel >= 1000) {
-        lastLabel = timestamp;
-        setElapsed(position);
-      }
-
-      frame = requestAnimationFrame(tick);
-    };
-
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [isPlaying, durationSec, progress]);
+    // The label can only change once a second; updating it faster is
+    // re-rendering to produce identical pixels.
+    if (timestamp - lastLabelRef.current >= 1000) {
+      lastLabelRef.current = timestamp;
+      setElapsed(position);
+    }
+  });
 
   // When paused, the bar still has to reflect seeks.
   useEffect(() => {

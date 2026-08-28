@@ -1,4 +1,5 @@
 import type { EngineEvent, EngineListener, PlaybackEngine } from '@cue/core';
+import { subscribeToFrames } from './frame-clock';
 
 /**
  * The web audio engine.
@@ -15,7 +16,8 @@ import type { EngineEvent, EngineListener, PlaybackEngine } from '@cue/core';
 export class WebAudioEngine implements PlaybackEngine {
   private readonly audio: HTMLAudioElement;
   private readonly listeners = new Set<EngineListener>();
-  private rafId: number | null = null;
+  /** Unsubscribes the position loop from the shared frame clock. */
+  private stopFrames: (() => void) | null = null;
   /** Mirrors what was last reported, so repeats are not sent. */
   private buffering = false;
 
@@ -126,25 +128,30 @@ export class WebAudioEngine implements PlaybackEngine {
    * which never re-renders anything.
    */
   private startPositionLoop(): void {
-    if (this.rafId !== null) return;
+    if (this.stopFrames !== null) return;
 
     let lastEmit = 0;
 
-    const tick = (timestamp: number) => {
-      if (timestamp - lastEmit >= 250) {
-        lastEmit = timestamp;
-        this.emit({ type: 'position', positionSec: this.audio.currentTime });
-      }
-      this.rafId = requestAnimationFrame(tick);
-    };
-
-    this.rafId = requestAnimationFrame(tick);
+    /**
+     * Shares the app's one frame loop rather than opening a second.
+     *
+     * This callback only does something four times a second, but it used to
+     * wake at the display's refresh rate to find that out — 140 callbacks to
+     * perform four, on top of the loop every playhead-following component was
+     * already running. Subscribing here means the whole app has a single rAF
+     * chain, and this emit lands in the same frame as the reads it feeds.
+     */
+    this.stopFrames = subscribeToFrames((timestamp) => {
+      if (timestamp - lastEmit < 250) return;
+      lastEmit = timestamp;
+      this.emit({ type: 'position', positionSec: this.audio.currentTime });
+    });
   }
 
   private stopPositionLoop(): void {
-    if (this.rafId === null) return;
-    cancelAnimationFrame(this.rafId);
-    this.rafId = null;
+    if (this.stopFrames === null) return;
+    this.stopFrames();
+    this.stopFrames = null;
     // One final reading, so the stored position matches where playback
     // actually stopped rather than the last throttled sample.
     this.emit({ type: 'position', positionSec: this.audio.currentTime });

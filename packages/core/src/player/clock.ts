@@ -26,7 +26,7 @@
  */
 
 /**
- * How much of the remaining error is taken out per frame, 0–1.
+ * How much of the remaining error is taken out per reference frame, 0–1.
  *
  * The tension is entirely between two failure modes. Too high and the
  * quantisation it exists to hide comes straight back through — at 1.0 this is
@@ -37,8 +37,39 @@
  * step is absorbed over roughly a tenth of a second — below the threshold at
  * which a moving edge reads as anything but smooth, and fast enough that the
  * model never wanders more than a few milliseconds from the truth.
+ *
+ * "Per reference frame" is load-bearing: the figure is calibrated against
+ * `SLEW_REFERENCE_HZ`, and `read` rescales it to whatever the real frame
+ * interval turns out to be. See `SLEW_REFERENCE_HZ`.
  */
 const SLEW = 0.08;
+
+/**
+ * The refresh rate `SLEW` is quoted against.
+ *
+ * The smoothing used to be applied once per *call*, which quietly made the
+ * model's behaviour a function of the display and of how many components
+ * happened to be watching. Both are things it has no business depending on:
+ *
+ *  - On a 144Hz panel the same 0.08 ran 144 times a second instead of 60, so
+ *    the error was pulled out 2.4× faster and the 40ms quantisation this class
+ *    exists to hide came back through as a faint stutter. The fast display got
+ *    the worse sweep, which is exactly backwards.
+ *  - Three consumers reading on one frame took three easing steps, so mounting
+ *    the transcript panel changed how the captions moved.
+ *
+ * Rescaling by elapsed time fixes both at once. The per-frame factor becomes
+ * `1 - (1 - SLEW) ** (elapsed / referenceInterval)`, which is the same
+ * exponential decay sampled at a different rate — so the model settles over
+ * the same *wall-clock* interval at 60Hz, 144Hz or 240Hz, and a second read
+ * within one frame has `elapsed ≈ 0`, an exponent of ≈0, and therefore
+ * advances the model by nothing at all. Idempotent within a frame, by
+ * construction rather than by a caller remembering to memoise.
+ *
+ * 60 rather than the true refresh rate because it is what the constant above
+ * was tuned on; changing it would retune the feel of every sweep.
+ */
+const SLEW_REFERENCE_HZ = 60;
 
 /**
  * The disagreement, in seconds, past which easing is the wrong response.
@@ -125,7 +156,18 @@ export class PlaybackClock {
      * very visible: a sweep that inches backwards mid-word reads as a glitch,
      * and a caption index derived from it can flicker between two lines.
      */
-    const eased = predicted + (rawSec - predicted) * SLEW;
+    /**
+     * The slew, rescaled from its reference rate to this frame's actual length.
+     *
+     * `Math.min(1, ...)` is belt and braces — `elapsedSec` is already bounded
+     * above by `MAX_STEP_SEC` and below by the `elapsedSec < 0` guard, so the
+     * exponent cannot go negative and the factor cannot exceed 1. It costs
+     * nothing and means a future change to either bound cannot turn this into
+     * an overshoot.
+     */
+    const slew = Math.min(1, 1 - (1 - SLEW) ** (elapsedSec * SLEW_REFERENCE_HZ));
+
+    const eased = predicted + (rawSec - predicted) * slew;
     this.position = Math.max(this.position, eased);
     return this.position;
   }

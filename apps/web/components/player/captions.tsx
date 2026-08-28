@@ -3,6 +3,7 @@
 import { queryKeys } from '@cue/api-client';
 import {
   activeSegmentIndex,
+  canAlign,
   CAPTION_LEAD_MS,
   gapBefore,
   seekTargetSec,
@@ -11,13 +12,14 @@ import {
   type TimedWord,
 } from '@cue/core';
 import type { TranscriptSegment } from '@cue/types';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { animate, useMotionValue } from 'motion/react';
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { api } from '@/lib/api';
 import { usePrefersReducedMotion, useTransition } from '@/lib/motion';
-import { usePlayerActions, usePlayerState, readPosition } from '@/lib/player/store';
+import { useFrameLoop } from '@/lib/player/frame-clock';
+import { usePlayerActions, usePlayerSelector, readPosition } from '@/lib/player/store';
 import {
   driftMs,
   OFFSET_STEP_MS,
@@ -83,7 +85,39 @@ function captionClockMs(offsetMs = 0): number {
 
 export function Captions({ episodeId, className }: { episodeId: string; className?: string }) {
   const t = useTranslator();
-  const state = usePlayerState();
+  /**
+   * Four primitives, not the whole snapshot.
+   *
+   * `usePlayerState` re-emits on every position tick — several times a second
+   * while anything plays, as its own doc says — and this component renders one
+   * element per cue. On an 824-cue episode that meant re-rendering eight hundred
+   * children several times a second to move a highlight that changes every few
+   * seconds, and it held the main thread at 85% busy with individual tasks over
+   * half a second long. The frame loops were not the cause; measured, all of
+   * them together cost 35ms across six seconds. They were being *starved* by
+   * this, which is what the juddering scroll actually was.
+   *
+   * Each selector returns a primitive, so the store's `Object.is` gate turns a
+   * tick into no render at all between one spoken line and the next.
+   */
+  const isCurrent = usePlayerSelector((s) => s.current?.id === episodeId);
+  const playing = usePlayerSelector(
+    (s) => s.current?.id === episodeId && s.status === 'playing',
+  );
+  const durationSec = usePlayerSelector((s) => s.durationSec);
+
+  /**
+   * The position, but only while paused.
+   *
+   * The one-shot below has to re-run when the playhead moves with no frame loop
+   * running — a seek while paused. Subscribing to `positionSec` outright would
+   * reintroduce exactly the per-tick render this is avoiding, so it collapses to
+   * a constant during playback and carries a real value only when there is no
+   * loop to do the job instead.
+   */
+  const pausedPositionSec = usePlayerSelector((s) =>
+    s.status === 'playing' ? 0 : s.positionSec,
+  );
   const { seek } = usePlayerActions();
   const reduced = usePrefersReducedMotion();
   const glide = useTransition('gentle');
@@ -133,8 +167,6 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
    * control is worse than one that was never offered.
    */
   const timed = transcript?.timed ?? false;
-  const isCurrent = state.current?.id === episodeId;
-  const playing = isCurrent && state.status === 'playing';
 
   /** Whether the sweep should run at all: it needs a clock and a live episode. */
   const syncing = timed && isCurrent && segments.length > 0;
@@ -294,26 +326,17 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
    */
   const lastRef = useRef(-1);
 
-  useEffect(() => {
-    if (!syncing || !playing) return;
+  useFrameLoop(syncing && playing, () => {
+    const positionMs = captionClockMs(offsetRef.current);
 
-    let frame = 0;
-    const tick = () => {
-      const positionMs = captionClockMs(offsetRef.current);
+    const next = activeSegmentIndex(segments, positionMs);
+    if (next !== lastRef.current) {
+      lastRef.current = next;
+      setActiveIndex(next);
+    }
 
-      const next = activeSegmentIndex(segments, positionMs);
-      if (next !== lastRef.current) {
-        lastRef.current = next;
-        setActiveIndex(next);
-      }
-
-      paint(positionMs);
-      frame = requestAnimationFrame(tick);
-    };
-
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [syncing, playing, segments, paint]);
+    paint(positionMs);
+  });
 
   /**
    * Paused, the position still moves on a seek.
@@ -332,7 +355,7 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
     // `offsetMs` is a dependency even though the value is read through the ref:
     // nudging the sync while paused has to move the highlight immediately, and
     // paused is exactly when somebody is most likely to be adjusting it.
-  }, [syncing, playing, segments, state.positionSec, offsetMs, paint]);
+  }, [syncing, playing, segments, pausedPositionSec, offsetMs, paint]);
 
   // ------------------------------------------------------- the scroll ------
 
@@ -692,7 +715,11 @@ export function Captions({ episodeId, className }: { episodeId: string; classNam
         <CaptionSync
           episodeId={episodeId}
           offsetMs={offsetMs}
-          driftMs={driftMs(transcript?.audioDurationMs, state.durationSec)}
+          driftMs={driftMs(transcript?.audioDurationMs, durationSec)}
+          /* The rule for which transcripts the pipeline is for lives in
+             `@cue/core` so the server and the client cannot drift on it. */
+          canFix={canAlign(transcript)}
+          aligned={transcript?.aligned ?? false}
         />
       ) : null}
     </div>
@@ -720,14 +747,70 @@ function CaptionSync({
   episodeId,
   offsetMs,
   driftMs: drift,
+  canFix,
+  aligned,
 }: {
   episodeId: string;
   offsetMs: number;
   /** Non-null only when the two durations are known *and* disagree. */
   driftMs: number | null;
+  /** Whether these cues are the publisher's, and so re-timable. */
+  canFix: boolean;
+  /** Whether a correction has already been applied to them. */
+  aligned: boolean;
 }) {
   const t = useTranslator();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
+
+  /**
+   * Ask the server to find the ads and re-time the cues around them.
+   *
+   * On success the transcript query is invalidated rather than patched: the
+   * corrected cues come back from the same endpoint the panel already reads, so
+   * there is one shape of transcript in the app and no second path that has to
+   * stay in step with it.
+   *
+   * A null `outcome` means the work outlived the request. The refetch still runs
+   * — it will usually have landed by the time the user looks — and if it has not,
+   * the correction appears on their next visit. Nothing here polls, because the
+   * only thing a poll would buy is a few seconds on a job the reader has already
+   * been told about.
+   */
+  const fix = useMutation({
+    mutationFn: () => api.alignTranscript(episodeId),
+    onSuccess: async (result) => {
+      const key = queryKeys.episode.transcript(episodeId);
+      await queryClient.invalidateQueries({ queryKey: key });
+
+      /**
+       * Look once more, later, when the work outlived the request.
+       *
+       * `outcome: null` means the server was still sampling audio when it
+       * answered. The refetch above will have found the cues unchanged, and
+       * without this the reader would have pressed a button, watched it settle
+       * back, and seen nothing happen — which is how a working feature comes to
+       * be described as broken.
+       *
+       * One retry, not a poll. The correction is written to the row either way,
+       * so the worst case this leaves is a reader who sees it on their next
+       * visit rather than a client that keeps asking forever.
+       */
+      if (!result.outcome) {
+        setTimeout(() => {
+          void queryClient.invalidateQueries({ queryKey: key });
+        }, 20_000);
+      }
+
+      return result;
+    },
+  });
+
+  /** The correction is on the cues, so a stored nudge for the old ones is stale. */
+  const applyFix = () => {
+    setCaptionOffsetMs(episodeId, 0);
+    fix.mutate();
+  };
 
   // Opened on its own when there is evidence, so the fix is in front of the
   // person who needs it rather than behind a control they have no reason to
@@ -762,6 +845,29 @@ function CaptionSync({
           // that and find it did not work.
           <p className="type-caption m-0 w-full text-[var(--color-text-tertiary)]">
             {t.t('captions.differentCut')}
+          </p>
+        ) : null}
+
+        {canFix && !aligned ? (
+          <button
+            type="button"
+            onClick={applyFix}
+            disabled={fix.isPending}
+            className="type-caption w-full cursor-pointer rounded-full border border-[var(--color-border-strong)] bg-transparent px-3 py-1.5 text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)] disabled:cursor-default disabled:opacity-60"
+          >
+            {fix.isPending ? t.t('captions.fixing') : t.t('captions.fix')}
+          </button>
+        ) : null}
+
+        {fix.isError ? (
+          <p className="type-caption m-0 w-full text-[var(--color-text-tertiary)]">
+            {t.t('captions.fixFailed')}
+          </p>
+        ) : null}
+
+        {aligned ? (
+          <p className="type-caption m-0 w-full text-[var(--color-text-tertiary)]">
+            {t.t('captions.fixed')}
           </p>
         ) : null}
 

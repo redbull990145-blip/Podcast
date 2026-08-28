@@ -13,10 +13,11 @@ import { animate, AnimatePresence, useMotionValue, useReducedMotion } from 'moti
 import * as m from 'motion/react-m';
 import type { Route } from 'next';
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Artwork } from '@/components/media/artwork';
 import { api } from '@/lib/api';
 import { usePressScale, useTransition } from '@/lib/motion';
+import { useFrameLoop } from '@/lib/player/frame-clock';
 import { readPosition, usePlayerActions, usePlayerSelector } from '@/lib/player/store';
 import { useSession } from '@/lib/session';
 import { isLightNow, useThemeChoice } from '@/lib/theme';
@@ -575,22 +576,36 @@ function Track({ fraction, fill }: { fraction: number; fill?: string }) {
  */
 function LiveTrack({ entry, playing }: { entry: ContinueEntry; playing: boolean }) {
   const total = entry.durationSec ?? entry.episode.durationSec;
+  /** Position only while paused, so a seek still moves the bar. */
+  const pausedPositionSec = usePlayerSelector((s) =>
+    s.status === 'playing' ? 0 : s.positionSec,
+  );
   const scaleX = useMotionValue(
     total && total > 0 ? Math.min(1, entry.positionSec / total) : 0,
   );
 
-  useEffect(() => {
+  /**
+   * Only while playing, unlike the loop this replaced.
+   *
+   * That loop woke every frame for the life of the card whether or not
+   * anything was moving, because stopping it would have frozen the bar after a
+   * paused seek. The one-shot below covers that case instead — the same idiom
+   * the caption column and the transcript panel already use — so a home screen
+   * showing three of these costs nothing at all while paused.
+   */
+  const write = useCallback(() => {
     if (!total || total <= 0) return;
+    scaleX.set(Math.min(1, Math.max(0, readPosition() / total)));
+  }, [total, scaleX]);
 
-    let frame = 0;
-    const tick = () => {
-      scaleX.set(Math.min(1, Math.max(0, readPosition() / total)));
-      frame = requestAnimationFrame(tick);
-    };
+  useFrameLoop(Boolean(playing && total && total > 0), write);
 
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [total, playing, scaleX]);
+  // Paused, the playhead still moves on a seek, and no loop is running to
+  // notice. `pausedPositionSec` is constant during playback, so this costs one
+  // effect per pause rather than one per tick.
+  useEffect(() => {
+    if (!playing) write();
+  }, [playing, pausedPositionSec, write]);
 
   return (
     <div
@@ -635,42 +650,39 @@ function LiveProgress({
 }) {
   const t = useTranslator();
   const total = entry.durationSec ?? entry.episode.durationSec;
+  /** Position only while paused, so a seek still moves the bar. */
+  const pausedPositionSec = usePlayerSelector((s) =>
+    s.status === 'playing' ? 0 : s.positionSec,
+  );
 
   const scaleX = useMotionValue(fallbackFraction);
   const [positionSec, setPositionSec] = useState(entry.positionSec);
 
-  useEffect(() => {
+  // Whole seconds only: the label reads `12:04`, so writing state on any
+  // finer grain is a re-render that cannot change a pixel.
+  const shownSecRef = useRef(-1);
+
+  const write = useCallback(() => {
     if (!total || total <= 0) return;
 
-    let frame = 0;
-    // Whole seconds only: the label reads `12:04`, so writing state on any
-    // finer grain is a re-render that cannot change a pixel.
-    let shownSec = -1;
+    const position = readPosition();
+    scaleX.set(Math.min(1, Math.max(0, position / total)));
 
-    const tick = () => {
-      const position = readPosition();
-      scaleX.set(Math.min(1, Math.max(0, position / total)));
+    const whole = Math.floor(position);
+    if (whole !== shownSecRef.current) {
+      shownSecRef.current = whole;
+      setPositionSec(whole);
+    }
+  }, [total, scaleX]);
 
-      const whole = Math.floor(position);
-      if (whole !== shownSec) {
-        shownSec = whole;
-        setPositionSec(whole);
-      }
+  // See `LiveTrack`: the loop runs only while the playhead is actually moving,
+  // and a paused seek is picked up by the one-shot rather than by a loop that
+  // never sleeps.
+  useFrameLoop(Boolean(playing && total && total > 0), write);
 
-      frame = requestAnimationFrame(tick);
-    };
-
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-    /*
-      `playing` is a dependency even though the loop does not read it.
-
-      Paused, `readPosition()` returns a constant and the loop is a no-op that
-      still wakes every frame — but stopping it outright would freeze the bar
-      at whatever it last wrote, which is wrong after a seek. Re-running on the
-      transition is what makes a paused-then-scrubbed position land.
-    */
-  }, [total, playing, scaleX]);
+  useEffect(() => {
+    if (!playing) write();
+  }, [playing, pausedPositionSec, write]);
 
   const left = total && total > 0 ? t.duration(Math.max(0, total - positionSec)) : null;
 
