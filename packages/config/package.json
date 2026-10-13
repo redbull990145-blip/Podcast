@@ -10,7 +10,6 @@
     "./tsconfig/next.json": "./tsconfig/next.json",
     "./tsconfig/react-native.json": "./tsconfig/react-native.json",
     "./eslint/base": "./eslint/base.js",
-    "./eslint/react": "./eslint/react.js",
     "./vitest/base": "./vitest/base.js"
   }
 }

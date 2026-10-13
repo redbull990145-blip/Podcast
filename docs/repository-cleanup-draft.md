@@ -1,13 +1,13 @@
 # Draft: repository cleanup review
 
-Inspected on 2026-10-14. **No files were deleted and no cleanup was performed.** This draft proposes a separate cleanup change; it does not change the validated deployment/security fixes.
+Inspected on 2026-10-14. After the user's approval, the two confirmed tracked cleanup items below were rechecked and completed: the unused colour-interpolation module was removed and the dangling ESLint export was removed. The shared config package itself was preserved. No ignored/local-only files or other proposed cleanup candidates were deleted. The removed module remains recoverable from Git history if a future implementation needs it.
 
-## Confirmed tracked cleanup candidates
+## Completed tracked cleanup
 
-| Candidate | Evidence | Proposed action |
+| Item | Evidence | Completed action |
 | --- | --- | --- |
-| `apps/web/lib/color-lerp.ts` (6,312 bytes) | No import or file-path reference in tracked source, scripts or existing documentation. Its exported `parseColor`, `lerpColor`, `buildRamp`, `rampAt` and `ColorRamp` names occur only inside this module. `components/shell/now-playing-tint.tsx` now writes the palette once and animates a composited bloom instead of interpolating document-wide colours every frame. | Remove the unused module in a separate cleanup commit; run web TypeScript, lint and the tint/transition regression tests afterward. |
-| `packages/config/package.json`, export `./eslint/react` | Points to `./eslint/react.js`, which does not exist. No current tracked consumer imports `@cue/config/eslint/react`. | Remove the dangling export, or implement it if a consumer is planned. This is stale configuration, not an existing file to delete. Check all workspace lint afterward. |
+| `apps/web/lib/color-lerp.ts` (6,312 bytes) | No import or file-path reference in tracked source, scripts or existing documentation. Its exported `parseColor`, `lerpColor`, `buildRamp`, `rampAt` and `ColorRamp` names occur only inside this module. `components/shell/now-playing-tint.tsx` now writes the palette once and animates a composited bloom instead of interpolating document-wide colours every frame. | Removed the unused module; its prior implementation remains in Git history. |
+| `packages/config/package.json`, export `./eslint/react` | Points to `./eslint/react.js`, which does not exist. No current tracked consumer imports `@cue/config/eslint/react`. | Removed only the dangling export. Kept the shared config package and all existing config files. |
 
 No other tracked dead modules were confirmed by this quick reference audit. Framework conventions and dynamic loading mean absence of a text reference alone is not a general deletion rule.
 
@@ -32,10 +32,10 @@ These are already ignored by Git, so they are not included in the commit or push
 - Proof screenshots and security/remediation reports: these are review evidence. Archive older reports only after preserving test dependencies and useful references. The new Cloudflare screenshots are linked from the verification report.
 - Generated **tracked** `apps/web/public/_headers` and `apps/web/app/tokens.css`: deployment/build inputs with generators; do not remove them merely because they are generated.
 
-## Proposed next cleanup
+## Completed cleanup and remaining review
 
-1. Remove the one confirmed unused colour-interpolation module and resolve the dangling ESLint export.
-2. Run the checks noted above and review the diff for behaviour changes.
-3. Separately review local environment duplicates and select regenerable caches if storage cleanup is desired.
+1. Completed: removed the unused colour-interpolation module and dangling ESLint export after checking references and the current replacement implementation twice.
+2. Validation passed: web TypeScript, all 66 web regression tests (10 files), and all 11 workspace lint tasks (9 reused from the existing passing cache). Git diff whitespace check passed.
+3. Remaining draft only: privately review local environment duplicates or regenerable caches if storage cleanup is desired. These files have been preserved.
 
 Tracked-file checks found no committed `.log`, `.tsbuildinfo`, `.bak`, `.tmp`, `.orig`, ZIP, executable or database files. This was a quick inventory/reference audit, not a guarantee that every export or dependency is used.
