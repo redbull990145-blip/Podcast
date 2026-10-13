@@ -36,8 +36,8 @@ declare module 'fastify' {
 /**
  * The Better Auth endpoints that check or mint a credential.
  *
- * These are the guessing surface (`sign-in`, `email-otp`), and the account-spam
- * and enumeration surface (`sign-up`, `forget-password`, `reset-password`). The
+ * These are the guessing surface (`sign-in`, `email-otp`, `change-password`),
+ * and the account-spam and enumeration surface (`sign-up`, password reset). The
  * read-only `get-session` that fires on every page load is deliberately not
  * here — throttling it would rate-limit ordinary browsing. Matched by substring
  * so `/auth/sign-in/email` and `/auth/sign-in/social` are both covered.
@@ -54,6 +54,8 @@ const SENSITIVE_AUTH_PATHS = [
   '/sign-in',
   '/sign-up',
   '/forget-password',
+  '/request-password-reset',
+  '/change-password',
   '/reset-password',
   '/email-otp',
   '/send-verification-email',

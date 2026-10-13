@@ -30,7 +30,16 @@
     "js-yaml": "4.3.2",
     "qs": "6.16.0",
     "shell-quote": "1.11.0",
-    "source-map-js": "1.2.2"
+    "source-map-js": "1.2.2",
+    "@esbuild-kit/core-utils": {
+      "esbuild": "0.28.2"
+    },
+    "metro": {
+      "image-size": "2.0.4"
+    },
+    "xcode": {
+      "uuid": "11.1.1"
+    }
   },
   "scripts": {
     "dev": "turbo run dev",

@@ -36,7 +36,7 @@
  *
  * So: any change to the worker's CSP needs this bumped in the same commit.
  */
-const VERSION = 'v5';
+const VERSION = 'v6';
 
 const SHELL = `cue-shell-${VERSION}`;
 const STATIC = `cue-static-${VERSION}`;
@@ -232,7 +232,9 @@ self.addEventListener('fetch', (event) => {
     if (url.pathname.startsWith('/me/')) {
       event.respondWith(privateData(request));
     } else if (/^\/categories$|^\/podcasts(?:\/(?:search|trending|[^/]+)(?:\/episodes)?)?$|^\/episodes\/[^/]+(?:\/tint)?$/.test(url.pathname)) {
-      event.respondWith(staleWhileRevalidate(request, DATA, event));
+      // Shared catalogue entries must never carry the caller's identity.
+      // The API marks authenticated replies private even on public routes.
+      event.respondWith(staleWhileRevalidate(publicCatalogueRequest(request), DATA, event));
     }
     // Transcripts, AI status, auth, and unknown endpoints always stay live.
     return;
@@ -357,13 +359,19 @@ function offlineData() {
  */
 async function staleWhileRevalidate(request, cacheName, event) {
   const cache = await caches.open(cacheName).catch(() => null);
-  const cached = cache ? await cache.match(request).catch(() => null) : null;
+  let cached = cache ? await cache.match(request).catch(() => null) : null;
+  // Reject old entries too: changing the write policy alone leaves an already
+  // cached account header available to another account until cache eviction.
+  if (cached && !canShareCatalogueResponse(cached)) {
+    cached = null;
+    await cache.delete(request).catch(() => undefined);
+  }
 
   const network = fetch(request)
     .then(async (response) => {
       // Only successful, complete responses. A 401 cached here would keep
       // answering "signed out" after someone signed in.
-      if (cache && response.ok && response.status === 200) {
+      if (cache && canShareCatalogueResponse(response)) {
         await cache.put(request, response.clone()).catch(() => undefined);
       }
       return response;
@@ -379,6 +387,21 @@ async function staleWhileRevalidate(request, cacheName, event) {
   // Nothing cached and nothing reachable. A JSON error the client can parse,
   // rather than a network failure it has to guess at.
   return offlineData();
+}
+
+/** Public routes have identical bodies for every visitor, so fetch anonymously. */
+function publicCatalogueRequest(request) {
+  const headers = new Headers(request.headers);
+  headers.delete('Authorization');
+  headers.delete('Cookie');
+  headers.delete('X-Cue-Account-Id');
+  return new Request(request, { headers, credentials: 'omit' });
+}
+
+function canShareCatalogueResponse(response) {
+  if (!response.ok || response.status !== 200 || response.headers.has('X-Cue-Account-Id')) return false;
+  const directives = (response.headers.get('Cache-Control') ?? '').split(',');
+  return !directives.some((directive) => /^(?:private|no-store)(?:\s|=|$)/i.test(directive.trim()));
 }
 
 /** Keep a cache under a ceiling, dropping what was added longest ago. */

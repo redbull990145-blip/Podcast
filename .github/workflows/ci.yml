@@ -52,11 +52,18 @@ jobs:
       # a production release that is otherwise fine.
       - run: npm run budget --workspace @cue/web
 
-  # Deploying the web app to Cloudflare Workers.
+      # Vercel/Next builds do not create the worker required by Cloudflare.
+      # Build it on PRs too, so adapter regressions fail before a release.
+      # This artifact is validation-only and is never uploaded or deployed.
+      - run: npm run build:cloudflare --workspace @cue/web
+        env:
+          NEXT_PUBLIC_API_URL: https://api.example.test
+
+  # Optional GitHub-owned deployment. Workers Builds is the active publisher;
+  # opt in only after disabling its automatic deployment and setting the inputs.
   #
-  # Lives in this workflow rather than its own so that `needs: check` can gate
-  # it on the suite above — on Vercel the deploy ran from a git integration
-  # that had no idea whether anything passed, and a red build shipped anyway.
+  # When opted in, `needs: check` gates this publisher on the suite and adapter
+  # build above. Cloudflare's Git integration is configured independently.
   #
   # Note the interaction with this workflow's `cancel-in-progress`: a second
   # push to main while a deploy is running cancels it. That is the intended
@@ -65,7 +72,7 @@ jobs:
   # completes, so an interrupted one leaves the previous version serving.
   deploy-web:
     needs: check
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CLOUDFLARE_DEPLOY_FROM_ACTIONS == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -85,7 +92,7 @@ jobs:
       # stops it caching anything from the API.
       - name: Validate deployment inputs without printing credentials
         env:
-          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || secrets.API_URL }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
@@ -97,6 +104,6 @@ jobs:
           done
       - run: npm run deploy --workspace @cue/web
         env:
-          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || secrets.API_URL }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

@@ -1,6 +1,12 @@
 import { join } from 'node:path';
 import type { NextConfig } from 'next';
 import { buildProvenance, provenanceHeaders } from '../../scripts/build-provenance.js';
+import { validateCloudflareApiUrl } from './scripts/cloudflare-env.mjs';
+
+// Workers Builds can invoke the adapter directly rather than our npm script.
+if (process.env['WORKERS_CI'] === '1') {
+  validateCloudflareApiUrl(process.env['NEXT_PUBLIC_API_URL']);
+}
 
 const provenance = buildProvenance();
 

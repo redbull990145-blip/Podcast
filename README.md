@@ -116,25 +116,36 @@ function.
 | `apps/web` | Cloudflare Workers | `apps/web/wrangler.jsonc` |
 | `apps/api` | Render | `render.yaml` (Blueprint) |
 
-**Cloudflare** deploys from CI, not from a git integration — the `deploy-web`
-job in `.github/workflows/ci.yml`, gated on the test suite so a red build cannot
-ship. Next does not run on the Workers runtime unmodified, so
-`@opennextjs/cloudflare` compiles it into a worker first; `npm run deploy
---workspace @cue/web` runs both halves.
+**Cloudflare Workers Builds** is the active Git integration. Next's ordinary
+build does not generate a Worker; the OpenNext adapter must run before deploy.
+Use these build settings for `cue-web` (the repository is a monorepo):
 
-Two things must exist before the first deploy, because the deploy cannot create
-them itself:
+| Setting | Value |
+| --- | --- |
+| Root directory | `/` |
+| Build command | `npm exec --workspace @cue/web -- opennextjs-cloudflare build` |
+| Deploy command | `npm exec --workspace @cue/web -- opennextjs-cloudflare deploy` |
+| Version command (non-production branches) | `npm exec --workspace @cue/web -- opennextjs-cloudflare upload` |
+| Build variable `NEXT_PUBLIC_API_URL` | The hosted API base URL; current API is `https://podcast-68rl.onrender.com` |
 
-```bash
-npx wrangler r2 bucket create cue-web-cache
-```
+The Cloudflare build variable is separate from the Worker's runtime variables.
+The release build refuses missing, insecure, credential-bearing, or loopback
+API URLs before producing an artifact. GitHub CI separately builds the adapter
+with a synthetic API origin to catch adapter failures on pull requests; this
+validation artifact is never deployed. Workers Builds runs independently of
+the GitHub checks.
 
-…and three values in the repository's GitHub Actions settings: secrets
-`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, plus the variable
-`NEXT_PUBLIC_API_URL`. The Durable Object backing the revalidation queue needs
-no setup — the `migrations` block in `wrangler.jsonc` creates it on first
-deploy. What each Cloudflare resource is *for* is written down in that file
-rather than here.
+The GitHub `deploy-web` job is an alternative publisher, disabled by default
+to avoid two deployments racing. To use it, disable automatic Workers Builds
+deployment, set repository variable `CLOUDFLARE_DEPLOY_FROM_ACTIONS=true`, and
+provide secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and variable
+`NEXT_PUBLIC_API_URL` (or the existing `API_URL` secret). This path waits for
+the CI checks. `npm run deploy --workspace @cue/web` builds the Worker and
+deploys it from a configured CLI environment.
+
+R2 caching is deferred, so no bucket is required for the current deployment.
+The Durable Object backing the revalidation queue is declared by the
+`migrations` block in `wrangler.jsonc`. See that file for binding details.
 
 **Render** builds from the repo root (`rootDir: .`), so the whole workspace is
 present and nothing special is needed. Fill in the values `render.yaml` declares
@@ -143,13 +154,12 @@ with `sync: false`.
 The two must agree on each other's addresses, and getting this wrong fails
 *silently* — as a CORS error in the browser console, not as a failed deploy:
 
-- `NEXT_PUBLIC_API_URL` (GitHub Actions variable) → the Render URL. Baked in at
+- `NEXT_PUBLIC_API_URL` (Cloudflare build variable, or GitHub Actions input) → the Render URL. Baked in at
   build time, so it is set on the build rather than on the worker, and changing
   it means a redeploy rather than a restart.
-- `CORS_ORIGINS` (Render) → the web app's production domain. The `*.workers.dev`
-  URL a deploy also publishes is a *different* origin and is not on this list,
-  so testing against it fails every API call until you add it — which is
-  exactly what you want to do while migrating, before any DNS is moved.
+- `CORS_ORIGINS` (Render) → every web origin users access, including the
+  `*.workers.dev` deployment URL when it is used. A custom domain and the
+  Workers URL are different origins and each must be explicitly allowed.
 - `BETTER_AUTH_URL` (Render) → the API's own public URL.
 
 Because the two are different registrable domains, the session cookie is

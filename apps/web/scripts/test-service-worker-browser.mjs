@@ -67,10 +67,10 @@ try {
   let cacheNames;
   do {
     cacheNames = await page.evaluate(() => caches.keys());
-    if (cacheNames.length === 1 && cacheNames[0] === 'cue-shell-v5') break;
+    if (cacheNames.length === 1 && cacheNames[0] === 'cue-shell-v6') break;
     await new Promise((resolve) => setTimeout(resolve, 50));
   } while (Date.now() < activationDeadline);
-  assert.deepEqual(cacheNames, ['cue-shell-v5']);
+  assert.deepEqual(cacheNames, ['cue-shell-v6']);
   passed.push('actual old-worker upgrade purges old private/shared caches');
   const read = (path, owner) => page.evaluate(async ({ path, owner }) => {
     const response = await fetch(path, { headers: owner ? { 'X-Cue-Account-Id': owner } : {} });

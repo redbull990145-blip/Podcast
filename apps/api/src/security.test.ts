@@ -186,6 +186,8 @@ describe('credential-endpoint throttling', () => {
     expect(isSensitiveAuthPath('/auth/sign-in/social')).toBe(true);
     expect(isSensitiveAuthPath('/auth/sign-up/email')).toBe(true);
     expect(isSensitiveAuthPath('/auth/forget-password')).toBe(true);
+    expect(isSensitiveAuthPath('/auth/request-password-reset')).toBe(true);
+    expect(isSensitiveAuthPath('/auth/change-password')).toBe(true);
     expect(isSensitiveAuthPath('/auth/reset-password?token=abc')).toBe(true);
     expect(isSensitiveAuthPath('/auth/send-verification-email')).toBe(true);
 
@@ -257,6 +259,18 @@ describe('credential-endpoint throttling', () => {
 
     expect(seen).toHaveLength(0);
     await app.close();
+  });
+
+  it.each(['/auth/request-password-reset', '/auth/change-password'])('throttles %s before its credential handler', async (url) => {
+    const { app, seen } = await withStubLimiter();
+    try {
+      for (let i = 0; i < 3; i++) await app.inject({ method: 'POST', url, payload: {} });
+      const limited = await app.inject({ method: 'POST', url, payload: {} });
+      expect(limited.statusCode).toBe(429);
+      expect(seen).toEqual(Array<string>(4).fill('auth auth:127.0.0.1'));
+    } finally {
+      await app.close();
+    }
   });
 
   it('throttles the direct verification-email endpoint before the mail handler', async () => {

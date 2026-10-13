@@ -28,14 +28,14 @@ function worker() {
     }),
   };
   const notify = vi.fn();
-  runInNewContext(source, { URL, Request, Response, Date, fetch, caches, self: {
+  runInNewContext(source, { URL, Headers, Request, Response, Date, fetch, caches, self: {
     location: new URL(`${APP}/sw.js?api=${encodeURIComponent(API)}`),
     addEventListener: (name: string, listener: (event: unknown) => void) => listeners.set(name, listener),
     clients: { matchAll: async () => [{ postMessage: notify }], claim: async () => undefined },
   } });
-  function request(path: string, options: { navigate?: boolean; range?: boolean; audio?: boolean; owner?: string | null } = {}) {
+  function request(path: string, options: { navigate?: boolean; range?: boolean; audio?: boolean; owner?: string | null; authorization?: string } = {}) {
     const owner = options.owner === undefined ? intendedOwner : options.owner;
-    const request = new Request(path.startsWith('http') ? path : `${API}${path}`, { headers: { ...(options.range ? { range: 'bytes=0-5' } : {}), ...(owner ? { 'X-Cue-Account-Id': owner } : {}) } });
+    const request = new Request(path.startsWith('http') ? path : `${API}${path}`, { credentials: 'include', headers: { ...(options.range ? { range: 'bytes=0-5' } : {}), ...(owner ? { 'X-Cue-Account-Id': owner } : {}), ...(options.authorization ? { Authorization: options.authorization } : {}) } });
     if (options.navigate) Object.defineProperty(request, 'mode', { value: 'navigate' });
     if (options.audio) Object.defineProperty(request, 'destination', { value: 'audio' });
     let response: Promise<Response> | undefined;
@@ -58,6 +58,36 @@ function worker() {
 afterEach(() => vi.restoreAllMocks());
 
 describe('worker account isolation', () => {
+  it('fetches shared catalogue data without account credentials and can replay it across accounts', async () => {
+    const w = worker(); await w.session('A');
+    w.fetch.mockResolvedValueOnce(json({ categories: ['public'] }));
+    await w.request('/categories', { authorization: 'Bearer private-A' });
+    const request = w.fetch.mock.calls.at(-1)![0];
+    expect(request.credentials).toBe('omit');
+    expect(request.headers.has('Authorization')).toBe(false);
+    expect(request.headers.has('X-Cue-Account-Id')).toBe(false);
+    await w.session('B'); w.offline();
+    expect(await (await w.request('/categories'))!.json()).toMatchObject({ data: { categories: ['public'] } });
+  });
+
+  it.each(['account-header', 'private', 'no-store'])('does not share catalogue responses marked %s', async (mark) => {
+    const w = worker();
+    const response = json({ categories: ['private-A'] }, mark === 'account-header' ? 'A' : undefined);
+    if (mark !== 'account-header') response.headers.set('Cache-Control', mark === 'private' ? 'max-age=300, private="Cookie"' : 'public, NO-STORE');
+    w.fetch.mockResolvedValueOnce(response);
+    await w.request('/categories');
+    await w.session('B'); w.offline();
+    expect((await w.request('/categories'))!.status).toBe(503);
+  });
+
+  it('rejects a legacy shared catalogue entry that contains account metadata', async () => {
+    const w = worker();
+    const cache = await w.caches.open('cue-data-v6');
+    await cache.put(`${API}/categories`, json({ categories: ['private-A'] }, 'A'));
+    w.offline();
+    expect((await w.request('/categories'))!.status).toBe(503);
+  });
+
   it('offers offline private data only to the same verified account', async () => {
     const w = worker();
     await w.session('A');
@@ -67,7 +97,7 @@ describe('worker account isolation', () => {
     expect(await (await w.request('/me/queue'))!.json()).toMatchObject({ data: { items: ['A-private'] } });
     await w.session('B');
     expect((await w.request('/me/queue'))!.status).toBe(503);
-    expect(w.stores.has('cue-data-v5-account-A')).toBe(false);
+    expect(w.stores.has('cue-data-v6-account-A')).toBe(false);
   });
   it('invalidates private caches when an expired session returns 401', async () => {
     const w = worker(); await w.session('A');
@@ -102,7 +132,7 @@ describe('worker account isolation', () => {
     await w.request(`${APP}/library`, { navigate: true });
     await w.session('B'); w.offline();
     expect(await (await w.request(`${APP}/library`, { navigate: true }))!.text()).toBe('Offline');
-    expect(w.stores.get('cue-shell-v5')?.has(`${APP}/library`)).toBe(false);
+    expect(w.stores.get('cue-shell-v6')?.has(`${APP}/library`)).toBe(false);
   });
   it('never intercepts AI polling, transcripts, auth, audio or range requests', () => {
     const w = worker();
@@ -139,7 +169,7 @@ describe('worker account isolation', () => {
   });
   it('does not establish a cold-start identity from existing private caches', async () => {
     const w = worker();
-    const cache = await w.caches.open('cue-data-v5-account-A');
+    const cache = await w.caches.open('cue-data-v6-account-A');
     await cache.put(`${API}/me/queue`, json({ items: ['A-private'] }, 'A'));
     w.offline();
     expect((await w.request('/me/queue', { owner: 'A' }))!.status).toBe(503);
@@ -156,7 +186,7 @@ describe('worker account isolation', () => {
     const w = worker();
     if (operation === 'open') w.caches.open.mockRejectedValue(new Error('storage unavailable'));
     else {
-      const cache = await w.caches.open('cue-data-v5');
+      const cache = await w.caches.open('cue-data-v6');
       cache.match = async () => { throw new Error('storage unreadable'); };
       w.caches.open.mockResolvedValueOnce(cache);
     }
@@ -177,7 +207,7 @@ describe('worker account isolation', () => {
     w.fetch.mockResolvedValueOnce(json({ items: ['A-private'] }, 'A')); await w.request('/me/queue');
     vi.spyOn(Date, 'now').mockReturnValue(now + 2000); w.offline();
     expect((await w.request('/me/queue'))!.status).toBe(503);
-    expect(w.stores.has('cue-data-v5-account-A')).toBe(false);
+    expect(w.stores.has('cue-data-v6-account-A')).toBe(false);
   });
   it.each(['missing-expiry', 'malformed-json'])('fails private caching closed after %s session metadata', async (kind) => {
     const w = worker(); await w.session('A');
