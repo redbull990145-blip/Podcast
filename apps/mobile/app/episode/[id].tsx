@@ -19,6 +19,7 @@ import { ScreenMessage } from '@/components/screen-message';
 import { ShareButton } from '@/components/share-button';
 import { api } from '@/lib/api';
 import { playerActions, usePlayerState } from '@/lib/player/store';
+import { transcriptQueryOptions } from '@/lib/transcript-query';
 import { TAB_BAR_HEIGHT, radius, space, type, useTheme } from '@/theme';
 
 /**
@@ -46,6 +47,8 @@ export default function EpisodeScreen() {
   });
 
   const episode = data?.episode;
+  const { data: transcriptData } = useQuery(transcriptQueryOptions(id, Boolean(episode && !episode.transcriptUrl)));
+  const hasTranscript = Boolean(episode?.transcriptUrl || transcriptData?.transcript?.status === 'ready');
 
   const { data: podcastData } = useQuery({
     queryKey: queryKeys.podcast.detail(episode?.podcastId ?? ''),
@@ -219,7 +222,7 @@ export default function EpisodeScreen() {
           </Text>
         )}
 
-        {episode.transcriptUrl ? (
+        {hasTranscript ? (
           <View style={styles.transcript}>
             <Text style={[type('title3'), { color: theme.textPrimary }]}>{t.t('transcript.title')}</Text>
             <Text

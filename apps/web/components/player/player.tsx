@@ -1,7 +1,6 @@
 'use client';
 
 import { queryKeys } from '@cue/api-client';
-import { SKIP_BACK_SEC, SKIP_FORWARD_SEC } from '@cue/core';
 import { colorVarStyle, icon, stage } from '@cue/design';
 import { duration } from '@cue/motion';
 import { useQuery } from '@tanstack/react-query';
@@ -18,7 +17,10 @@ import type { Route } from 'next';
 import { useEffect, useRef, useState } from 'react';
 import { Artwork } from '@/components/media/artwork';
 import { api } from '@/lib/api';
+import { useModalSheet } from '@/lib/modal-sheet';
 import { useCanTravel, usePressScale, useTransition } from '@/lib/motion';
+import { setPlayerExpanded } from '@/lib/player/expanded';
+import { usePlaybackPreferences } from '@/lib/player/preferences';
 import { usePlayerActions, usePlayerState } from '@/lib/player/store';
 import { railWidth, useRailCollapsed } from '@/lib/rail';
 import { AmbientBackdrop } from './ambient-backdrop';
@@ -27,6 +29,7 @@ import { PlayPauseButton, SkipButton } from './controls';
 import { SpeedControl } from './speed-control';
 import { ProgressBar } from './progress-bar';
 import { QueuePanel } from './queue-panel';
+import { SleepTimerButton, SleepTimerChoices, SleepTimerStatus } from './sleep-timer';
 import { useSheetDrag } from './use-sheet-drag';
 import { VolumeSlider } from './volume-slider';
 import { useTranslator } from '@/components/i18n/locale-provider';
@@ -187,6 +190,15 @@ export function Player() {
   const t = useTranslator();
   const state = usePlayerState();
   const actions = usePlayerActions();
+  /*
+    The listener's own skip intervals, subscribed rather than imported.
+
+    These are only ever *drawn* here — `actions.skipBack` has always read them
+    off the machine — and that was the bug: the buttons were handed the module
+    default, so somebody who chose 30s in Settings got a control that said 15,
+    announced 15, and jumped 30.
+  */
+  const preferences = usePlaybackPreferences();
   const [expanded, setExpanded] = useState(false);
 
   /**
@@ -231,14 +243,32 @@ export function Player() {
     return () => controls.stop();
   }, [expanded, expansion, settle]);
 
-  // Escape closes, as it does for every other overlay on the web.
+  /**
+   * The sheet, for the keyboard.
+   *
+   * Escape used to be handled here on its own, which was the visible tenth of
+   * the problem. `useModalSheet` owns it now alongside the containment and the
+   * focus return, and it defers to the speed panel's own Escape rather than
+   * closing the whole player out from under it — see the note there.
+   */
+  const sheetRef = useRef<HTMLDivElement>(null);
+  useModalSheet({
+    open: expanded,
+    onClose: () => setExpanded(false),
+    containerRef: sheetRef,
+  });
+
+  /*
+    Tell the shell, so it can stand down while the sheet is open.
+
+    The rail, the page and the tab bar are this component's siblings rather than
+    its children, so they cannot be handed a prop — see `lib/player/expanded`.
+    Without this the sheet covers the window and every destination behind it
+    stays tabbable, which is the same defect the sheet itself had in reverse.
+  */
   useEffect(() => {
-    if (!expanded) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setExpanded(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    setPlayerExpanded(expanded);
+    return () => setPlayerExpanded(false);
   }, [expanded]);
 
   /**
@@ -390,6 +420,13 @@ export function Player() {
   const togglePanel = (next: 'captions' | 'queue') =>
     setPanelChoice(panel === next ? null : next);
 
+  /* The sleep options, revealed in place under the utility row. Closed again
+     whenever the sheet is, so it is not already open the next time it opens. */
+  const [sleepOpen, setSleepOpen] = useState(false);
+  useEffect(() => {
+    if (!expanded) setSleepOpen(false);
+  }, [expanded]);
+
   /**
    * Whether the sheet is *actually* in two columns right now.
    *
@@ -501,7 +538,38 @@ export function Player() {
     setColumnsSettled((was) => (was === open ? was : open));
   });
 
-  const captionsMounted = wide ? twoColumn || columnsSettled : captionsOpen;
+  /**
+   * Whether the sheet is drawn at all.
+   *
+   * Follows the spring rather than the intent, exactly as `columnsSettled`
+   * does, and for the same reason inverted: the transcript has to survive the
+   * sheet's *closing* animation or the column would blank out while the cover
+   * is still on its way down.
+   */
+  const [sheetVisible, setSheetVisible] = useState(false);
+  useMotionValueEvent(expansion, 'change', (value) => {
+    const visible = value > 0.001;
+    setSheetVisible((was) => (was === visible ? was : visible));
+  });
+
+  /*
+    Gated on the sheet being on screen, which it was not.
+
+    `panelChoice` starts `'unset'` and resolves to `'captions'` at any width past
+    1024, so this was true on every desktop window the moment anything played —
+    with the player collapsed. The whole caption engine ran behind it: a
+    per-frame paint loop, a scroll spring, and a React state write per spoken
+    line, for a column nobody could see. `TranscriptPanel` guards precisely this
+    with `useOnScreen` and documents the cost it measured; the column inside the
+    player had no equivalent because it was assumed to be visible whenever it
+    was mounted. It is now.
+
+    The remount on each open is accepted rather than worked around. `Captions`
+    is already keyed on the episode and re-anchors from the active line as soon
+    as it mounts, so it lands on the right words either way — and a live frame
+    loop behind a closed player is not a thing to trade a scroll position for.
+  */
+  const captionsMounted = sheetVisible && (wide ? twoColumn || columnsSettled : captionsOpen);
 
   const sheetY = useTransform(expansion, [0, 1], [restY, 0]);
   const scrimOpacity = useTransform(expansion, [0, 1], [0, 1]);
@@ -692,7 +760,12 @@ export function Player() {
           // explicitly, it blurs the cover once instead of on every frame.
           style={{ opacity: fullOpacity, willChange: 'opacity' }}
         >
-          <AmbientBackdrop artworkUrl={episode.artworkUrl} accentColor={accentColor} />
+          <AmbientBackdrop
+            artworkUrl={episode.artworkUrl}
+            accentColor={accentColor}
+            active={expanded}
+            expansion={expansion}
+          />
         </m.div>
 
         {/* ------------------------------------------------------- mini -- */}
@@ -712,6 +785,11 @@ export function Player() {
         */}
         <m.div
           {...drag}
+          /* Withdrawn from the keyboard while the sheet is open, not just from
+             the pointer. The bar is a duplicate of controls the sheet already
+             has, sitting underneath it — `pointerEvents` alone left Tab walking
+             through a transport nobody could see. */
+          inert={expanded || undefined}
           style={{
             opacity: miniOpacity,
             pointerEvents: expanded ? 'none' : 'auto',
@@ -761,7 +839,7 @@ export function Player() {
               <div className="flex items-center gap-3">
                 <SkipButton
                   direction="back"
-                  seconds={SKIP_BACK_SEC}
+                  seconds={preferences.skipBackSec}
                   onClick={actions.skipBack}
                   size={36}
                 />
@@ -774,7 +852,7 @@ export function Player() {
                 />
                 <SkipButton
                   direction="forward"
-                  seconds={SKIP_FORWARD_SEC}
+                  seconds={preferences.skipForwardSec}
                   onClick={actions.skipForward}
                   size={36}
                 />
@@ -836,7 +914,7 @@ export function Player() {
 
             {/* ------------------------------------------- narrow transport -- */}
             <div className="flex items-center gap-1 md:hidden">
-              <SkipButton direction="back" seconds={SKIP_BACK_SEC} onClick={actions.skipBack} />
+              <SkipButton direction="back" seconds={preferences.skipBackSec} onClick={actions.skipBack} />
               <PlayPauseButton
                 playing={playing}
                 loading={loading}
@@ -883,6 +961,31 @@ export function Player() {
           on the backdrop.
         */}
         <m.div
+          ref={sheetRef}
+          /*
+            A dialog, at last — and on this element rather than on the region
+            above it, which also contains the mini bar. The bar is not part of
+            the dialog; it is the thing the dialog replaces.
+          */
+          role="dialog"
+          aria-modal={expanded || undefined}
+          aria-label={episode.title}
+          /*
+            The fix for the 662 ghosts.
+
+            Collapsed, this subtree is translated off the bottom of the window
+            at `opacity: 0` — and was still fully tabbable and still read by
+            screen readers, because neither of those properties has anything to
+            say about focus. Measured on a 1440px window with an episode
+            playing: a second transport, a volume slider, a speed control, and
+            651 transcript lines, every one of them a tab stop nobody could see.
+
+            `inert` follows the *intent* rather than the spring, unlike
+            `sheetVisible` above: a sheet that is on its way out should stop
+            accepting the keyboard immediately, whereas its content has to stay
+            drawn until it has finished leaving.
+          */
+          inert={!expanded || undefined}
           style={{
             ...colorVarStyle(stage),
             opacity: fullOpacity,
@@ -974,7 +1077,7 @@ export function Player() {
                 <div className="mt-4 flex items-center justify-center gap-10">
                   <SkipButton
                     direction="back"
-                    seconds={SKIP_BACK_SEC}
+                    seconds={preferences.skipBackSec}
                     onClick={actions.skipBack}
                     size={52}
                   />
@@ -987,7 +1090,7 @@ export function Player() {
                   />
                   <SkipButton
                     direction="forward"
-                    seconds={SKIP_FORWARD_SEC}
+                    seconds={preferences.skipForwardSec}
                     onClick={actions.skipForward}
                     size={52}
                   />
@@ -1007,6 +1110,14 @@ export function Player() {
                   />
 
                   <div className="flex items-center gap-1">
+                    {/* The one control in the product that has to be reachable
+                        with the lights off, and the only one that was built,
+                        tested and translated without ever being drawn. */}
+                    <SleepTimerButton
+                      open={sleepOpen}
+                      onToggle={() => setSleepOpen((was) => !was)}
+                    />
+
                     {/* At both widths now. Two columns previously offered no
                         way to turn the transcript off, which left anyone who
                         just wanted to look at the cover stuck with it. */}
@@ -1027,6 +1138,33 @@ export function Player() {
                     />
                   </div>
                 </div>
+
+                {/*
+                  Revealed in place rather than in a menu.
+
+                  Seven pills fit on one line inside the cover's column, and the
+                  sheet has the vertical room — the same move `CaptionSync`
+                  makes in the transcript beside it. A portalled panel here
+                  would be the second one on this screen, positioned against a
+                  button that moves whenever the column does.
+                */}
+                {sleepOpen ? (
+                  <div className="mt-4 border-t border-[var(--color-border)] pt-4">
+                    <SleepTimerChoices onPick={() => setSleepOpen(false)} />
+                  </div>
+                ) : null}
+
+                {/*
+                  Outside the disclosure, deliberately.
+
+                  Picking an interval closes the options — which is right, the
+                  choice is made — and that took the one line confirming what
+                  had just happened off the screen with them. The moment a
+                  listener most wants to read "Stopping at 23:45" is the moment
+                  immediately after choosing it. It renders nothing when nothing
+                  is armed, so this costs an empty element and no layout.
+                */}
+                <SleepTimerStatus className="mt-3" />
               </m.div>
 
               <AnimatePresence>

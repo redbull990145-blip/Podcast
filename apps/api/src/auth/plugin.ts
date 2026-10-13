@@ -28,6 +28,8 @@ declare module 'fastify' {
   interface FastifyRequest {
     /** Null when the caller is anonymous. Routes decide whether that matters. */
     user: SessionUser | null;
+    /** Authoritative expiry of the credential resolved for this request. */
+    sessionExpiresAt: string | null;
   }
 }
 
@@ -54,6 +56,7 @@ const SENSITIVE_AUTH_PATHS = [
   '/forget-password',
   '/reset-password',
   '/email-otp',
+  '/send-verification-email',
 ];
 
 export function isSensitiveAuthPath(url: string): boolean {
@@ -109,6 +112,7 @@ async function sendWebResponse(reply: FastifyReply, response: Response): Promise
 export async function registerAuth(app: FastifyInstance, auth: Auth): Promise<void> {
   app.decorate('auth', auth);
   app.decorateRequest('user', null);
+  app.decorateRequest('sessionExpiresAt', null);
 
   /**
    * Resolve the session on every request, before any handler runs.
@@ -131,6 +135,17 @@ export async function registerAuth(app: FastifyInstance, auth: Auth): Promise<vo
       return;
     }
 
+    // CORS only controls reading a response. Empty-body writes can be sent
+    // without a preflight, so cookie authentication needs an Origin check.
+    // Native bearer requests carry no cookie and do not need a browser Origin.
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && request.headers.cookie) {
+      const origin = request.headers.origin;
+      const trusted = [...app.config.corsOrigins, new URL(app.config.authUrl).origin];
+      if (typeof origin !== 'string' || !trusted.includes(origin)) {
+        throw new AppError('forbidden', 'This request needs a trusted Origin');
+      }
+    }
+
     const headers = new Headers();
     for (const [key, value] of Object.entries(request.headers)) {
       if (typeof value === 'string') headers.append(key, value);
@@ -138,6 +153,7 @@ export async function registerAuth(app: FastifyInstance, auth: Auth): Promise<vo
 
     try {
       const session = await auth.api.getSession({ headers });
+      request.sessionExpiresAt = session ? session.session.expiresAt.toISOString() : null;
       request.user = session
         ? {
             id: session.user.id,
@@ -147,20 +163,41 @@ export async function registerAuth(app: FastifyInstance, auth: Auth): Promise<vo
           }
         : null;
     } catch (error) {
-      // A failed session lookup means "not signed in", not "server broken".
-      // Throwing here would take down anonymous browsing too.
+      // Public browsing may proceed anonymously through an auth outage. /me
+      // must distinguish that outage from a rejected credential so a native
+      // device can retain its last verified identity until the session expires.
       request.log.warn({ err: error }, 'session lookup failed; treating as anonymous');
       request.user = null;
+      request.sessionExpiresAt = null;
+      if (request.url.split('?')[0] === '/me') throw new AppError('upstream_unavailable', 'Session verification is temporarily unavailable');
+    }
+    // The account selected in a tab must match the session carrying the write.
+    // Cookies can change in another tab before this tab receives its broadcast.
+    const expectedAccount = request.headers['x-cue-account-id'];
+    if (expectedAccount && request.user && expectedAccount !== request.user.id) {
+      throw new AppError('forbidden', 'The account changed. Refresh your session.');
+    }
+  });
+
+  app.addHook('onSend', async (request, reply) => {
+    if (request.user) {
+      void reply.header('X-Cue-Account-Id', request.user.id);
+    }
+    // Even a negative or unavailable identity must be verified on the network.
+    if (request.user || request.url.split('?')[0] === '/me') {
+      void reply.header('Cache-Control', 'private, no-store');
+      const vary = String(reply.getHeader('vary') ?? '');
+      void reply.header('Vary', [...new Set([...vary.split(',').map((v) => v.trim()).filter(Boolean), 'Cookie', 'Authorization'])].join(', '));
     }
   });
 
   /**
    * Drop Fastify's built-in `text/plain` parser.
    *
-   * This is CSRF protection, not tidying. The session cookie is `SameSite=None`
+   * This supplements the explicit Origin check above. The cookie is `SameSite=None`
    * in production — it has to be, since the web app and this API are different
    * registrable domains — so the browser attaches it to cross-site requests and
-   * the only thing standing in the way is that a `<form>` cannot produce
+   * an additional barrier is that a `<form>` cannot produce
    * `application/json`. `text/plain` it *can* produce, via
    * `enctype="text/plain"`, and that needs no preflight and no JavaScript.
    *

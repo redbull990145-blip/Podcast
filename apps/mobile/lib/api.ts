@@ -1,5 +1,6 @@
 import { createClient, xhrSse } from '@cue/api-client';
-import { getToken } from './auth-token';
+import { clearToken, getToken } from './auth-token';
+import { accountScope } from './account';
 
 /**
  * The API base URL on device.
@@ -17,6 +18,6 @@ const baseUrl = process.env['EXPO_PUBLIC_API_URL'] ?? 'http://localhost:8080';
  * the Ask answer would arrive in one silent lump after several seconds, on the
  * platform where that wait is least tolerable.
  */
-export const api = createClient({ baseUrl, getAuthToken: getToken, sse: xhrSse });
+export const api = createClient({ baseUrl, getAuthToken: getToken, getSessionGeneration: accountScope.generation, getAccountId: () => accountScope.snapshot().accountId, onUnauthorized: () => { void clearToken().catch(() => undefined); }, sse: xhrSse });
 
 export { ApiClientError } from '@cue/api-client';

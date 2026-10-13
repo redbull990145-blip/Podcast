@@ -10,11 +10,27 @@
   ],
   "packageManager": "npm@11.16.0",
   "engines": {
-    "node": ">=20.11"
+    "node": ">=20.18.1"
   },
   "overrides": {
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "undici": "7.30.0",
+    "sharp": "0.35.5",
+    "proxy-addr": "2.0.8",
+    "fast-uri@3": "3.1.8",
+    "fast-uri@4": "4.1.5",
+    "brace-expansion@1": "1.1.21",
+    "brace-expansion@2": "2.1.7",
+    "brace-expansion@5": "5.0.12",
+    "@xmldom/xmldom@0.8": "0.8.15",
+    "@xmldom/xmldom@0.9": "0.9.12",
+    "compression": "1.8.2",
+    "fast-copy": "4.1.0",
+    "js-yaml": "4.3.2",
+    "qs": "6.16.0",
+    "shell-quote": "1.11.0",
+    "source-map-js": "1.2.2"
   },
   "scripts": {
     "dev": "turbo run dev",
@@ -34,6 +50,6 @@
     "turbo": "^2.10.9",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.67.0",
-    "vitest": "^4.1.10"
+    "vitest": "4.1.11"
   }
 }

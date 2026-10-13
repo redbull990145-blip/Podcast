@@ -67,6 +67,15 @@ export class NativeAudioEngine implements PlaybackEngine {
    * instead. This class holds the memory and maps field names; that is all.
    */
   private memory: StatusMemory = initialStatusMemory;
+  private loadGeneration = 0;
+  private finishLoad: (() => void) | null = null;
+  private statusSubscription: { remove: () => void } | null = null;
+
+  cancelLoad(): void {
+    this.loadGeneration += 1;
+    this.finishLoad?.();
+    this.finishLoad = null;
+  }
 
   constructor() {
     this.player = createAudioPlayer(null, { updateInterval: UPDATE_INTERVAL_MS });
@@ -76,8 +85,14 @@ export class NativeAudioEngine implements PlaybackEngine {
     // particular rate.
     this.player.shouldCorrectPitch = true;
 
-    this.player.addListener('playbackStatusUpdate', (status) => {
-      this.handleStatus(status);
+    this.subscribeStatus();
+  }
+
+  private subscribeStatus(): void {
+    this.statusSubscription?.remove();
+    const generation = this.loadGeneration;
+    this.statusSubscription = this.player.addListener('playbackStatusUpdate', (status) => {
+      if (generation === this.loadGeneration) this.handleStatus(status);
     });
   }
 
@@ -122,9 +137,12 @@ export class NativeAudioEngine implements PlaybackEngine {
   }
 
   async load(url: string, startAtSec: number): Promise<void> {
+    this.cancelLoad();
+    const generation = this.loadGeneration;
     // A new source starts from a clean memory, or the first tick of the next
     // episode is compared against the last tick of the previous one.
     this.memory = initialStatusMemory;
+    this.subscribeStatus();
 
     this.player.replace({ uri: url });
 
@@ -134,6 +152,7 @@ export class NativeAudioEngine implements PlaybackEngine {
     // would play a fraction of a second from zero first — audible, and it
     // sounds like a glitch. So wait for the load, then seek.
     await this.whenLoaded();
+    if (generation !== this.loadGeneration) return;
     await this.player.seekTo(startAtSec);
   }
 
@@ -148,17 +167,25 @@ export class NativeAudioEngine implements PlaybackEngine {
   private whenLoaded(): Promise<void> {
     if (this.player.isLoaded) return Promise.resolve();
 
-    return new Promise<void>((resolve) => {
-      const timer = setTimeout(finish, 15_000);
-      const subscription = this.player.addListener('playbackStatusUpdate', (status) => {
-        if (status.isLoaded || status.error !== null) finish();
-      });
-
-      function finish(): void {
+    return new Promise<void>((resolve, reject) => {
+      const subscription: { current?: { remove: () => void } } = {};
+      let finished = false;
+      const finish = (error?: Error): void => {
+        if (finished) return;
+        finished = true;
         clearTimeout(timer);
-        subscription.remove();
-        resolve();
-      }
+        subscription.current?.remove();
+        if (this.finishLoad === finish) this.finishLoad = null;
+        if (error) reject(error);
+        else resolve();
+      };
+      const timer = setTimeout(() => finish(new Error('The episode took too long to load')), 15_000);
+      subscription.current = this.player.addListener('playbackStatusUpdate', (status) => {
+        if (status.error !== null) finish(new Error(describeStreamError(status.error)));
+        else if (status.isLoaded) finish();
+      });
+      if (finished) subscription.current.remove();
+      else this.finishLoad = finish;
     });
   }
 
@@ -167,6 +194,9 @@ export class NativeAudioEngine implements PlaybackEngine {
   }
 
   pause(): void {
+    // cancelLoad also invalidates callbacks; retain current-source pause and
+    // subsequent resume status events under the new generation.
+    this.subscribeStatus();
     this.player.pause();
   }
 
@@ -198,7 +228,10 @@ export class NativeAudioEngine implements PlaybackEngine {
   }
 
   destroy(): void {
+    this.cancelLoad();
     this.listeners.clear();
+    this.statusSubscription?.remove();
+    this.statusSubscription = null;
     this.player.clearLockScreenControls();
     this.player.remove();
   }

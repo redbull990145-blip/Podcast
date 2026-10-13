@@ -12,6 +12,7 @@ import postgres from 'postgres';
 import * as schema from './schema/index.ts';
 
 export type Database = ReturnType<typeof createPostgresDatabase>;
+export type DatabaseTransaction = Parameters<Parameters<Database['transaction']>[0]>[0];
 
 export type DatabaseOptions = {
   connectionString: string;

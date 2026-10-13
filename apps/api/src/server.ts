@@ -16,7 +16,7 @@ import {
   createPodcastIndexClient,
   type PodcastIndexClient,
 } from './catalog/podcastindex.ts';
-import type { Config } from './config.ts';
+import { assertLocalDatabaseApproval, type Config } from './config.ts';
 import { registerErrorHandler } from './errors.ts';
 import { createRateLimiter, type RateLimiter } from './rate-limit.ts';
 import { aiRoutes } from './routes/ai.ts';
@@ -40,6 +40,8 @@ declare module 'fastify' {
 }
 
 export async function buildServer(config: Config): Promise<FastifyInstance> {
+  // Check before opening a persistent directory, including direct factory callers.
+  assertLocalDatabaseApproval(config.databaseUrl, config.allowPersistentPgliteMigrations);
   const isTest = config.nodeEnv === 'test';
 
   const app = Fastify({
@@ -54,10 +56,7 @@ export async function buildServer(config: Config): Promise<FastifyInstance> {
         : { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss' } } }),
       redact: ['req.headers.authorization', 'req.headers.cookie'],
     },
-    // A hop count, never `true`. `true` trusts the whole X-Forwarded-For chain
-    // and returns its leftmost entry, which the caller writes — so `request.ip`
-    // becomes attacker-chosen and every IP-keyed limit is bypassed by rotating
-    // a header. See TRUST_PROXY_HOPS in config.ts.
+    // Only explicitly configured proxy addresses may supply client IPs.
     trustProxy: config.trustProxy,
     // A podcast API takes URLs and search strings, never large uploads.
     bodyLimit: 256 * 1024,
@@ -111,6 +110,7 @@ export async function buildServer(config: Config): Promise<FastifyInstance> {
     origin: config.corsOrigins,
     // Required for the session cookie to be sent cross-origin at all.
     credentials: true,
+    exposedHeaders: ['X-Cue-Account-Id'],
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
   });
 

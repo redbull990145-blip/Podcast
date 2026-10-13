@@ -43,7 +43,13 @@ const COVER_BOX = (perPage: number) =>
 
 export function PagedRail({
   items,
-  /** Grid columns, and therefore how many are on screen at once. */
+  /**
+   * How many items a turn of the shelf advances by.
+   *
+   * Not the column count — see the grid below. On a desktop the two are the
+   * same and that is why they were once one number; on a phone the same three
+   * items are stacked rather than squeezed.
+   */
   perPage = 3,
   /** The section's heading, and the `id` its `aria-labelledby` points at. */
   label,
@@ -188,8 +194,20 @@ export function PagedRail({
           is well below the middle of its cover once the caption is included,
           so the arrow needs the artwork's own height, not the cell's.
         */}
+        {/*
+          Only where their geometry is true.
+
+          Both anchors are boxes one column wide and square, which is how the
+          arrow finds the vertical middle of a *cover* rather than of a cell
+          that also contains a caption. That arithmetic holds while the row is
+          `perPage` columns across and stops holding the moment it is not — at
+          one column the box is the full width of the page and the arrow would
+          sit a third of the way down it. Below `lg` the dots turn the shelf
+          instead, which they already did and which is the more reachable
+          control on a touch screen anyway.
+        */}
         <div
-          className="pointer-events-none absolute top-0 end-0 z-10 flex items-center justify-end"
+          className="pointer-events-none absolute top-0 end-0 z-10 hidden items-center justify-end lg:flex"
           style={{ width: COVER_BOX(perPage), aspectRatio: '1 / 1' }}
         >
           {pages > 1 ? <EdgeArrow direction="next" onClick={() => go(1)} label={t.t('rail.next', { section: label })} /> : null}
@@ -199,7 +217,7 @@ export function PagedRail({
             back-arrow points at nothing, and a control that does nothing is
             worse than one that is not there. */}
         <div
-          className="pointer-events-none absolute top-0 start-0 z-10 flex items-center justify-start"
+          className="pointer-events-none absolute top-0 start-0 z-10 hidden items-center justify-start lg:flex"
           style={{ width: COVER_BOX(perPage), aspectRatio: '1 / 1' }}
         >
           {pages > 1 && page > 0 ? (
@@ -218,8 +236,26 @@ export function PagedRail({
             // tweens fade them, and a sprung opacity overshoots past 1 and
             // flickers where the compositor clamps it.
             transition={{ ...settle, opacity: { duration: duration.fast / 1000 } }}
-            className="m-0 grid list-none gap-x-5 gap-y-7 p-0"
-            style={{ gridTemplateColumns: `repeat(${perPage}, minmax(0, 1fr))` }}
+            /*
+              Columns follow the width; the *page* does not.
+
+              `perPage` is how many items a turn of the shelf advances by, and
+              that stays 3 at every size — it is an editorial decision about how
+              much to offer, not a layout one. How many of those three sit side
+              by side is a layout question, and it was answered with an inline
+              `repeat(3, …)`, which no media query can reach: at 375px both of
+              Home's rails rendered three 98px columns, which is not a readable
+              width for a cover with a title under it.
+
+              Two across below `lg`, not one. That is the ladder every other
+              cover grid in this app already uses — `ForYou` on Search, a
+              category's results — and it is the denser of the two readable
+              answers: one column makes a 375px phone show a single 335px cover
+              at a time, which is a poster rather than a shelf. The last row of
+              a three-item page is ragged at two columns, and that is the price
+              of the density.
+            */
+            className="m-0 grid list-none grid-cols-2 gap-x-5 gap-y-7 p-0 lg:grid-cols-3"
           >
             {visible}
           </m.ul>

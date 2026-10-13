@@ -4,6 +4,7 @@ import { playableFromEpisode } from '@cue/core';
 import type { Episode } from '@cue/types';
 import * as m from 'motion/react-m';
 import { useRouter } from 'next/navigation';
+import { useTranslator } from '@/components/i18n/locale-provider';
 import { useHydrated } from '@/lib/hydrated';
 import { usePressScale, useTransition } from '@/lib/motion';
 import { usePlayerActions, usePlayerSelector } from '@/lib/player/store';
@@ -44,6 +45,7 @@ export function PlayButton({
    */
   requiresAccount?: boolean;
 }) {
+  const t = useTranslator();
   const actions = usePlayerActions();
   const router = useRouter();
   const { isSignedIn, isLoading } = useSession();
@@ -112,13 +114,18 @@ export function PlayButton({
         }
         void actions.play(playable);
       }}
-      aria-label={
+      /* The title is a parameter rather than a template literal, so the words
+         around it can sit wherever the language puts them. Built in English
+         here, it read half in the reader's language and half in ours — the same
+         fault `QueueRow` fixed for its own play control. */
+      aria-label={t.t(
         locked
-          ? `Sign in to play ${episode.title}`
+          ? 'episode.signInToPlayTitle'
           : isPlaying
-            ? `Pause ${episode.title}`
-            : `Play ${episode.title}`
-      }
+            ? 'episode.pauseTitle'
+            : 'episode.playTitle',
+        { title: episode.title },
+      )}
       whileTap={{ scale: press }}
       transition={transition}
       className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full border border-[var(--color-border)] bg-transparent text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-hover)]"

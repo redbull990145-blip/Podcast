@@ -6,6 +6,8 @@ import dynamic from 'next/dynamic';
 import { Artwork } from '@/components/media/artwork';
 import { usePlayerActions, usePlayerState } from '@/lib/player/store';
 import { useSession } from '@/lib/session';
+import { PageShell } from '@/components/ui/page-shell';
+import { EmptyState } from '@/components/ui/empty-state';
 
 /**
  * The reorderable list arrives separately.
@@ -39,7 +41,7 @@ export function QueueClient() {
   const queue = state.queue;
 
   return (
-    <div className="mx-auto max-w-[var(--measure-wide)] px-5 py-10 md:px-10">
+    <PageShell width="wide">
       <header className="mb-8 flex items-end justify-between gap-4">
         <div>
           <h1 className="type-display m-0 text-[var(--color-text-primary)]">Queue</h1>
@@ -68,7 +70,7 @@ export function QueueClient() {
       ) : (
         <QueueList queue={queue} />
       )}
-    </div>
+    </PageShell>
   );
 }
 
@@ -109,28 +111,20 @@ function Empty({
   loading: boolean;
   playing: boolean;
 }) {
+  const t = useTranslator();
   if (loading) return null;
 
+  /*
+    Two different emptinesses, and the difference is worth the second pair of
+    keys: "nothing after this one" is a queue that has done its job, "nothing
+    queued" is one that has not been used yet. Both were English literals here,
+    in a component whose own file already imports the translator.
+  */
   return (
-    <div className="rounded-[var(--radius-lg)] border border-dashed border-[var(--color-border)] px-6 py-12 text-center">
-      <p className="type-title3 m-0 text-[var(--color-text-primary)]">
-        {playing ? 'Nothing after this one' : 'Nothing lined up'}
-      </p>
-
-      <p className="type-callout mx-auto mt-2 mb-0 max-w-[var(--measure-prose)] text-[var(--color-text-secondary)]">
-        {playing
-          ? 'Add an episode from any show and it will play when this one finishes.'
-          : 'Queue episodes from a show and they will play back to back.'}
-      </p>
-
-      {!signedIn ? (
-        <p className="type-caption mt-4 mb-0 text-[var(--color-text-tertiary)]">
-          {/* Honest about the limit rather than hiding the queue behind auth:
-              it works signed-out, it just does not follow you. */}
-          Your queue works without an account — signing in is what carries it to
-          your other devices.
-        </p>
-      ) : null}
-    </div>
+    <EmptyState
+      title={playing ? t.t('queue.emptyAfter') : t.t('queue.empty')}
+      body={playing ? t.t('queue.emptyAfterBody') : t.t('queue.emptyBody')}
+      {...(signedIn ? {} : { detail: t.t('queue.worksSignedOut') })}
+    />
   );
 }

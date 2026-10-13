@@ -5,6 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
+import { accountScope } from '@/lib/account';
+import type { AccountSnapshot } from '@cue/core';
 import { useSession } from '@/lib/session';
 import { useTranslator } from '@/components/i18n/locale-provider';
 
@@ -37,23 +39,27 @@ export function SubscribeButton({ podcastId, tint }: { podcastId: string; tint?:
   const subscribed = data?.subscribed ?? false;
 
   const toggle = useMutation({
-    mutationFn: (next: boolean) =>
-      next ? api.subscribe(podcastId) : api.unsubscribe(podcastId),
+    mutationFn: ({ next, owner }: { next: boolean; owner: AccountSnapshot }) => {
+      if (!accountScope.matches(owner)) throw Object.assign(new Error('The account changed'), { name: 'AbortError' });
+      return next ? api.subscribe(podcastId) : api.unsubscribe(podcastId);
+    },
 
-    onMutate: async (next: boolean) => {
+    onMutate: async ({ next, owner }) => {
       // Cancel any in-flight read, or it can land after this write and
       // overwrite the optimistic value with a stale one.
       await queryClient.cancelQueries({ queryKey: key });
+      if (!accountScope.matches(owner)) throw Object.assign(new Error('The account changed'), { name: 'AbortError' });
       const previous = queryClient.getQueryData(key);
       queryClient.setQueryData(key, { subscribed: next });
-      return { previous };
+      return { previous, owner };
     },
 
     onError: (_error, _next, context) => {
-      if (context?.previous) queryClient.setQueryData(key, context.previous);
+      if (context?.previous && accountScope.matches(context.owner)) queryClient.setQueryData(key, context.previous);
     },
 
-    onSettled: () => {
+    onSettled: (_data, _error, { owner }) => {
+      if (!accountScope.matches(owner)) return;
       // The library's contents and this show's state both changed.
       void queryClient.invalidateQueries({ queryKey: key });
       void queryClient.invalidateQueries({ queryKey: queryKeys.library.subscriptions() });
@@ -78,7 +84,7 @@ export function SubscribeButton({ podcastId, tint }: { podcastId: string; tint?:
     <Button
       variant={subscribed ? 'secondary' : 'primary'}
       tint={subscribed ? undefined : tint}
-      onClick={() => toggle.mutate(!subscribed)}
+      onClick={() => toggle.mutate({ next: !subscribed, owner: accountScope.snapshot() })}
       // The label is the state. "Following" tells you where you are; a checkbox
       // and a static word makes you work it out.
       aria-pressed={subscribed}

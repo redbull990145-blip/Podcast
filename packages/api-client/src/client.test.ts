@@ -13,6 +13,85 @@ function clientWith(fetchImpl: typeof fetch, baseUrl = 'https://api.test') {
   return createClient({ baseUrl, fetchImpl });
 }
 
+describe('account boundaries', () => {
+  it('forwards cancellation for session verification and preserves server expiry metadata', async () => {
+    const controller = new AbortController(); const sessionExpiresAt = '2030-01-01T00:00:00.000Z';
+    const fetchImpl = mockFetch({ ok: true, data: { user: null, sessionExpiresAt } });
+    expect(await clientWith(fetchImpl as unknown as typeof fetch).getMe(controller.signal)).toEqual({ user: null, sessionExpiresAt });
+    expect(fetchImpl.mock.calls[0]![1]?.signal).toBe(controller.signal);
+  });
+  it('forwards cancellation of an account-owned progress write', async () => {
+    const controller = new AbortController();
+    const fetchImpl = mockFetch({ ok: true, data: { progress: {}, superseded: false } });
+    const client = clientWith(fetchImpl as unknown as typeof fetch);
+    await client.reportProgress('episode', { positionSec: 30, durationSec: 90, completed: false, deviceId: 'test', observedAt: 1 }, controller.signal);
+    expect(fetchImpl.mock.calls[0]![1]?.signal).toBe(controller.signal);
+  });
+  it('sends the verified account intent and permits /me to discover a cookie change', async () => {
+    const fetchImpl = mockFetch({ ok: true, data: { user: { id: 'B' } } });
+    const client = createClient({ baseUrl: 'https://api.test', getAccountId: () => 'A', fetchImpl: fetchImpl as unknown as typeof fetch });
+    await client.clearQueue();
+    expect(fetchImpl.mock.calls[0]![1]?.headers).toMatchObject({ 'X-Cue-Account-Id': 'A' });
+    const changed = jsonResponse({ ok: true, data: { user: { id: 'B' } } }); changed.headers.set('X-Cue-Account-Id', 'B');
+    fetchImpl.mockResolvedValueOnce(changed);
+    expect(await client.getMe()).toEqual({ user: { id: 'B' } });
+    expect(fetchImpl.mock.calls[1]![1]?.headers).not.toHaveProperty('X-Cue-Account-Id');
+  });
+  it('rejects a delayed response after account A becomes account B', async () => {
+    let generation = 1;
+    let finish!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => { finish = resolve; });
+    const client = createClient({ baseUrl: 'https://api.test', getSessionGeneration: () => generation, fetchImpl: (() => pending) as typeof fetch });
+    const request = client.getQueue();
+    await Promise.resolve();
+    generation += 1;
+    finish(jsonResponse({ ok: true, data: { items: ['A-private'] } }));
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+  });
+  it('does not send a write when identity changes while reading the token', async () => {
+    let generation = 1;
+    const fetchImpl = vi.fn();
+    const client = createClient({ baseUrl: 'https://api.test', getSessionGeneration: () => generation,
+      getAuthToken: async () => { generation += 1; return 'old-token'; }, fetchImpl });
+    await expect(client.clearQueue()).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it('revokes the explicitly captured native token after local credentials are cleared', async () => {
+    const fetchImpl = mockFetch({ success: true });
+    const client = createClient({ baseUrl: 'https://api.test', getAuthToken: () => null, fetchImpl: fetchImpl as unknown as typeof fetch });
+    await client.signOut('departing-token');
+    expect(fetchImpl.mock.calls[0]![1]).toMatchObject({ credentials: 'omit', headers: { authorization: 'Bearer departing-token' } });
+  });
+  it('rejects a private response from a different verified account', async () => {
+    const response = jsonResponse({ ok: true, data: { items: ['B-private'] } });
+    response.headers.set('X-Cue-Account-Id', 'B');
+    const onUnauthorized = vi.fn();
+    const client = createClient({ baseUrl: 'https://api.test', getAccountId: () => 'A', onUnauthorized, fetchImpl: (async () => response) as typeof fetch });
+    await expect(client.getQueue()).rejects.toMatchObject({ name: 'AbortError' });
+    expect(onUnauthorized).toHaveBeenCalledOnce();
+  });
+  it('applies the account fence to raw banner uploads', async () => {
+    let generation = 1;
+    let finish!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => { finish = resolve; });
+    const fetchImpl = vi.fn(() => pending);
+    const client = createClient({ baseUrl: 'https://api.test', getSessionGeneration: () => generation, fetchImpl: fetchImpl as typeof fetch });
+    const file = new Blob(['image'], { type: 'image/png' });
+    const request = client.uploadPlaylistBanner('p', file);
+    await Promise.resolve(); expect(fetchImpl.mock.calls).toHaveLength(1);
+    generation += 1; finish(jsonResponse({ ok: true, data: { playlist: {} } }));
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+  });
+  it('does not deliver streaming tokens from a departed account', async () => {
+    let generation = 1;
+    const onToken = vi.fn();
+    const client = createClient({ baseUrl: 'https://api.test', getSessionGeneration: () => generation,
+      sse: async (options) => { generation += 1; options.onFrame('event: token\ndata: {"token":"A-private"}'); } });
+    await expect(client.askEpisode('e', { question: 'test', onToken })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(onToken).not.toHaveBeenCalled();
+  });
+});
+
 /**
  * A spy with fetch's actual signature, so `mock.calls[0]` is typed as
  * `[string, RequestInit | undefined]` rather than an empty tuple.
@@ -24,6 +103,15 @@ function mockFetch(body: unknown, status = 200) {
 }
 
 describe('request building', () => {
+  it('forwards progress lookup cancellation with the intended account', async () => {
+    const fetchImpl = mockFetch({ ok: true, data: { progress: null } });
+    const controller = new AbortController();
+    const client = createClient({ baseUrl: 'https://api.test', fetchImpl: fetchImpl as unknown as typeof fetch, getAccountId: () => 'A' });
+    await client.getProgress('e1', { signal: controller.signal });
+    const request = fetchImpl.mock.calls[0]![1];
+    expect(request?.signal).toBe(controller.signal);
+    expect((request?.headers as Record<string, string>)['X-Cue-Account-Id']).toBe('A');
+  });
   it('unwraps the envelope so callers see data, not the wrapper', async () => {
     const fetchImpl = mockFetch({ ok: true, data: { episode: { id: 'e1' } } });
 

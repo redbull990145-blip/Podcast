@@ -1,3 +1,5 @@
+import { getTranslator } from '@/lib/i18n';
+
 /**
  * Show notes.
  *
@@ -11,10 +13,16 @@
  * else: sanitise at the boundary, not here. A second component that trusts raw
  * feed markup would reintroduce exactly the hole that one closes.
  */
-export function ShowNotes({ html, text }: { html: string | null; text: string | null }) {
+export async function ShowNotes({ html, text }: { html: string | null; text: string | null }) {
+  // A server component, so it takes the server translator — the same split
+  // `EpisodeRow` documents. The label was a bare English literal on a landmark,
+  // which is the one place a screen reader has no context to fall back on.
+  const t = await getTranslator();
+  const label = t.t('episode.showNotes');
+
   if (html) {
     return (
-      <section aria-label="Show notes" className="max-w-[var(--measure-prose)]">
+      <section aria-label={label} className="max-w-[var(--measure-prose)]">
         <div
           className="show-notes type-body text-[var(--color-text-secondary)]"
           dangerouslySetInnerHTML={{ __html: html }}
@@ -27,7 +35,7 @@ export function ShowNotes({ html, text }: { html: string | null; text: string | 
   // that as text is not a fallback so much as the other normal case.
   if (text) {
     return (
-      <section aria-label="Show notes" className="max-w-[var(--measure-prose)]">
+      <section aria-label={label} className="max-w-[var(--measure-prose)]">
         <p className="type-body whitespace-pre-line text-[var(--color-text-secondary)]">
           {text}
         </p>

@@ -43,14 +43,13 @@ export function ThemeToggle({ className = '' }: { className?: string }) {
       className={[
         'flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full',
         'border-0 bg-[var(--color-surface-hover)] p-0 text-[var(--color-text-primary)]',
-        'transition-colors hover:bg-[var(--color-surface-pressed)]',
+        'cue-button hover:bg-[var(--color-surface-pressed)]',
         className,
       ].join(' ')}
     >
-      {/* Rendered from state rather than crossfaded: the icon is the answer to
-          "which way does this go", and two of them dissolving through each
-          other is a moment where it answers neither. */}
-      {light ? <MoonIcon /> : <SunIcon />}
+      <span key={light ? 'moon' : 'sun'} className="cue-theme-icon flex">
+        {light ? <MoonIcon /> : <SunIcon />}
+      </span>
     </button>
   );
 }

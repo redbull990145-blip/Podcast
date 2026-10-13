@@ -122,6 +122,7 @@ async function run(episodeId: string): Promise<void> {
     const saved = await downloadEpisode(record, {
       signal: controller.signal,
       onProgress: (bytesWritten, bytesTotal) => {
+        if (controller.signal.aborted || active.get(episodeId) !== controller) return;
         const now = Date.now();
         if (now - lastEmit < 250) return;
         lastEmit = now;
@@ -131,17 +132,20 @@ async function run(episodeId: string): Promise<void> {
 
     // Cancelled while the last chunk was in the air: the record is already
     // gone and the files with it, so there is nothing to complete.
-    if (!index[episodeId]) return;
+    if (controller.signal.aborted || active.get(episodeId) !== controller || !index[episodeId]) {
+      deleteFiles({ ...record, fileUri: saved.fileUri, artworkUri: saved.artworkUri });
+      return;
+    }
 
     set(completeDownload(index, episodeId, saved, Date.now()));
   } catch (error) {
     // A cancellation is not a failure — the record was removed on purpose, and
     // marking it failed would resurrect a row the listener just deleted.
-    if (controller.signal.aborted || !index[episodeId]) return;
+    if (controller.signal.aborted || active.get(episodeId) !== controller || !index[episodeId]) return;
 
     set(failDownload(index, episodeId, describe(error)));
   } finally {
-    active.delete(episodeId);
+    if (active.get(episodeId) === controller) active.delete(episodeId);
     // Whatever happened, the slot is free.
     pump();
   }

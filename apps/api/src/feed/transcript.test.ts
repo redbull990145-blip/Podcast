@@ -27,6 +27,17 @@ Today we are talking about inflation.
 `;
 
 describe('parseTranscript', () => {
+  it('drops invalid clock fields and unsafe numeric timestamps without losing valid cues', () => {
+    const huge = '9'.repeat(400);
+    const source = `WEBVTT\n\n00:99:00 --> 00:99:01\nbad minute\n\n00:00:99 --> 00:01:00\nbad second\n\n${huge}:00:00 --> ${huge}:00:01\noverflow\n\n00:00:01 --> 00:00:02\nvalid`;
+    expect(parseTranscript(source)).toMatchObject([{ text: 'valid', startMs: 1000, endMs: 2000 }]);
+    expect(timestampMapOffset(`X-TIMESTAMP-MAP=LOCAL:00:00:00,MPEGTS:${huge}`)).toBe(0);
+  });
+  it('decodes valid Unicode entities in captions and replaces invalid scalars safely', () => {
+    const [caption] = parseTranscript('00:00:01 --> 00:00:02\nA &amp; B &#x1F399; &#1114112; &#xD800;');
+    expect(caption?.text).toBe('A & B 🎙 � �');
+    expect(parseHtmlTranscript('<p>&#1114112; &#xFFFFFFFF; &#xD800; &#0; &#x1F399;</p>')[0]?.text).toBe('� � � � 🎙');
+  });
   it('reads WebVTT', () => {
     const segments = parseTranscript(VTT);
     expect(segments).toHaveLength(2);

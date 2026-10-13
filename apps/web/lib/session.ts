@@ -5,6 +5,7 @@ import type { SessionUser } from '@cue/types';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { api } from './api';
+import { accountScope, beginAccountTransition, bindAccountCache } from './account';
 import { purgeCachedData } from './connectivity';
 import { resetQueue, setSyncState } from './player/store';
 
@@ -17,9 +18,15 @@ import { resetQueue, setSyncState } from './player/store';
  * against a rejected promise just to render.
  */
 export function useSession() {
+  const queryClient = useQueryClient();
+  bindAccountCache(queryClient);
   const { data, isPending } = useQuery({
     queryKey: queryKeys.session,
-    queryFn: () => api.getMe(),
+    queryFn: async () => {
+      const result = await api.getMe();
+      accountScope.set(result.user?.id ?? null);
+      return result;
+    },
     // The session is read by nearly every screen; refetching it per navigation
     // would put a request in front of every page for information that changes
     // roughly never.
@@ -39,8 +46,14 @@ export function useSignOut() {
   const router = useRouter();
 
   return useMutation({
-    mutationFn: () => api.signOut(),
-    onSuccess: () => {
+    mutationFn: async () => {
+      beginAccountTransition(queryClient);
+      const owner = accountScope.snapshot();
+      await api.signOut();
+      return owner;
+    },
+    onSuccess: (owner) => {
+      if (!accountScope.matches(owner)) return;
       // Everything user-scoped in the cache belonged to the person who just
       // left. Clearing it wholesale is the only safe move — a stale library
       // rendering under the next person's session would be a data leak.

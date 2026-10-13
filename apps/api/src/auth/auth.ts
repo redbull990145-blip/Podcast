@@ -77,10 +77,9 @@ export function createAuth(db: Database, config: Config, log: FastifyBaseLogger)
       // active listener is never signed out mid-episode.
       updateAge: 60 * 60 * 24,
       cookieCache: {
-        // Cache the session on the request for a few seconds so a page making
-        // several API calls does not hit the sessions table once per call.
-        enabled: true,
-        maxAge: 5 * 60,
+        // A signed cache cookie outlives revocation/expiry in the sessions table.
+        // Always resolve the current row, including cookies from older releases.
+        enabled: false,
       },
     },
 

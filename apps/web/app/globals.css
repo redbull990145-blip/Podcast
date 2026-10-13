@@ -592,6 +592,69 @@ body {
   }
 }
 
+/* Interaction feedback stays local to the control and uses compositor motion. */
+.cue-button {
+  transition:
+    transform var(--spring-responsive-duration) var(--spring-responsive),
+    background-color var(--duration-instant) var(--ease-standard),
+    border-color var(--duration-instant) var(--ease-standard),
+    opacity var(--duration-instant) var(--ease-standard);
+}
+
+.cue-button:not(:disabled):active {
+  transform: scale(0.95);
+  transition-duration: 60ms;
+  transition-timing-function: var(--ease-standard);
+}
+
+.cue-artwork-feedback {
+  transition: transform var(--spring-standard-duration) var(--spring-standard);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .cue-button:not(:disabled):hover:not(:active) {
+    transform: translateY(-1px);
+  }
+
+  .group:hover .cue-artwork-feedback,
+  .group:focus-visible .cue-artwork-feedback {
+    transform: translateY(-5px) scale(1.015);
+  }
+
+  .cue-episode-row:hover {
+    background-color: var(--color-surface-hover);
+  }
+}
+
+.group:active .cue-artwork-feedback {
+  transform: scale(0.98);
+  transition-duration: 60ms;
+}
+
+.cue-episode-row {
+  transition: background-color var(--duration-instant) var(--ease-standard);
+}
+
+.cue-theme-icon {
+  animation: cue-theme-arrive var(--spring-snappy-duration) var(--spring-snappy);
+}
+
+@keyframes cue-theme-arrive {
+  from { transform: rotate(-35deg) scale(0.6); opacity: 0; }
+  to { transform: rotate(0) scale(1); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cue-button,
+  .cue-artwork-feedback {
+    transform: none !important;
+  }
+
+  .cue-theme-icon {
+    animation: none;
+  }
+}
+
 /* ------------------------------------------------------------- a11y ------ */
 
 /* Visible focus, but only for keyboard users — a mouse click on a button

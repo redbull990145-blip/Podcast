@@ -142,6 +142,16 @@ export const en = {
   'library.groupUnplayed': 'Waiting for you',
   'library.groupActive': 'Still running',
   'library.groupQuiet': 'Gone quiet',
+  'library.browseAnyway': 'Browse without an account',
+  'library.findSomething': 'Find something',
+  'library.noEpisodes': 'No episodes yet',
+  /* Terse on purpose: "20 new episodes" squeezes a 375px row until the show's
+     own title truncates. The full count is the row's accessible name. */
+  'library.newCount': '{count} new',
+  'search.fieldLabel': 'Search podcasts',
+  'search.failed': 'Search failed.',
+  'search.trendingFailed': 'Couldn’t load trending shows.',
+  'search.openFailed': 'Couldn’t open that show.',
 
   // --------------------------------------------------------------- search --
   'search.title': 'Search',
@@ -241,6 +251,9 @@ export const en = {
   'queue.title': 'Queue',
   'queue.empty': 'Nothing queued',
   'queue.emptyBody': 'Add an episode and it will play after this one.',
+  'queue.emptyAfter': 'Nothing after this one',
+  'queue.emptyAfterBody': 'Add an episode from any show and it will play when this one finishes.',
+  'queue.worksSignedOut': 'Your queue works without an account — signing in is what carries it to your other devices.',
   'queue.waiting': '{count, plural, =0 {Queue, empty} one {Queue, # waiting} other {Queue, # waiting}}',
   'queue.remove': 'Remove from queue',
   'queue.clear': 'Clear the queue',
@@ -516,6 +529,7 @@ export const en = {
   'settings.skipBackHint': 'You skip back to re-hear something specific.',
   'settings.skipForward': 'Skip forward',
   'settings.skipForwardHint': 'And forward to escape an ad.',
+  'settings.sleepTimerHint': 'Stops playing after a while. It runs on the clock, so it keeps time with your phone asleep.',
 
   'settings.language': 'Language',
   'settings.languageCaption':
@@ -552,6 +566,26 @@ export const en = {
   'auth.noAccount': 'Create an account',
   'auth.haveAccount': 'Sign in instead',
 
+  'auth.verifyTitle': 'Check your email',
+  'auth.verifyBody': 'We sent a {count}-digit code to {email}.',
+  'auth.verifyCode': 'Verification code',
+  'auth.verify': 'Verify',
+  'auth.verifying': 'Verifying…',
+  'auth.noCode': 'Didn’t get it?',
+  'auth.resend': 'Send another',
+  'auth.resendIn': 'Send another in {seconds}s',
+  'auth.resent': 'Sent. Check your email.',
+  'auth.resendFailed': 'Couldn’t send another code.',
+  'auth.failed': 'Something went wrong. Try again.',
+  'auth.signinHeading': 'Welcome back',
+  'auth.signupHeading': 'Make an account',
+  'auth.lede': 'Your library and your place in every episode, on every device.',
+  'auth.createAccount': 'Create account',
+  'auth.creating': 'Creating…',
+  'auth.newHere': 'New here?',
+  'auth.alreadyHaveOne': 'Already have one?',
+  'auth.passwordHint': 'At least 8 characters.',
+
   // --------------------------------------------------------------- format --
   // Words that live inside otherwise numeric output. They belong in the
   // catalog rather than in the formatter, because "min" is not the
@@ -561,6 +595,12 @@ export const en = {
   'queue.after': '{count, plural, one {# episode after this one.} other {# episodes after this one.}}',
   'queue.reorder': 'Reorder {title}',
   'queue.removeTitle': 'Remove {title} from the queue',
+  'episode.playTitle': 'Play {title}',
+  'episode.pauseTitle': 'Pause {title}',
+  'episode.signInToPlayTitle': 'Sign in to play {title}',
+  'episode.addToQueueTitle': 'Add {title} to the queue',
+  'episode.played': 'Played',
+  'episode.partHeard': '{percent}% played',
   'home.timeLeft': '{duration} left',
   'home.resume': 'Resume {title}',
 

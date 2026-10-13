@@ -8,6 +8,7 @@ import {
   oklabToRgb,
   rgbToHex,
   rgbToOklab,
+  tintedScheme,
 } from './tint.ts';
 
 /** Real podcast covers are rarely well-behaved. These are the awkward ones. */
@@ -163,5 +164,24 @@ describe('deriveCover', () => {
 
   it('returns nothing for a colour it cannot read', () => {
     expect(deriveCover('not a colour')).toBeNull();
+  });
+});
+
+describe('light artwork palette', () => {
+  it.each([COVERS.vividOrange, COVERS.deepBlue, COVERS.hotPink, COVERS.fluorescentLime])(
+    'keeps visible artwork chroma in %s instead of bleaching it into white',
+    (hex) => {
+      const ground = rgbToOklab(hexToRgb(tintedScheme(hex, 'light')!.bg)!);
+      const darkGround = rgbToOklab(hexToRgb(tintedScheme(hex, 'dark')!.bg)!);
+      expect(ground.L).toBeGreaterThan(0.85);
+      expect(ground.L).toBeLessThan(0.94);
+      expect(Math.hypot(ground.a, ground.b)).toBeGreaterThan(0.045);
+      expect(Math.hypot(ground.a, ground.b)).toBeGreaterThan(Math.hypot(darkGround.a, darkGround.b));
+    },
+  );
+
+  it('keeps grey artwork neutral in the richer light palette', () => {
+    const ground = rgbToOklab(hexToRgb(tintedScheme(COVERS.neutralGrey, 'light')!.bg)!);
+    expect(Math.hypot(ground.a, ground.b)).toBeLessThan(0.002);
   });
 });

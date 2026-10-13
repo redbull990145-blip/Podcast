@@ -13,17 +13,13 @@
  *   4. Redirect re-validation      — a public URL that 302s to a private one
  *   5. Size and time caps          — a feed that never ends
  *
- * KNOWN RESIDUAL RISK: there is a TOCTOU window between our DNS check and the
- * socket connecting, so an attacker controlling a DNS server with a ~0s TTL
- * could in principle rebind between the two. Closing it fully means pinning
- * the connection to the address we validated, via a custom undici dispatcher
- * with its own `lookup`. Deliberately not done yet — noted rather than
- * pretended away, and `resolveHostname` is factored so the dispatcher can be
- * dropped in without touching callers.
+ * Callers pass the resulting address snapshot to pinned-fetch.ts, so the
+ * socket connects to an address checked here without repeating DNS.
  */
 
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { abortable, operationDeadline } from '../ai/deadline.ts';
 
 export type UrlRejection =
   | 'invalid-url'
@@ -114,19 +110,33 @@ function isBlockedIpv4(address: string): string | null {
 }
 
 function isBlockedIpv6(address: string): string | null {
-  const normalized = address.toLowerCase().replace(/^\[|\]$/g, '');
+  const normalized = new URL(`http://[${address}]/`).hostname.slice(1, -1).toLowerCase();
+  const [left = '', right] = normalized.split('::');
+  const leading = left ? left.split(':') : [];
+  const trailing = right ? right.split(':') : [];
+  const words = (right === undefined ? leading : [...leading, ...Array<string>(8 - leading.length - trailing.length).fill('0'), ...trailing]).map((word) => parseInt(word, 16));
 
-  if (normalized === '::1') return 'loopback';
-  if (normalized === '::') return 'unspecified';
+  if (words.slice(0, 7).every((word) => word === 0) && words[7] === 1) return 'loopback';
+  if (words.every((word) => word === 0)) return 'unspecified';
 
   // IPv4-mapped (`::ffff:127.0.0.1`) must be judged on the embedded IPv4, or
   // every v4 rule above is trivially bypassed by wrapping the address.
-  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(normalized);
-  if (mapped?.[1]) return isBlockedIpv4(mapped[1]);
+  if (words.slice(0, 5).every((word) => word === 0) && words[5] === 0xffff) {
+    const high = words[6]!; const low = words[7]!;
+    return isBlockedIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+  }
 
   // fc00::/7 unique-local, fe80::/10 link-local.
   if (/^f[cd]/.test(normalized)) return 'unique-local';
   if (/^fe[89ab]/.test(normalized)) return 'link-local';
+  if (/^ff/.test(normalized)) return 'multicast';
+
+  // Restrict publisher IPv6 to native global unicast. Transition/translation
+  // prefixes can route embedded IPv4 to internal targets on capable networks.
+  // IANA special-purpose ranges are not public podcast destinations.
+  if (words[0]! < 0x2000 || words[0]! > 0x3fff) return 'non-global IPv6';
+  if (words[0] === 0x2002 || (words[0] === 0x2001 && words[1]! < 0x200)) return 'special-purpose IPv6';
+  if ((words[0] === 0x2001 && words[1] === 0x0db8) || (words[0] === 0x3fff && words[1]! < 0x1000)) return 'documentation';
 
   return null;
 }
@@ -135,7 +145,10 @@ function isBlockedIpv6(address: string): string | null {
 export function isBlockedAddress(address: string): string | null {
   const version = isIP(address);
   if (version === 4) return isBlockedIpv4(address);
-  if (version === 6) return isBlockedIpv6(address);
+  if (version === 6) {
+    try { return isBlockedIpv6(address); }
+    catch { return 'malformed or scoped IPv6 address'; }
+  }
   return 'not an IP address';
 }
 
@@ -187,7 +200,7 @@ async function resolveHostname(hostname: string): Promise<string[]> {
  * Full check. Returns the validated URL plus the addresses it resolved to, so
  * a caller can log exactly what it was about to talk to.
  */
-export async function checkUrl(input: string): Promise<UrlCheck> {
+export async function checkUrl(input: string, options: { signal?: AbortSignal; resolveHostname?: (hostname: string) => Promise<string[]> } = {}): Promise<UrlCheck> {
   const url = normalizeFeedUrl(input);
   if (!url) {
     return { allowed: false, reason: 'invalid-url', detail: 'Could not be parsed as a URL' };
@@ -207,23 +220,28 @@ export async function checkUrl(input: string): Promise<UrlCheck> {
   }
 
   // A literal IP skips DNS entirely and is checked directly.
-  if (isIP(url.hostname) !== 0) {
-    const blocked = isBlockedAddress(url.hostname);
+  const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  if (isIP(hostname) !== 0) {
+    const blocked = isBlockedAddress(hostname);
     if (blocked) {
       return { allowed: false, reason: 'private-address', detail: `Address is ${blocked}` };
     }
-    return { allowed: true, url, addresses: [url.hostname] };
+    return { allowed: true, url, addresses: [hostname] };
   }
 
   let addresses: string[];
+  const deadline = operationDeadline(options.signal, 15_000);
   try {
-    addresses = await resolveHostname(url.hostname);
+    deadline.signal.throwIfAborted();
+    addresses = await abortable((options.resolveHostname ?? resolveHostname)(url.hostname), deadline.signal);
   } catch {
     return {
       allowed: false,
       reason: 'dns-failure',
       detail: `Could not resolve ${url.hostname}`,
     };
+  } finally {
+    deadline.dispose();
   }
 
   if (addresses.length === 0) {

@@ -12,11 +12,12 @@
 
 import { sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
+import { buildProvenance } from '../build-provenance.ts';
 
 export function healthRoutes(app: FastifyInstance): void {
   app.get('/health', async () => ({
     ok: true,
-    data: { status: 'up', uptimeSec: Math.round(process.uptime()) },
+    data: { status: 'up', uptimeSec: Math.round(process.uptime()), build: buildProvenance },
   }));
 
   app.get('/health/ready', async (_request, reply) => {
@@ -36,6 +37,7 @@ export function healthRoutes(app: FastifyInstance): void {
       ok: true,
       data: {
         status: 'ready',
+        build: buildProvenance,
         databaseLatencyMs: Math.round(performance.now() - startedAt),
         cache: app.cache.client ? 'connected' : 'disabled',
       },

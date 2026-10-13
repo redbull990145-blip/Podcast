@@ -49,11 +49,24 @@ function audioExtension(url: string): string {
 }
 
 export function audioFile(record: DownloadRecord): File {
+  const saved = ownedFile(record.fileUri, AUDIO_DIR);
+  if (saved) return saved;
   return new File(AUDIO_DIR, `${safeName(record.episodeId)}${audioExtension(record.audioUrl)}`);
 }
 
 function artworkFile(record: DownloadRecord): File {
+  const saved = ownedFile(record.artworkUri, ART_DIR);
+  if (saved) return saved;
   return new File(ART_DIR, `${safeName(record.episodeId)}.img`);
+}
+
+function ownedFile(uri: string | null, directory: Directory): File | null {
+  if (!uri) return null;
+  const prefix = `${directory.uri.replace(/\/$/, '')}/`;
+  if (!uri.startsWith(prefix)) return null;
+  const name = uri.slice(prefix.length);
+  if (!/^[A-Za-z0-9_-]+\.(mp3|m4a|aac|ogg|opus|wav|flac|img)$/.test(name)) return null;
+  return new File(directory, name);
 }
 
 // ------------------------------------------------------------------- index --
@@ -66,6 +79,16 @@ function artworkFile(record: DownloadRecord): File {
  * on internal storage — this is not the async-worthy part of the feature.
  */
 export function readIndex(): DownloadIndex {
+  // Only abandoned temporary files in this module's own directories. A fresh
+  // process has no active transfers yet when the index is first read.
+  for (const directory of [AUDIO_DIR, ART_DIR]) {
+    try {
+      if (!directory.exists) continue;
+      for (const item of directory.list()) {
+        if (item instanceof File && /^[A-Za-z0-9_-]+\.part$/.test(item.name)) removeFile(item);
+      }
+    } catch { /* Failure to clean partial files does not make them playable. */ }
+  }
   try {
     if (!INDEX_FILE.exists) return normalizeIndex(null);
     return normalizeIndex(JSON.parse(INDEX_FILE.textSync()));
@@ -105,7 +128,8 @@ export function reconcileWithDisk(index: DownloadIndex): DownloadIndex {
     }
 
     try {
-      if (audioFile(record).exists) kept[record.episodeId] = record;
+      const file = audioFile(record);
+      if (file.exists && file.size > 0 && file.size === record.bytesWritten) kept[record.episodeId] = record;
     } catch {
       // Unreadable counts as absent.
     }
@@ -136,39 +160,72 @@ export async function downloadEpisode(
   options: { onProgress: (bytesWritten: number, bytesTotal: number) => void; signal: AbortSignal },
 ): Promise<SavedFiles> {
   ensureDirectories();
-
-  const destination = audioFile(record);
+  // An old transfer may still finish after cancellation. Its files must never
+  // share a path with a replacement attempt.
+  const transfer = `${safeName(record.episodeId)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  const destination = new File(AUDIO_DIR, `${transfer}.part`);
+  const published = new File(AUDIO_DIR, `${transfer}${audioExtension(record.audioUrl)}`);
+  let expectedBytes = -1;
 
   const task = File.createDownloadTask(record.audioUrl, destination, {
     signal: options.signal,
     onProgress: ({ bytesWritten, totalBytes }) => {
+      expectedBytes = totalBytes;
       options.onProgress(bytesWritten, totalBytes);
     },
   });
 
-  const file = await task.downloadAsync();
-  if (!file) throw new Error('The download stopped before it finished');
-
-  return {
-    fileUri: file.uri,
-    artworkUri: await downloadArtwork(record),
-    // The size on disk, which is the only number that is not a claim.
-    bytes: file.size,
-  };
+  try {
+    const file = await task.downloadAsync();
+    throwIfAborted(options.signal);
+    if (!file || file.size <= 0 || (expectedBytes > 0 && file.size !== expectedBytes)) {
+      throw new Error('The download stopped before it finished');
+    }
+    const bytes = file.size;
+    file.move(published);
+    const artworkUri = await downloadArtwork(record, transfer, options.signal);
+    throwIfAborted(options.signal);
+    return { fileUri: published.uri, artworkUri, bytes };
+  } catch (error) {
+    removeFile(destination);
+    removeFile(published);
+    removeFile(new File(ART_DIR, `${transfer}.img`));
+    throw error;
+  }
 }
 
-async function downloadArtwork(record: DownloadRecord): Promise<string | null> {
+async function downloadArtwork(record: DownloadRecord, transfer: string, signal: AbortSignal): Promise<string | null> {
   if (!record.artworkUrl) return null;
-
+  const destination = new File(ART_DIR, `${transfer}.part`);
+  const published = new File(ART_DIR, `${transfer}.img`);
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  signal.addEventListener('abort', cancel, { once: true });
+  if (signal.aborted) cancel();
+  const deadline = setTimeout(cancel, 30_000);
   try {
-    const file = await File.downloadFileAsync(record.artworkUrl, artworkFile(record), {
-      idempotent: true,
-    });
-    return file.uri;
+    const file = await File.createDownloadTask(record.artworkUrl, destination, { signal: controller.signal }).downloadAsync();
+    throwIfAborted(controller.signal);
+    if (!file || file.size <= 0) throw new Error('Artwork was incomplete');
+    file.move(published);
+    return published.uri;
   } catch {
+    removeFile(destination);
+    removeFile(published);
     // Cosmetic. The record still holds the publisher's URL.
     return null;
+  } finally {
+    clearTimeout(deadline);
+    signal.removeEventListener('abort', cancel);
   }
+}
+
+function removeFile(file: File): void {
+  try { if (file.exists) file.delete(); } catch { /* Best-effort cleanup. */ }
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw Object.assign(new Error('The download was cancelled'), { name: 'AbortError' });
 }
 
 /**

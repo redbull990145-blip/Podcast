@@ -5,9 +5,9 @@
 # environment and listens on $PORT. Koyeb, Fly, or a container host take the
 # same three commands.
 #
-# The web app is not in this file. It deploys to Vercel from the same repo with
-# no config: root directory `apps/web`, and the environment variables under
-# "Client → API" in .env.example.
+# The web app is not in this file. The repository workflow targets Cloudflare
+# Workers; Vercel remains a separately configured fallback. Validate both
+# origins against the API's CORS allowlist before an approved release.
 
 services:
   - type: web
@@ -29,11 +29,11 @@ services:
       - key: NODE_ENV
         value: production
 
-      # One Render load balancer sits in front. This decides whose address a
-      # rate limit is counted against; see .env.example for why the number
-      # matters in both directions.
-      - key: TRUST_PROXY_HOPS
-        value: 1
+      # Set only provider-verified IP addresses/CIDRs. Hop counts cannot prove
+      # proxy identity. With no addresses the API ignores forwarding headers.
+      # This local declaration does not establish Render's proxy addresses.
+      - key: TRUST_PROXY_ADDRESSES
+        sync: false
 
       # Everything below is a secret or an environment-specific URL, so it is
       # set in the dashboard rather than committed. `sync: false` is what makes
@@ -45,6 +45,10 @@ services:
       - key: BETTER_AUTH_URL
         sync: false
       - key: CORS_ORIGINS
+        sync: false
+      # Existing shared renderer token; must match the web runtime binding.
+      # Do not generate/rotate it as part of applying this proposal.
+      - key: INTERNAL_API_TOKEN
         sync: false
       - key: REDIS_URL
         sync: false

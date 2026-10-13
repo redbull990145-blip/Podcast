@@ -25,7 +25,7 @@ describe('client address behind a proxy', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    app = await buildServer(loadConfig(BASE_ENV));
+    app = await buildServer(loadConfig({ ...BASE_ENV, TRUST_PROXY_ADDRESSES: '127.0.0.1' }));
     app.get('/test/whoami', async (request) => ({
       ok: true,
       data: { ip: request.ip, identity: rateLimitIdentity(request) },

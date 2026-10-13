@@ -14,8 +14,6 @@
  * place in this feature where scaling out costs quota rather than correctness.
  */
 
-import { transcripts } from '@cue/db';
-import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { claimQuota, refundQuota } from '../access.ts';
 import { alignEpisode, type AlignOutcome } from './run.ts';
@@ -53,24 +51,14 @@ export async function requestAlignment(
     return { started: true, outcome: await settle(running) };
   }
 
-  const { metered, day } = await claimQuota(app, userId);
-
-  const job = alignEpisode(app, episodeId, userId)
-    .then(async (outcome) => {
-      if (outcome.status === 'aligned') {
-        await app.db
-          .update(transcripts)
-          .set({ alignment: outcome.alignment })
-          .where(
-            and(
-              eq(transcripts.episodeId, episodeId),
-              // Only a publisher transcript. If a generated one landed while this
-              // was running it describes audio this correction knows nothing
-              // about, and applying it would break a transcript that was right.
-              eq(transcripts.source, 'feed'),
-            ),
-          );
-      }
+  // Publish the shared admission promise before yielding to quota I/O. Joining
+  // callers share even a pending reservation and never pay for a second job.
+  const job: Promise<AlignOutcome> = (async (): Promise<AlignOutcome> => {
+    const { metered, day } = await claimQuota(app, userId);
+    try {
+      const outcome = await alignEpisode(app, episodeId, userId, {
+        funding: metered ? 'operator' : 'byok',
+      });
 
       /**
        * Refund anything that did not produce a correction.
@@ -86,22 +74,21 @@ export async function requestAlignment(
       }
 
       return outcome;
-    })
-    .catch(async (error: unknown): Promise<AlignOutcome> => {
+    } catch (error: unknown) {
       if (metered && day) await refundQuota(app, userId, day);
       return {
         status: 'failed',
         detail: error instanceof Error ? error.message : 'The alignment failed',
       };
-    })
-    .finally(() => {
-      inFlight.delete(episodeId);
-    });
+    }
+  })().finally(() => {
+    if (inFlight.get(episodeId) === job) inFlight.delete(episodeId);
+  });
 
   inFlight.set(episodeId, job);
 
-  // Not awaited past the deadline, but never unhandled: `job` already carries a
-  // `catch`, so letting the race drop it cannot produce an unhandled rejection.
+  // Every caller observes this promise through settle's race. Admission errors
+  // propagate to those callers; provider failures become the existing outcome.
   return { started: true, outcome: await settle(job) };
 }
 

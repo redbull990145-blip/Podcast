@@ -12,6 +12,8 @@
 # than letting the more specific one win, so anything repeated here would be
 # sent twice.
 /*
+  X-Cue-Revision: 3b8409be69ffed8c4376788c421b32986258e8af
+  X-Cue-Source-Dirty: true
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Strict-Transport-Security: max-age=63072000; includeSubDomains

@@ -19,8 +19,8 @@
  * anchors *disagree*, which is exactly where an ad break must be.
  */
 
-import { episodes, transcripts } from '@cue/db';
-import { eq } from 'drizzle-orm';
+import { episodes, transcripts, type TranscriptRow } from '@cue/db';
+import { and, eq, getTableColumns, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { keyFor } from '../access.ts';
 import { transcribe } from '../groq.ts';
@@ -29,12 +29,7 @@ import type { Transcript } from '@cue/types';
 import { isTimed } from '../../feed/transcript.ts';
 import { findAnchor, indexReference, referenceTokens } from './anchor.ts';
 import { insertedAudio, readAudioShape, type AudioShape } from './detect.ts';
-import {
-  buildOffsetMap,
-  STEP_TOLERANCE_MS,
-  type Anchor,
-  type OffsetMap,
-} from './map.ts';
+import { buildOffsetMap, STEP_TOLERANCE_MS, type Anchor, type OffsetMap } from './map.ts';
 import { fetchProbe, hypothesisTokens, type Probe } from './probe.ts';
 
 /**
@@ -110,6 +105,11 @@ export type AlignOutcome =
   | { status: 'inconclusive'; detail: string; probes: number }
   | { status: 'failed'; detail: string };
 
+/** Server timestamp text retains microseconds that the Date mapper discards. */
+export type VersionedTranscriptRow = TranscriptRow & {
+  fetchedAtVersion: string;
+};
+
 /**
  * Align one episode's publisher transcript against the audio.
  *
@@ -120,18 +120,21 @@ export async function alignEpisode(
   app: FastifyInstance,
   episodeId: string,
   userId: string,
-  options: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void } = {},
+  options: {
+    funding: 'byok' | 'operator';
+    signal?: AbortSignal;
+    onProgress?: (done: number, total: number) => void;
+  },
 ): Promise<AlignOutcome> {
-  const [episode] = await app.db
-    .select()
-    .from(episodes)
-    .where(eq(episodes.id, episodeId))
-    .limit(1);
+  const [episode] = await app.db.select().from(episodes).where(eq(episodes.id, episodeId)).limit(1);
 
   if (!episode) return { status: 'failed', detail: 'No such episode' };
 
   const [row] = await app.db
-    .select()
+    .select({
+      ...getTableColumns(transcripts),
+      fetchedAtVersion: sql<string>`to_char(${transcripts.fetchedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+    })
     .from(transcripts)
     .where(eq(transcripts.episodeId, episodeId))
     .limit(1);
@@ -194,10 +197,13 @@ export async function alignEpisode(
 
   const index = indexReference(referenceTokens(row.segments));
   if (index.tokens.length === 0) {
-    return { status: 'failed', detail: 'This transcript has no words to match' };
+    return {
+      status: 'failed',
+      detail: 'This transcript has no words to match',
+    };
   }
 
-  const funding = await keyFor(app, userId);
+  const funding = await keyFor(app, userId, options.funding);
   const duration = shape.durationMs;
   const anchors: Anchor[] = [];
   const attempted = new Set<number>();
@@ -272,17 +278,47 @@ export async function alignEpisode(
     };
   }
 
+  const alignment: StoredAlignment = {
+    steps: map.steps,
+    anchors: map.anchors,
+    confidence: map.confidence,
+    probes,
+    audioDurationMs: duration,
+    at: new Date().toISOString(),
+  };
+  if (!(await saveAlignment(app, row, alignment))) {
+    return {
+      status: 'failed',
+      detail: 'The transcript changed while its alignment was running. Try again.',
+    };
+  }
   return {
     status: 'aligned',
-    alignment: {
-      steps: map.steps,
-      anchors: map.anchors,
-      confidence: map.confidence,
-      probes,
-      audioDurationMs: duration,
-      at: new Date().toISOString(),
-    },
+    alignment,
   };
+}
+
+/** Publish only against the exact publisher cues measured by this attempt. */
+export async function saveAlignment(
+  app: FastifyInstance,
+  observed: VersionedTranscriptRow,
+  alignment: StoredAlignment,
+): Promise<boolean> {
+  const changed = await app.db
+    .update(transcripts)
+    .set({ alignment })
+    .where(
+      and(
+        eq(transcripts.episodeId, observed.episodeId),
+        eq(transcripts.source, 'feed'),
+        eq(transcripts.status, 'ready'),
+        sql`${transcripts.fetchedAt} = ${observed.fetchedAtVersion}::timestamptz`,
+        eq(transcripts.revision, observed.revision),
+        eq(transcripts.segments, observed.segments),
+      ),
+    )
+    .returning({ id: transcripts.episodeId });
+  return changed.length === 1;
 }
 
 /**
@@ -292,9 +328,7 @@ export async function alignEpisode(
  * already narrowed below `BRACKET_TARGET_MS` are ignored — their insertion point
  * is located well enough — which is also what ends the loop.
  */
-function widestDisagreement(
-  anchors: readonly Anchor[],
-): { low: Anchor; high: Anchor } | null {
+function widestDisagreement(anchors: readonly Anchor[]): { low: Anchor; high: Anchor } | null {
   const sorted = [...anchors].sort((a, b) => a.audioMs - b.audioMs);
 
   let best: { low: Anchor; high: Anchor } | null = null;
@@ -304,9 +338,7 @@ function widestDisagreement(
     const low = sorted[i - 1]!;
     const high = sorted[i]!;
 
-    const offsetGap = Math.abs(
-      high.audioMs - high.transcriptMs - (low.audioMs - low.transcriptMs),
-    );
+    const offsetGap = Math.abs(high.audioMs - high.transcriptMs - (low.audioMs - low.transcriptMs));
     if (offsetGap <= STEP_TOLERANCE_MS) continue;
 
     const span = high.audioMs - low.audioMs;

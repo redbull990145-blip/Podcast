@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { SearchClient } from './search-client';
 import { getTranslator } from '@/lib/i18n';
+import { PageShell } from '@/components/ui/page-shell';
 
 export const metadata: Metadata = { title: 'Search' };
 
@@ -26,7 +27,7 @@ export default async function SearchPage({
   const slug = (Array.isArray(category) ? category[0] : category) ?? null;
 
   return (
-    <div className="mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
+    <PageShell width="wide">
       {/* The title goes when a category is open — that screen has a heading of
           its own, and stacking "Search" above "Technology" is one page title
           too many for a page with one subject. */}
@@ -36,6 +37,6 @@ export default async function SearchPage({
         </h1>
       )}
       <SearchClient initialQuery={initialQuery} category={slug} />
-    </div>
+    </PageShell>
   );
 }

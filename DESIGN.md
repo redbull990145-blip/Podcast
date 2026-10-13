@@ -31,9 +31,17 @@ Strategy: **restrained chrome + content-derived accent**. Tokens live in
 
 - **Paper ramp** — the entire interface. Warm, `#0A0907` to `#FFFFFF`.
 - **Ember** (`#F0724A` dark / `#DC5A34` light) — the accent. It marks *what is
-  live*: what is playing, how far through it you are, what is new, which page
-  you are on, and the editorial voice (the eyebrow over the resume hero, the
-  rank in a trending list). Never a primary button — see below.
+  live*: what is playing, what is new, which page you are on, and the editorial
+  voice (the eyebrow over the resume hero, the rank in a trending list). Never a
+  primary button — see below.
+
+  **Not the scrubber's fill, which this used to claim.** The transport is drawn
+  in ink for the reason the primary-button rule gives: an orange disc beside an
+  orange progress bar is two saturated shapes on one strip competing to be
+  looked at. The code has always been right about this and the document was not.
+  The one progress fill that *is* coloured is the listening mark on a cover,
+  and it takes the artwork's tint rather than the accent — it belongs to that
+  show.
 - **Ink** (`ink` / `textOnInk`) — the maximum-contrast fill. Primary buttons.
 - **Artwork tint** — per show, derived at render from `podcast.accentColor`.
 
@@ -117,6 +125,14 @@ play the pills had stopped being the round thing on screen.
 | `wash` | ambient gradient behind a header, row hover | contrast < 2:1 against the background — felt, not seen |
 | `fill` | a tinted button or chip | strong enough to read as a control |
 | `text` | tinted text and icons | **≥ 4.5:1 against the theme background, always** |
+
+**A fourth use, added later: the listening mark.** A part-heard episode carries
+a three-pixel bar along the bottom edge of its own cover and a finished one is
+dimmed under a tick, both drawn in `text`. It is the only place a *quantity* is
+expressed in an artwork colour, and it earns that by being the one fact a show
+page could not previously state at all — which of three hundred episodes you
+have heard. The signal is never the colour alone: the bar has a length, the tick
+has a shape, and the finished cover loses contrast.
 
 That last row is enforced by tests, not by eye
 (`packages/design/src/tokens/tint.test.ts`) — the inputs are covers we do not
@@ -348,6 +364,34 @@ recommendation, and Start over is there because a half-finished episode is the
 one case where "play" is genuinely ambiguous and the answer the button gives is
 wrong often enough to need a visible alternative.
 
+**The player is a dialog, and says so.** The expanded sheet scrims the page,
+locks the document's scroll and closes on Escape — and for a long time said none
+of that to a keyboard or a screen reader. Collapsed, it is translated off the
+bottom of the window at `opacity: 0`, which removes it from neither the tab
+order nor the accessibility tree: measured on a 1440px window with an episode
+playing, it held 662 focusable elements nobody could see, a complete second
+transport plus every line of a 651-cue transcript. `inert` on the closed sheet
+deletes those; `inert` on the rail, the page and the tab bar while it is open is
+what makes the sheet actually modal; and `useModalSheet` moves focus in, keeps
+it in, and returns it on close.
+
+The caption column was gated on the same mistake. `panelChoice` resolves to
+`'captions'` at any width past 1024, so the whole sweep — a per-frame paint
+loop, a scroll spring, a React write per spoken line — ran behind a *closed*
+player on every desktop. It is mounted with the sheet now.
+
+**Sleep timer.** The machine has always had one: a wall-clock deadline rather
+than a countdown, because a JS timer drifts exactly when a sleep timer is
+running. What it never had was a control. It is a crescent in the expanded
+player's utility row, showing the minutes remaining beside it while armed, with
+the options revealed in place — the same disclosure `CaptionSync` uses in the
+column beside it rather than a second portalled menu.
+
+**Space, J/K/L, arrows, M.** Bound globally rather than on the player, because
+the player is a bar at the floor of the window that most people never focus.
+Every binding maps onto an action the store already exposes, and every one
+defers to a focused control: a button that has focus owns its own Space.
+
 **The desktop player bar is the player.** 84px, three columns — what is playing,
 the transport with its scrubber and timecodes, then speed, queue and volume —
 which is the shape every desktop media player has had for twenty years, because
@@ -384,6 +428,12 @@ a show should put it somewhere visible from every screen rather than only from
 the one page that knows about it. A dot rather than a count: the number is on
 the Library row where there is room to read it, and here it only has to answer
 "is there anything?".
+
+**A show page says what you have heard.** The plainest gap the product had: an
+archive of three hundred episodes with no mark on any of them. It is one request
+per page rather than one per row — `GET /me/progress?ids=` — and deliberately
+not a field on the episode list, which runs behind a shared cache that per-user
+data would either poison or defeat.
 
 **Library** is organised by the listener's relationship to each show — *Waiting
 for you* / *Still going* / *Gone quiet* — not by the catalogue's alphabet. You

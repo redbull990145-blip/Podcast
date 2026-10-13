@@ -215,8 +215,10 @@ describe('withRetry', () => {
     error.name = 'AbortError';
     const send = vi.fn<() => Promise<Response>>().mockRejectedValue(error);
 
-    await expect(settle(withRetry(send, controller.signal))).rejects.toThrow('aborted');
-    expect(send).toHaveBeenCalledTimes(1);
+    await expect(settle(withRetry(send, controller.signal))).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('calls `send` afresh each time, so a consumed body is never resent', async () => {

@@ -8,13 +8,16 @@ import {
   searchSegments,
   seekTargetSec,
 } from '@cue/core';
+import type { Translator } from '@cue/i18n';
 import type { Episode, TranscriptSegment } from '@cue/types';
 import { useQuery } from '@tanstack/react-query';
+import { animate, useMotionValue } from 'motion/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { useTranslator } from '@/components/i18n/locale-provider';
-import { usePrefersReducedMotion } from '@/lib/motion';
+import { usePrefersReducedMotion, useTransition } from '@/lib/motion';
 import { useOnScreen } from '@/lib/on-screen';
+import { attachTranscriptReader } from '@/lib/transcript-reader';
 import { useFrameLoop } from '@/lib/player/frame-clock';
 import { readPosition, usePlayerActions, usePlayerSelector } from '@/lib/player/store';
 
@@ -60,8 +63,9 @@ export function TranscriptPanel({
   const pausedPositionSec = usePlayerSelector((s) =>
     s.status === 'playing' ? 0 : s.positionSec,
   );
-  const { seek, play } = usePlayerActions();
+  const { seek, playAt } = usePlayerActions();
   const reduced = usePrefersReducedMotion();
+  const glide = useTransition('gentle');
 
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -73,7 +77,19 @@ export function TranscriptPanel({
     // network round trip and, on a miss, a fetch from their CDN — worth not
     // repeating for the life of the session.
     staleTime: Infinity,
-    enabled: Boolean(episode.transcriptUrl),
+    /*
+      Asked for unconditionally, which it was not.
+
+      This was `enabled: Boolean(episode.transcriptUrl)` — a sensible-looking
+      guard against a pointless request, resting on an assumption that is
+      false: a transcript *Cue generated itself* is stored against an episode
+      whose `transcriptUrl` is null, because no publisher ever offered one. So
+      the feature worked in the player, where `Captions` deliberately does not
+      gate (and says so), and was invisible on the one page whose job is to
+      show it. The early return below had the same fault and has gone with it.
+
+      The cost of asking anyway is one indexed read when there is nothing.
+    */
   });
 
   const transcript = data?.transcript ?? null;
@@ -112,8 +128,8 @@ export function TranscriptPanel({
    * audio playing on an 824-cue episode, the two together held the main thread
    * at 85% busy; paused, it was 0%.
    */
-  const panelRef = useRef<HTMLElement>(null);
-  const onScreen = useOnScreen(panelRef);
+  const [panelElement, setPanelElement] = useState<HTMLElement | null>(null);
+  const onScreen = useOnScreen(panelElement);
 
   useFrameLoop(onScreen && timed && isCurrent && segments.length > 0, () => {
     const next = activeSegmentIndex(segments, readPosition() * 1000);
@@ -133,23 +149,114 @@ export function TranscriptPanel({
   }, [timed, isCurrent, playing, segments, pausedPositionSec]);
 
   /**
-   * Keep the active line in view — but only while it is moving on its own.
+   * Keep the active line in view — inside this panel, and only while the reader
+   * is not reading something else.
    *
-   * Scrolling the reader's view is an interruption if they went looking
-   * somewhere else, so it follows only during playback. Under reduced motion it
-   * jumps rather than glides, per the policy: the position still updates, it
-   * just stops travelling to get there.
+   * What this replaces was one line, `line.scrollIntoView({ block: 'center' })`,
+   * and it was wrong in the two ways that matter most on a transcript.
+   *
+   * **It scrolled the page, not the panel.** The list was not its own scroll
+   * container, and `scrollIntoView` moves every scrollable ancestor — so every
+   * few seconds of playback the whole episode page slid under the reader, who
+   * might have been half way through the show notes. The container below is
+   * what confines it.
+   *
+   * **It had no way to yield.** The player's caption column has had one for as
+   * long as it has existed: touch or wheel means the reader has said,
+   * unambiguously, that they want to be somewhere other than where the
+   * playhead is, and dragging them forward again makes re-reading impossible.
+   * Six seconds later it resumes. That is ported here rather than reinvented —
+   * the two columns answer the same question and should not answer it
+   * differently.
+   *
+   * The travel is a retargetable spring for the reason `captions.tsx` gives:
+   * the browser's smooth scroll is a fixed-duration ease with no interruption
+   * model, and a new target mid-flight is variously queued, restarted or
+   * jumped depending on the implementation. A line advances every few seconds,
+   * so that was happening constantly.
    */
   const listRef = useRef<HTMLOListElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
+  const mountScroll = useCallback((element: HTMLDivElement | null) => {
+    scrollRef.current = element;
+    setScrollElement(element);
+  }, []);
+  const offset = useMotionValue(0);
+
+  useEffect(() => {
+    return offset.on('change', (value) => {
+      const box = scrollRef.current;
+      if (box) box.scrollTop = value;
+    });
+  }, [offset]);
+
+  /**
+   * Whether the panel is still following the audio.
+   *
+   * Listening for `wheel` and `touchmove` rather than for `scroll`, because the
+   * spring produces scroll events too — telling the two apart after the fact
+   * means a flag that is wrong exactly when it matters.
+   */
+  const followingRef = useRef(true);
+
+  useEffect(() => {
+    const box = scrollElement;
+    if (!box) return;
+
+    return attachTranscriptReader(box, followingRef, (position) => offset.jump(position), RESUME_FOLLOWING_MS);
+  }, [offset, scrollElement]);
 
   useEffect(() => {
     if (!onScreen || !playing || activeIndex < 0) return;
+    if (!followingRef.current) return;
 
+    const box = scrollRef.current;
     const line = listRef.current?.querySelector<HTMLElement>(`[data-line="${activeIndex}"]`);
-    // Smooth `scrollIntoView` on a list this long is not cheap, and off screen
-    // it is not anything at all.
-    line?.scrollIntoView({ block: 'center', behavior: reduced ? 'auto' : 'smooth' });
-  }, [onScreen, activeIndex, playing, reduced]);
+    if (!box || !line) return;
+
+    /*
+      Measured from rectangles rather than from `offsetTop`.
+
+      `offsetTop` is relative to the nearest *positioned* ancestor, which is not
+      necessarily the scroll container — on this page it was the tinted page
+      wrapper, so the first computed target included the whole page header and
+      the panel scrolled fifteen hundred pixels to reach its second line.
+      Rectangle differences are relative to the box being scrolled by
+      construction, and cannot be broken by adding or removing a `relative`
+      somewhere in between.
+    */
+    const boxTop = box.getBoundingClientRect().top;
+    const lineBox = line.getBoundingClientRect();
+    const target =
+      box.scrollTop + (lineBox.top - boxTop) - (box.clientHeight - lineBox.height) / 2;
+    const clamped = Math.max(0, Math.min(target, box.scrollHeight - box.clientHeight));
+
+    /*
+      A cut rather than a glide when the playhead has genuinely moved.
+
+      Gliding is right for one line to the next and wrong for a seek, which can
+      be an hour of transcript away: springing across that flings the column
+      through thousands of lines of somebody else's conversation at a speed
+      nobody can read. Past a certain size a movement is a discontinuity, and a
+      cut is the honest way to draw one — the same rule the caption column and
+      the playback clock both follow.
+    */
+    if (reduced || Math.abs(clamped - offset.get()) > box.clientHeight * 2) {
+      offset.jump(clamped);
+      box.scrollTop = clamped;
+      return;
+    }
+
+    // Re-anchored only on a large disagreement: `scrollTop` is quantised by the
+    // browser while the motion value is not, so the two routinely differ by
+    // about a pixel mid-glide — and `jump` resets velocity, which would stop
+    // the spring dead several times on the way to every line.
+    if (Math.abs(offset.get() - box.scrollTop) > 24) offset.jump(box.scrollTop);
+
+    const controls = animate(offset, clamped, glide);
+    return () => controls.stop();
+  }, [onScreen, activeIndex, playing, reduced, offset, glide]);
 
   const matches = useMemo(
     () => (query.trim() ? searchSegments(segments, query) : null),
@@ -182,30 +289,37 @@ export function TranscriptPanel({
         accentColor,
       });
 
-      void play(playable).then(() => {
-        // After the load rather than as part of it: `play` resolves the stored
-        // resume position, and resume rules would rewrite an explicit target
-        // (rewinding it, or zeroing it near the end of the episode).
-        seek(target);
-      });
+      void playAt(playable, target);
     },
-    [isCurrent, seek, play, episode, podcastTitle, podcastArtworkUrl, accentColor],
+    [isCurrent, seek, playAt, episode, podcastTitle, podcastArtworkUrl, accentColor],
   );
 
-  if (!episode.transcriptUrl) {
-    return <Empty>{t.t('transcript.noneBody')}</Empty>;
-  }
+  /*
+    Nothing at all, rather than a heading over an apology.
 
-  if (isPending) return <Empty>{t.t('transcript.loading')}</Empty>;
+    The episode page used to decide this for itself, by rendering the whole
+    section only when `episode.transcriptUrl` was set — which is what hid every
+    generated transcript. Moving the decision in here is what lets the answer
+    depend on whether a transcript *exists* rather than on where it came from,
+    and the page above is now free of the question entirely.
 
-  if (error) return <Empty>{t.t('transcript.failed')}</Empty>;
+    Pending renders nothing too. This sits at the very bottom of the page, so
+    there is nothing below it to push down; a heading that appears, says
+    "Loading the transcript…", and then removes itself again for the majority
+    of episodes that have none is worse than a section that simply arrives.
+  */
+  if (isPending) return null;
+  if (error) return <Section t={t}><Empty>{t.t('transcript.failed')}</Empty></Section>;
 
   if (!transcript || transcript.status === 'failed' || segments.length === 0) {
-    return <Empty>{data?.detail ?? t.t('transcript.noneBody')}</Empty>;
+    return null;
   }
 
   return (
-    <section ref={panelRef} aria-label={t.t('transcript.title')}>
+    <section ref={setPanelElement} className="mt-10" aria-label={t.t('transcript.title')}>
+      <h2 className="type-title3 mt-0 mb-4 text-[var(--color-text-primary)]">
+        {t.t('transcript.title')}
+      </h2>
       <div className="mb-4 flex items-center gap-3">
         <label className="block flex-1">
           <span className="sr-only">{t.t('transcript.searchLabel')}</span>
@@ -227,16 +341,55 @@ export function TranscriptPanel({
         ) : null}
       </div>
 
-      <ol ref={listRef} className="m-0 list-none p-0">
-        {shown.map((segment) => (
-          <Line
-            key={segment.index}
-            segment={segment}
-            active={timed && !matches && segment.index === activeIndex}
-            onSeek={timed ? () => onSelect(segment) : null}
-          />
-        ))}
-      </ol>
+      {/*
+        The panel scrolls, the page does not.
+
+        Bounded so that following the audio moves this column and nothing else —
+        the whole reason the old `scrollIntoView` was disruptive was that the
+        list had no scroll container of its own, so the browser obligingly moved
+        the outermost one it could find. `overscroll-contain` stops a flick at
+        the end of the transcript continuing into the page behind it.
+
+        `70vh` rather than a fixed height: a transcript is a companion to the
+        episode page, not a replacement for it, and leaving a strip of the page
+        visible above and below is what says so.
+      */}
+      <div
+        ref={mountScroll}
+        className="max-h-[70vh] overflow-y-auto overscroll-contain rounded-[var(--radius-md)]"
+        style={{
+          // Scroll anchoring compensates as off-screen lines take their real
+          // height, which lands the active line somewhere other than the middle
+          // — the same fight the caption column documents.
+          overflowAnchor: 'none',
+        }}
+      >
+        <ol ref={listRef} className="m-0 list-none p-0">
+          {shown.map((segment) => (
+            <Line
+              key={segment.index}
+              segment={segment}
+              active={timed && !matches && segment.index === activeIndex}
+              onSeek={timed ? () => onSelect(segment) : null}
+            />
+          ))}
+        </ol>
+      </div>
+    </section>
+  );
+}
+
+/** How long a manual scroll holds the panel before it follows the audio again. */
+const RESUME_FOLLOWING_MS = 6000;
+
+/** The heading, for the one state that has something to say and no list. */
+function Section({ t, children }: { t: Translator; children: React.ReactNode }) {
+  return (
+    <section className="mt-10" aria-label={t.t('transcript.title')}>
+      <h2 className="type-title3 mt-0 mb-4 text-[var(--color-text-primary)]">
+        {t.t('transcript.title')}
+      </h2>
+      {children}
     </section>
   );
 }

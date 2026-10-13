@@ -69,14 +69,16 @@ export async function runMigrations(db: Database): Promise<string[]> {
 
     const text = readFileSync(join(migrationsDir, file), 'utf8');
 
-    // Drizzle separates statements with this marker; splitting on `;` would
-    // break any function body or string literal that contains one.
-    for (const statement of text.split('--> statement-breakpoint')) {
-      const trimmed = statement.trim();
-      if (trimmed.length > 0) await db.execute(sql.raw(trimmed));
-    }
-
-    await db.execute(sql`INSERT INTO "__migrations" (name) VALUES (${file})`);
+    // Drizzle owns the transaction and its pooled connection, including the
+    // migration journal write. SQL files contain statements without BEGIN/COMMIT.
+    const statements = text.split('--> statement-breakpoint');
+    await db.transaction(async (tx) => {
+      for (const statement of statements) {
+        const trimmed = statement.trim();
+        if (trimmed.length > 0) await tx.execute(sql.raw(trimmed));
+      }
+      await tx.execute(sql`INSERT INTO "__migrations" (name) VALUES (${file})`);
+    });
     ran.push(file);
   }
 

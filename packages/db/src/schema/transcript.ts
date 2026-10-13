@@ -20,7 +20,7 @@
 
 import type { TranscriptAlignment } from '@cue/types';
 import { sql } from 'drizzle-orm';
-import { index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { check, index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { episodes } from './catalog.ts';
 import { users } from './auth.ts';
 
@@ -223,6 +223,12 @@ export const transcriptionJobs = pgTable(
      */
     quotaDay: text('quota_day'),
 
+    /** Rotated on every claim; all attempt writes compare this token. */
+    leaseToken: uuid('lease_token'),
+    /** Explicit for new admissions; pre-cutover rows remain quarantined. */
+    fundingSource: text('funding_source').notNull().default('legacy'),
+    quotaState: text('quota_state').notNull().default('legacy'),
+
     /** `queued` or `running`. A finished job is deleted; a dead one is `failed`. */
     status: text('status').notNull().default('queued'),
 
@@ -275,6 +281,26 @@ export const transcriptionJobs = pgTable(
     // oldest first. Also serves the sweep for abandoned jobs, which reads the
     // same two columns.
     index('transcription_jobs_queue_idx').on(table.status, table.createdAt),
+    check(
+      'transcription_jobs_funding_source_check',
+      sql`${table.fundingSource} IN ('legacy', 'byok', 'operator')`,
+    ),
+    check(
+      'transcription_jobs_quota_state_check',
+      sql`${table.quotaState} IN ('legacy', 'unmetered', 'reserved', 'refunded')`,
+    ),
+    check(
+      'transcription_jobs_funding_quota_check',
+      sql`(
+      (${table.fundingSource} = 'legacy' AND ${table.quotaState} = 'legacy')
+      OR (${table.fundingSource} = 'byok' AND ${table.quotaState} = 'unmetered' AND ${table.quotaDay} IS NULL)
+      OR (${table.fundingSource} = 'operator' AND ${table.quotaState} IN ('reserved', 'refunded') AND ${table.quotaDay} IS NOT NULL)
+    )`,
+    ),
+    check(
+      'transcription_jobs_running_lease_check',
+      sql`${table.fundingSource} = 'legacy' OR ${table.status} <> 'running' OR ${table.leaseToken} IS NOT NULL`,
+    ),
   ],
 ).enableRLS();
 

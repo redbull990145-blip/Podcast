@@ -43,9 +43,9 @@ async function main(): Promise<void> {
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     process.once(signal, () => {
       app.log.info({ signal }, 'shutting down');
-      // `close` runs the onClose hook that stops the loop, which waits for the
-      // job in flight. A deploy therefore finishes the current episode instead
-      // of abandoning it to be reclaimed and paid for twice.
+      // `close` cancels waits/current work and allows owned settlement up to
+      // the worker's shutdown grace. Unfinished leases recover after expiry;
+      // transient retries retain the original operator reservation.
       void app.close().then(
         () => process.exit(0),
         (error: unknown) => {

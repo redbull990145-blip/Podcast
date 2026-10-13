@@ -21,6 +21,22 @@ export const queryKeys = {
      * everything else that belonged to the person who left.
      */
     continue: () => ['library', 'continue'] as const,
+    /**
+     * Progress for a specific set of episodes.
+     *
+     * Under `library` with everything else that belongs to the listener, so a
+     * sign-out clears it and `useNowPlayingSync`'s blanket
+     * `invalidateQueries({ queryKey: ['library'] })` already refreshes it the
+     * moment the player reports a new position — which is what makes a show
+     * page mark an episode heard without anyone wiring that up per screen.
+     *
+     * The ids are part of the key because two lists on one screen are two
+     * different answers; they are sorted by the caller so that the same set
+     * asked for in a different order is the same cache entry rather than a
+     * second copy.
+     */
+    progress: (episodeIds: readonly string[]) =>
+      ['library', 'progress', [...episodeIds].sort().join(',')] as const,
     recommendations: () => ['library', 'recommendations'] as const,
     history: () => ['library', 'history'] as const,
     stats: () => ['library', 'stats'] as const,

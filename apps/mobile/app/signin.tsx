@@ -1,5 +1,5 @@
 import { ApiClientError } from '@cue/api-client';
-import { formatFieldErrors, PASSWORD_MIN, signInInput, signUpInput } from '@cue/validation';
+import { formatFieldErrors, OTP_LENGTH, PASSWORD_MIN, signInInput, signUpInput, verifyEmailInput } from '@cue/validation';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
@@ -14,7 +14,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '@/components/button';
-import { useSignIn, useSignUp } from '@/lib/session';
+import { useSignIn, useSignUp, useVerifyEmail } from '@/lib/session';
+import { api } from '@/lib/api';
 import { radius, space, type, useTheme } from '@/theme';
 
 /**
@@ -37,14 +38,30 @@ export default function SignInScreen() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+  const [otp, setOtp] = useState('');
+  const [notice, setNotice] = useState<string | null>(null);
+  const [resending, setResending] = useState(false);
+  const [resendAfter, setResendAfter] = useState(0);
 
   const signIn = useSignIn();
   const signUp = useSignUp();
-  const active = mode === 'signin' ? signIn : signUp;
+  const verify = useVerifyEmail();
+  const active = pendingEmail ? verify : mode === 'signin' ? signIn : signUp;
 
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const submit = () => {
+    if (pendingEmail) {
+      const parsed = verifyEmailInput.safeParse({ email: pendingEmail, otp });
+      if (!parsed.success) { setFieldErrors(formatFieldErrors(parsed.error)); return; }
+      setFieldErrors({}); setNotice(null);
+      verify.mutate(parsed.data, { onSuccess: (result) => {
+        if (result.token) router.back();
+        else { setPendingEmail(null); setMode('signin'); setNotice('Email verified. Sign in to continue.'); }
+      } });
+      return;
+    }
     // The same schema the server enforces, so the form rejects exactly what
     // the API would rather than approximating it.
     const parsed =
@@ -60,12 +77,18 @@ export default function SignInScreen() {
     setFieldErrors({});
 
     const onDone = {
-      onSuccess: () => router.back(),
+      onSuccess: (result: { token: string | null }) => {
+        if (result.token) router.back();
+        else { setPendingEmail(email.trim()); setNotice(null); setResendAfter(Date.now() + 30_000); }
+      },
       onError: (caught: unknown) => {
         // The envelope carries field-level detail for exactly this. Without
         // reading it, a rejection lands as one message at the foot of the
         // form and the field it is about stays unmarked.
         if (caught instanceof ApiClientError && caught.fields) setFieldErrors(caught.fields);
+        if (caught instanceof ApiClientError && caught.authCode === 'EMAIL_NOT_VERIFIED') {
+          setPendingEmail(email.trim()); setResendAfter(Date.now() + 30_000);
+        }
       },
     };
 
@@ -104,13 +127,17 @@ export default function SignInScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <Text style={[type('title1'), { color: theme.textPrimary }]}>
-          {mode === 'signin' ? 'Welcome back' : 'Create an account'}
+          {pendingEmail ? 'Verify your email' : mode === 'signin' ? 'Welcome back' : 'Create an account'}
         </Text>
         <Text style={[type('callout'), { color: theme.textSecondary, marginTop: space[2] }]}>
-          Your library and your place in every episode, on every device.
+          {pendingEmail ? `Enter the ${OTP_LENGTH}-digit code sent to ${pendingEmail}.` : 'Your library and your place in every episode, on every device.'}
         </Text>
 
         <View style={styles.fields}>
+          {pendingEmail ? (
+            <Field label="Verification code" value={otp} onChangeText={setOtp} keyboardType="number-pad"
+              textContentType="oneTimeCode" maxLength={OTP_LENGTH} error={fieldErrors['otp']} />
+          ) : <>
           {mode === 'signup' ? (
             <Field
               label="Name"
@@ -142,6 +169,7 @@ export default function SignInScreen() {
             hint={mode === 'signup' ? `At least ${PASSWORD_MIN} characters` : undefined}
             error={fieldErrors['password']}
           />
+          </>}
         </View>
 
         {message ? (
@@ -149,12 +177,13 @@ export default function SignInScreen() {
             {message}
           </Text>
         ) : null}
+        {notice ? <Text style={[type('caption'), { color: theme.textSecondary, marginTop: space[4] }]}>{notice}</Text> : null}
 
         <Button
           label={
             active.isPending
               ? 'One moment…'
-              : mode === 'signin'
+              : pendingEmail ? 'Verify email' : mode === 'signin'
                 ? 'Sign in'
                 : 'Create account'
           }
@@ -164,7 +193,7 @@ export default function SignInScreen() {
         />
 
         <Pressable
-          onPress={() => setMode(mode === 'signin' ? 'signup' : 'signin')}
+          onPress={() => { setPendingEmail(null); setFieldErrors({}); setNotice(null); setMode(mode === 'signin' ? 'signup' : 'signin'); active.reset(); }}
           accessibilityRole="button"
           style={({ pressed }) => [styles.switch, { opacity: pressed ? 0.7 : 1 }]}
         >
@@ -174,6 +203,18 @@ export default function SignInScreen() {
               : 'Already have an account? Sign in'}
           </Text>
         </Pressable>
+        {pendingEmail ? <Pressable accessibilityRole="button" disabled={resending}
+          onPress={() => {
+            if (resending) return;
+            if (Date.now() < resendAfter) { setNotice('Wait 30 seconds before requesting another code.'); return; }
+            setResending(true); setNotice(null);
+            void api.sendVerificationOtp({ email: pendingEmail }).then(() => {
+              setResendAfter(Date.now() + 30_000); setNotice('A new code was sent.');
+            }).catch((error: unknown) => { setNotice(error instanceof Error ? error.message : 'Could not send the code. Try again.'); })
+              .finally(() => setResending(false));
+          }} style={styles.switch}>
+          <Text style={[type('callout'), { color: theme.accentText }]}>{resending ? 'Sending…' : 'Send a new code'}</Text>
+        </Pressable> : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );

@@ -20,6 +20,8 @@ import { Button } from '@/components/ui/button';
 import { ChromeTint } from '@/components/shell/chrome-tint';
 import { api } from '@/lib/api';
 import { usePlayerActions } from '@/lib/player/store';
+import { PageShell } from '@/components/ui/page-shell';
+import { EmptyState } from '@/components/ui/empty-state';
 
 /** Both carry the projection engine, so they arrive on demand — see each file. */
 const PlaylistList = dynamic(() => import('./playlist-list'), {
@@ -161,13 +163,13 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
 
   if (error) {
     return (
-      <div className="mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
+      <PageShell>
         <Notice heading={t.t('playlists.notFound')} body={t.t('common.checkConnection')}>
           <Link href={'/playlists' as Route} className="no-underline">
             <Button variant="secondary">{t.t('playlists.title')}</Button>
           </Link>
         </Notice>
-      </div>
+      </PageShell>
     );
   }
 
@@ -231,7 +233,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
     <div className="relative min-h-dvh bg-[var(--color-bg)]" data-chrome-tint="">
       <ChromeTint color={tintSeed} />
 
-      <div className="relative mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
+      <PageShell className="relative">
         <div className="flex flex-col gap-8">
           <PlaylistBanner banner={playlist.banner} title={playlist.title} height={200} />
 
@@ -325,7 +327,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
             />
           )}
         </div>
-      </div>
+      </PageShell>
     </div>
   );
 }
@@ -410,13 +412,5 @@ function Notice({
   body: string;
   children?: React.ReactNode;
 }) {
-  return (
-    <div className="rounded-[var(--radius-lg)] border border-dashed border-[var(--color-border)] px-6 py-12 text-center">
-      <p className="type-title3 m-0 text-[var(--color-text-primary)]">{heading}</p>
-      <p className="type-callout mx-auto mt-2 mb-0 max-w-[var(--measure-prose)] text-[var(--color-text-secondary)]">
-        {body}
-      </p>
-      {children ? <div className="mt-5 flex justify-center">{children}</div> : null}
-    </div>
-  );
+  return <EmptyState title={heading} body={body} action={children} />;
 }

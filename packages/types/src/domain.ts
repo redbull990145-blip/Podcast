@@ -418,6 +418,23 @@ export type StoredProgress = {
   updatedAt: IsoDateTime;
 };
 
+/**
+ * One episode's progress, as a *list* needs it.
+ *
+ * `StoredProgress` minus `deviceId`. That field exists to resolve the case
+ * where two devices raced on the write path, and it has nothing to say to a row
+ * on a show page — sent for every episode of an archive it is a hundred copies
+ * of an answer to a question nobody asked.
+ *
+ * A named type rather than an inline `Pick` because both ends have to agree: it
+ * is what `GET /me/progress` returns and what `<ListeningMark>` consumes, and a
+ * shape spelled out twice is a shape that eventually differs.
+ */
+export type EpisodeProgress = Pick<
+  StoredProgress,
+  'episodeId' | 'positionSec' | 'durationSec' | 'completed' | 'updatedAt'
+>;
+
 /** An episode in the queue, carrying enough of its show to render standalone. */
 export type QueueEntry = {
   episode: Episode;

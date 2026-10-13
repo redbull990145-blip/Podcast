@@ -19,6 +19,8 @@ import {
   setSyncState,
   usePlayerSelector,
 } from '@/lib/player/store';
+import { usePlayerExpanded } from '@/lib/player/expanded';
+import { usePlayerShortcuts } from '@/lib/keyboard';
 import { setRailCollapsed, useRailCollapsed } from '@/lib/rail';
 import { NavIcon } from './nav-icon';
 import { NowPlayingTint } from './now-playing-tint';
@@ -36,6 +38,37 @@ import { navItems, settingsItem } from './nav-items';
 export function AppShell({ children }: { children: ReactNode }) {
   useSessionSync();
   useNowPlayingSync();
+  /* Space, J/K/L, arrows and M — bound here rather than in the player because
+     they have to work from wherever the reader is, and the player is a fixed
+     bar they may never have focused. */
+  usePlayerShortcuts();
+
+  /*
+    Everything that is not the player stands down while the player is open.
+
+    The expanded sheet covers the window, scrims what is behind it and locks the
+    document's scroll — and until now the page behind it stayed in the tab
+    order, so a keyboard user inside the "modal" could walk straight out into a
+    navigation rail they could not see. `inert` is the declarative half of the
+    fix; `useModalSheet` in the player is the half that keeps focus in.
+
+    Marked on the three regions rather than on this wrapper, because the player
+    is inside it too and inerting the sheet along with the page would leave
+    nothing on the screen anyone could press.
+  */
+  /*
+    `|| undefined` at each call site below, never a bare `false`.
+
+    React renders a boolean `inert` asymmetrically across the server/client
+    boundary — the server omits the attribute for `false` and the client
+    reconciler does not agree with that on hydration, which threw
+    "Hydration failed" on every route inside this shell. Passing `undefined`
+    means the attribute is simply absent on both sides, which is what `false`
+    was trying to say anyway. It is also the idiom this codebase already uses
+    for exactly this shape: `aria-busy={busy || undefined}`,
+    `aria-current={active ? 'page' : undefined}`.
+  */
+  const playerExpanded = usePlayerExpanded();
 
   return (
     <div className="min-h-dvh">
@@ -49,7 +82,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           has asked for that. Renders nothing on its own. */}
       <NowPlayingTint />
 
-      <SidebarNav />
+      <SidebarNav inert={playerExpanded} />
 
       {/* Leading gutter on desktop clears the sidebar; bottom padding on
           mobile clears the tab bar so the last row is never trapped under it.
@@ -81,6 +114,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         variable and this is just the ordinary background, same as before.
       */}
       <main
+        inert={playerExpanded || undefined}
         data-chrome-tint=""
         /*
           `overflow-x-hidden`, added for the paged rails on Home.
@@ -118,7 +152,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           appears and leaves on its own schedule has no place in that. */}
       <UpNext />
 
-      <TabBar />
+      <TabBar inert={playerExpanded} />
     </div>
   );
 }
@@ -182,7 +216,7 @@ function useNowPlayingSync() {
   }, [queryClient]);
 }
 
-function SidebarNav() {
+function SidebarNav({ inert }: { inert: boolean }) {
   const pathname = usePathname();
   const t = useTranslator();
   /* How many episodes are waiting, shown against Queue. It is the one number
@@ -202,6 +236,7 @@ function SidebarNav() {
 
   return (
     <aside
+      inert={inert || undefined}
       /*
         `w-[var(--measure-sidebar)]`, and the variable is what moves.
 
@@ -315,7 +350,7 @@ function RailToggle({ collapsed }: { collapsed: boolean }) {
       aria-label={label}
       aria-expanded={!collapsed}
       title={label}
-      className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-[var(--radius-md)] border-0 bg-transparent p-0 text-[var(--color-text-tertiary)] transition-[transform,background-color,color] duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] active:scale-[0.92] motion-reduce:active:scale-100"
+      className="cue-button flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-[var(--radius-md)] border-0 bg-transparent p-0 text-[var(--color-text-tertiary)] transition-[transform,background-color,color] duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] active:scale-[0.92] motion-reduce:active:scale-100"
     >
       <svg
         width="18"
@@ -479,10 +514,17 @@ function RailLink({
 }) {
   const t = useTranslator();
   const label = t.t(item.label);
+  const warm = useWarmDestination();
 
   return (
     <Link
       href={item.href as never}
+      // Every route is dynamic (locale and CSP nonce). The default only
+      // prefetches a loading boundary; preload these few persistent destinations
+      // in full so a sidebar click can render from the router cache.
+      prefetch={true}
+      onPointerEnter={() => warm(item.href)}
+      onFocus={() => warm(item.href)}
       aria-current={active ? 'page' : undefined}
       // The tooltip only exists while the words do not. Given unconditionally
       // it would sit a duplicate of the visible label under the cursor on every
@@ -750,9 +792,10 @@ function initialOf(name: string): string {
  * one place in the app that blurs: everything else is flat, and a floating bar
  * over scrolling content is exactly the case the effect was invented for.
  */
-function TabBar() {
+function TabBar({ inert }: { inert: boolean }) {
   const pathname = usePathname();
   const t = useTranslator();
+  const warm = useWarmDestination();
   // Same travelling ground the rail has, measured on the icon pill rather than
   // the whole cell — a filled 64px block would make the bar the loudest thing
   // on screen, and a pill that hops between five cells reads as a highlight,
@@ -761,6 +804,7 @@ function TabBar() {
 
   return (
     <nav
+      inert={inert || undefined}
       className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--color-border)] bg-[var(--color-surface-overlay)]/92 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden"
       data-chrome-tint=""
       aria-label={t.t('nav.main')}
@@ -777,6 +821,9 @@ function TabBar() {
             <li key={item.href} className="relative z-10 flex-1">
               <Link
                 href={item.href as never}
+                prefetch={true}
+                onPointerEnter={() => warm(item.href)}
+                onFocus={() => warm(item.href)}
                 aria-current={active ? 'page' : undefined}
                 className={[
                   // 64px tall: comfortably past the 44px minimum touch target,
@@ -809,6 +856,28 @@ function TabBar() {
       </ul>
     </nav>
   );
+}
+
+/** Fetch public Search data while the pointer or keyboard approaches its link. */
+function useWarmDestination() {
+  const queryClient = useQueryClient();
+  return useCallback((href: string) => {
+    if (href !== '/search') return;
+    // Match the resting Search page's exact keys/options; fresh responses are
+    // reused and concurrent hover/focus requests are deduplicated by Query.
+    void queryClient.prefetchQuery({
+      queryKey: queryKeys.discover.categories(),
+      queryFn: () => api.listCategories(),
+      staleTime: staleTime.categories,
+      retry: false,
+    });
+    void queryClient.prefetchQuery({
+      queryKey: queryKeys.discover.trending(''),
+      queryFn: () => api.trendingPodcasts({ limit: 20 }),
+      staleTime: staleTime.trending,
+      retry: false,
+    });
+  }, [queryClient]);
 }
 
 /**

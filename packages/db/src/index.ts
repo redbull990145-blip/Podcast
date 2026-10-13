@@ -1,5 +1,5 @@
 export { createDatabase, schema } from './client.ts';
-export type { Database, DatabaseOptions } from './client.ts';
+export type { Database, DatabaseOptions, DatabaseTransaction } from './client.ts';
 
 export { migrationsDir, runMigrations } from './migrate.ts';
 

@@ -8,14 +8,8 @@
  * about SameSite is doing the CSRF work, and whatever is doing it should be
  * asserted rather than assumed.
  *
- * Two things do it, and both are tested here:
- *
- *  1. Every mutating route needs a JSON body, and `application/json` is not a
- *     content type a `<form>` can produce. A cross-site form is therefore
- *     refused before any handler runs, and anything that *can* send JSON —
- *     fetch, XHR — is preflighted.
- *  2. The preflight is answered against an origin allowlist, so the browser
- *     never lets the real request leave.
+ * Cookie-bearing writes require a trusted Origin even with no body. Parser
+ * restrictions and CORS preflights add barriers for requests with bodies.
  */
 
 import type { FastifyInstance } from 'fastify';
@@ -28,6 +22,7 @@ import { buildServer } from './server.ts';
 
 describe('cross-site request forgery', () => {
   let app: FastifyInstance;
+  let mutations = 0;
 
   beforeAll(async () => {
     app = await buildServer(
@@ -37,8 +32,43 @@ describe('cross-site request forgery', () => {
         CORS_ORIGINS: 'https://cue.example',
       }),
     );
-    let mutations = 0;
-    app.post('/test/mutate', async () => ({ ok: true, data: { mutations: ++mutations } }));
+    app.route({ method: ['POST', 'PUT', 'PATCH', 'DELETE'], url: '/test/mutate', handler: async () => ({ ok: true, data: { mutations: ++mutations } }) });
+  });
+
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE'] as const)('rejects every untrusted cookie Origin for %s before mutation', async (method) => {
+    for (const origin of [undefined, 'null', '::::', 'https://cue.example/path', 'https://cue.example.attacker.example', 'https://attacker.example']) {
+      for (const authorization of [undefined, 'Bearer fake']) {
+        const before = mutations;
+        const response = await app.inject({ method, url: '/test/mutate', headers: { cookie: 'session=anything', ...(origin ? { origin } : {}), ...(authorization ? { authorization } : {}) } });
+        expect(response.statusCode).toBe(403);
+        expect(mutations).toBe(before);
+      }
+    }
+  });
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE'] as const)('supports trusted cookie and cookie-free bearer transport for %s', async (method) => {
+    for (const headers of [{ cookie: 'session=anything', origin: 'https://cue.example' }, { authorization: 'Bearer fake' }]) {
+      const before = mutations;
+      const response = await app.inject({ method, url: '/test/mutate', headers });
+      expect(response.statusCode).toBe(200);
+      expect(mutations).toBe(before + 1);
+    }
+  });
+
+  for (const origin of [undefined, 'null', 'https://attacker.example']) {
+    it(`rejects an empty-body cookie write with Origin ${String(origin)}`, async () => {
+      const response = await app.inject({ method: 'POST', url: '/test/mutate', headers: { cookie: 'session=anything', ...(origin ? { origin } : {}) } });
+      expect(response.statusCode).toBe(403);
+    });
+  }
+  it('does not let a fake bearer header bypass the cookie Origin check', async () => {
+    const response = await app.inject({ method: 'POST', url: '/test/mutate', headers: { cookie: 'session=anything', authorization: 'Bearer fake', origin: 'https://attacker.example' } });
+    expect(response.statusCode).toBe(403);
+  });
+  it('allows empty-body writes from the trusted app and cookie-free native clients', async () => {
+    for (const headers of [{ cookie: 'session=anything', origin: 'https://cue.example' }, {}]) {
+      const response = await app.inject({ method: 'POST', url: '/test/mutate', headers });
+      expect(response.statusCode).toBe(200);
+    }
   });
 
   afterAll(async () => {
@@ -157,6 +187,7 @@ describe('credential-endpoint throttling', () => {
     expect(isSensitiveAuthPath('/auth/sign-up/email')).toBe(true);
     expect(isSensitiveAuthPath('/auth/forget-password')).toBe(true);
     expect(isSensitiveAuthPath('/auth/reset-password?token=abc')).toBe(true);
+    expect(isSensitiveAuthPath('/auth/send-verification-email')).toBe(true);
 
     // The read-only lookups every page load makes must not be throttled.
     expect(isSensitiveAuthPath('/auth/get-session')).toBe(false);
@@ -225,6 +256,15 @@ describe('credential-endpoint throttling', () => {
     }
 
     expect(seen).toHaveLength(0);
+    await app.close();
+  });
+
+  it('throttles the direct verification-email endpoint before the mail handler', async () => {
+    const { app, seen } = await withStubLimiter();
+    for (let i = 0; i < 3; i++) await app.inject({ method: 'POST', url: '/auth/send-verification-email', payload: { email: 'nobody@cue.example' } });
+    const limited = await app.inject({ method: 'POST', url: '/auth/send-verification-email', payload: { email: 'nobody@cue.example' } });
+    expect(limited.statusCode).toBe(429);
+    expect(seen).toHaveLength(4);
     await app.close();
   });
 });

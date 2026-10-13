@@ -14,6 +14,7 @@
  */
 
 import { AppError } from '../errors.ts';
+import { delay, fetchWithDeadline, operationDeadline, withDeadline } from './deadline.ts';
 
 const BASE_URL = 'https://api.groq.com/openai/v1';
 
@@ -35,7 +36,10 @@ export const TRANSCRIBE_MODEL = 'whisper-large-v3-turbo';
  */
 export const CHAT_MODEL = 'llama-3.3-70b-versatile';
 
-export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
+export type ChatMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+};
 
 /**
  * Retrying the failures that are worth retrying.
@@ -136,8 +140,10 @@ function backoffMs(attempt: number): number {
   return attempt * 1000 * (1 + Math.random() * 0.5) + (attempt - 1) * 1000;
 }
 
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const CHAT_DEADLINE_MS = 90_000;
+const TRANSCRIBE_DEADLINE_MS = 180_000;
+export const CHAT_OPERATION_MS = 6 * 60_000;
+export const TRANSCRIBE_OPERATION_BASE_MS = 10 * 60_000;
 
 /**
  * `retry-after` in milliseconds, or null if it does not carry a usable number.
@@ -157,14 +163,18 @@ function retryAfterMs(response: Response): number | null {
 }
 
 /** Sleep, telling the caller where we are often enough to prove we are alive. */
-async function waitOut(waitMs: number, onWait: RetryOptions['onWait']): Promise<void> {
+async function waitOut(
+  waitMs: number,
+  onWait: RetryOptions['onWait'],
+  signal?: AbortSignal,
+): Promise<void> {
   const until = waitMs;
   let elapsed = 0;
 
   while (elapsed < until) {
     await onWait?.({ waitMs, remainingMs: until - elapsed });
     const slice = Math.min(NOTICE_EVERY_MS, until - elapsed);
-    await sleep(slice);
+    await delay(slice, signal);
     elapsed += slice;
   }
 }
@@ -189,6 +199,7 @@ export async function withRetry(
   let waitedMs = 0;
 
   for (;;) {
+    signal?.throwIfAborted();
     let response: Response;
 
     try {
@@ -200,7 +211,7 @@ export async function withRetry(
       if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
       attempts += 1;
       if (attempts >= MAX_ATTEMPTS) throw error;
-      await sleep(backoffMs(attempts));
+      await delay(backoffMs(attempts), signal);
       continue;
     }
 
@@ -216,7 +227,7 @@ export async function withRetry(
 
       await response.body?.cancel();
       waitedMs += asked;
-      await waitOut(asked, options?.onWait);
+      await waitOut(asked, options?.onWait, signal);
       continue;
     }
 
@@ -228,7 +239,7 @@ export async function withRetry(
     // message, so only discard it when we are going round again.
     if (attempts >= MAX_ATTEMPTS) return response;
     await response.body?.cancel();
-    await sleep(backoffMs(attempts));
+    await delay(backoffMs(attempts), signal);
   }
 }
 
@@ -300,23 +311,35 @@ export type ChatOptions = {
 };
 
 export async function chat(options: ChatOptions): Promise<string> {
+  return withDeadline(
+    (signal) => chatRequest({ ...options, signal }),
+    options.signal,
+    CHAT_OPERATION_MS,
+  );
+}
+
+async function chatRequest(options: ChatOptions): Promise<string> {
   const response = await withRetry(
     () =>
-      fetch(`${BASE_URL}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${options.key}`,
-          'content-type': 'application/json',
+      fetchWithDeadline(
+        `${BASE_URL}/chat/completions`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${options.key}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: CHAT_MODEL,
+            messages: options.messages,
+            temperature: options.temperature ?? 0.2,
+            max_tokens: options.maxTokens ?? 2048,
+            ...(options.json ? { response_format: { type: 'json_object' } } : {}),
+          }),
+          ...(options.signal ? { signal: options.signal } : {}),
         },
-        body: JSON.stringify({
-          model: CHAT_MODEL,
-          messages: options.messages,
-          temperature: options.temperature ?? 0.2,
-          max_tokens: options.maxTokens ?? 2048,
-          ...(options.json ? { response_format: { type: 'json_object' } } : {}),
-        }),
-        ...(options.signal ? { signal: options.signal } : {}),
-      }),
+        CHAT_DEADLINE_MS,
+      ),
     options.signal,
   );
 
@@ -342,21 +365,34 @@ export async function chat(options: ChatOptions): Promise<string> {
  * difference between those two numbers being what the reader experiences.
  */
 export async function* chatStream(options: ChatOptions): AsyncGenerator<string> {
-  const response = await fetch(`${BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${options.key}`,
-      'content-type': 'application/json',
+  const deadline = operationDeadline(options.signal, CHAT_OPERATION_MS);
+  try {
+    yield* chatStreamRequest({ ...options, signal: deadline.signal });
+  } finally {
+    deadline.dispose();
+  }
+}
+
+async function* chatStreamRequest(options: ChatOptions): AsyncGenerator<string> {
+  const response = await fetchWithDeadline(
+    `${BASE_URL}/chat/completions`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${options.key}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: CHAT_MODEL,
+        messages: options.messages,
+        temperature: options.temperature ?? 0.2,
+        max_tokens: options.maxTokens ?? 1024,
+        stream: true,
+      }),
+      ...(options.signal ? { signal: options.signal } : {}),
     },
-    body: JSON.stringify({
-      model: CHAT_MODEL,
-      messages: options.messages,
-      temperature: options.temperature ?? 0.2,
-      max_tokens: options.maxTokens ?? 1024,
-      stream: true,
-    }),
-    ...(options.signal ? { signal: options.signal } : {}),
-  });
+    CHAT_DEADLINE_MS,
+  );
 
   if (!response.ok) throw await failure(response, options.byok);
   if (!response.body) throw new AppError('upstream_unavailable', 'Groq returned no stream');
@@ -432,7 +468,17 @@ export type TranscribedSegment = {
  * already measured in minutes, paid once per episode, to remove an estimation
  * layer whose error ran to hundreds of milliseconds inside a cue.
  */
-export async function transcribe(options: {
+export async function transcribe(
+  options: Parameters<typeof transcribeRequest>[0],
+): Promise<TranscribedSegment[]> {
+  return withDeadline(
+    (signal) => transcribeRequest({ ...options, signal }),
+    options.signal,
+    TRANSCRIBE_OPERATION_BASE_MS + (options.rateLimitBudgetMs ?? DEFAULT_BUDGET_MS),
+  );
+}
+
+async function transcribeRequest(options: {
   key: string;
   byok: boolean;
   bytes: Uint8Array;
@@ -477,29 +523,37 @@ export async function transcribe(options: {
    * looks nothing like the transient error that caused the retry. Rebuilding it
    * is cheap: the `Blob` underneath is shared, so nothing is copied again.
    */
-  const response = await withRetry(() => {
-    const form = new FormData();
-    form.append('file', blob, options.filename);
-    form.append('model', TRANSCRIBE_MODEL);
-    form.append('response_format', 'verbose_json');
-    // Repeated, not comma-joined: this is multipart form data, and the bracket
-    // suffix is part of the literal field name Groq documents.
-    form.append('timestamp_granularities[]', 'segment');
-    form.append('timestamp_granularities[]', 'word');
-    if (options.language) form.append('language', options.language);
+  const response = await withRetry(
+    () => {
+      const form = new FormData();
+      form.append('file', blob, options.filename);
+      form.append('model', TRANSCRIBE_MODEL);
+      form.append('response_format', 'verbose_json');
+      // Repeated, not comma-joined: this is multipart form data, and the bracket
+      // suffix is part of the literal field name Groq documents.
+      form.append('timestamp_granularities[]', 'segment');
+      form.append('timestamp_granularities[]', 'word');
+      if (options.language) form.append('language', options.language);
 
-    return fetch(`${BASE_URL}/audio/transcriptions`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${options.key}` },
-      body: form,
-      ...(options.signal ? { signal: options.signal } : {}),
-    });
-  }, options.signal, {
-    ...(options.onWait ? { onWait: options.onWait } : {}),
-    ...(options.rateLimitBudgetMs === undefined
-      ? {}
-      : { rateLimitBudgetMs: options.rateLimitBudgetMs }),
-  });
+      return fetchWithDeadline(
+        `${BASE_URL}/audio/transcriptions`,
+        {
+          method: 'POST',
+          headers: { authorization: `Bearer ${options.key}` },
+          body: form,
+          ...(options.signal ? { signal: options.signal } : {}),
+        },
+        TRANSCRIBE_DEADLINE_MS,
+      );
+    },
+    options.signal,
+    {
+      ...(options.onWait ? { onWait: options.onWait } : {}),
+      ...(options.rateLimitBudgetMs === undefined
+        ? {}
+        : { rateLimitBudgetMs: options.rateLimitBudgetMs }),
+    },
+  );
 
   if (!response.ok) throw await failure(response, options.byok);
 
@@ -524,20 +578,23 @@ export async function transcribe(options: {
           .filter((word) => word.text !== '')
       : [];
 
-    const texts = body.segments.map((segment) => ({ text: (segment.text ?? '').trim() }));
-    const perSegment =
-      words.length > 0 ? partitionWords(texts, words) : texts.map(() => null);
+    const texts = body.segments.map((segment) => ({
+      text: (segment.text ?? '').trim(),
+    }));
+    const perSegment = words.length > 0 ? partitionWords(texts, words) : texts.map(() => null);
 
-    return body.segments
-      .map((segment, index) => ({
-        startMs: Math.round((segment.start ?? 0) * 1000),
-        endMs: Math.round((segment.end ?? 0) * 1000),
-        text: texts[index]!.text,
-        words: perSegment[index] ?? null,
-      }))
-      // Filtered *after* partitioning, so dropping an empty cue cannot shift
-      // every later segment onto the wrong run of words.
-      .filter((segment) => segment.text !== '');
+    return (
+      body.segments
+        .map((segment, index) => ({
+          startMs: Math.round((segment.start ?? 0) * 1000),
+          endMs: Math.round((segment.end ?? 0) * 1000),
+          text: texts[index]!.text,
+          words: perSegment[index] ?? null,
+        }))
+        // Filtered *after* partitioning, so dropping an empty cue cannot shift
+        // every later segment onto the wrong run of words.
+        .filter((segment) => segment.text !== '')
+    );
   }
 
   // Some responses carry only the flat text — a very short chunk, or silence

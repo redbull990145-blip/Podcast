@@ -1,5 +1,8 @@
 import { join } from 'node:path';
 import type { NextConfig } from 'next';
+import { buildProvenance, provenanceHeaders } from '../../scripts/build-provenance.js';
+
+const provenance = buildProvenance();
 
 /**
  * The API's origin, for the service worker's CSP.
@@ -23,6 +26,8 @@ function apiOrigin(): string | null {
 }
 
 const config: NextConfig = {
+  // Next substitutes this literal while building the server artifact.
+  env: { CUE_BUILD_PROVENANCE: JSON.stringify(provenance) },
   // Workspace packages ship TypeScript source rather than a build step, so
   // Next compiles them alongside the app. That keeps edits to a shared token
   // or type instant instead of requiring a rebuild in another package.
@@ -190,6 +195,7 @@ const config: NextConfig = {
       {
         source: '/:path*',
         headers: [
+          ...provenanceHeaders(provenance),
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           // Nothing here is meant to be embedded. `SAMEORIGIN` rather than

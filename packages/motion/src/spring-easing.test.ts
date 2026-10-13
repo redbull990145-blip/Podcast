@@ -32,18 +32,13 @@ describe('springEasing', () => {
   /**
    * Overshoot is not uniform across the scale, and should not be.
    *
-   * `responsive` (ζ 0.71) and `expressive` (ζ 0.82) are the two the listener
-   * manipulates directly, and their single overshoot is what separates a
-   * control that feels sprung from one that feels drawn. The other three sit at
-   * ζ ≈ 0.93, which overshoots by under a tenth of a percent — arithmetically
-   * underdamped, perceptually a clean arrival, which is what ambient drift and
-   * a checkmark are supposed to do.
+   * Interactive springs rebound perceptibly. Ambient motion stays restrained.
    */
-  it.each(['responsive', 'expressive'] as const)('%s overshoots perceptibly', (token) => {
+  it.each(['standard', 'snappy', 'responsive', 'expressive'] as const)('%s overshoots perceptibly', (token) => {
     expect(Math.max(...stopsOf(springEasing(token).easing))).toBeGreaterThan(1.01);
   });
 
-  it.each(['gentle', 'standard', 'snappy'] as const)('%s arrives without a bounce', (token) => {
+  it.each(['gentle'] as const)('%s arrives without a bounce', (token) => {
     expect(Math.max(...stopsOf(springEasing(token).easing))).toBeLessThan(1.005);
   });
 

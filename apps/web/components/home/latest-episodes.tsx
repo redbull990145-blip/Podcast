@@ -139,15 +139,15 @@ async function LatestPick({ episode, podcast }: Pick) {
       <Link
         href={`/podcast/${podcast.id}` as Route}
         aria-label={podcast.title}
-        className="block w-[72px] shrink-0 no-underline transition-opacity hover:opacity-90 sm:mb-3.5 sm:w-full"
+        className="group block w-[72px] shrink-0 no-underline sm:mb-3.5 sm:w-full"
       >
-        <Artwork
+        <div className="cue-artwork-feedback"><Artwork
           src={episode.artworkUrl ?? podcast.artworkUrl}
           alt=""
           size={200}
           responsive
           sizes="(min-width: 1024px) 22vw, (min-width: 640px) 44vw, 72px"
-        />
+        /></div>
       </Link>
 
       <div className="min-w-0 flex-1">
@@ -215,7 +215,7 @@ export function LatestEpisodesSkeleton() {
       {/* Shaped like the real grid above, breakpoint for breakpoint — a
           placeholder reserving a different amount of space than the content it
           stands in for is a layout shift with extra steps. */}
-      <div className="grid grid-cols-1 gap-x-5 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-x-5 gap-y-6 lg:grid-cols-3">
         {/* `PER_PAGE`, not `PICKS`: the shelf holds six and shows three, and
             what has to be reserved is the space three of them take. */}
         {Array.from({ length: PER_PAGE }, (_, index) => (

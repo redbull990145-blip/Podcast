@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { useOnline } from '@/lib/connectivity';
 import { useSession } from '@/lib/session';
+import { EmptyState } from '@/components/ui/empty-state';
 
 /**
  * The library, organised by your relationship to each show rather than by the
@@ -42,9 +43,9 @@ export function LibraryClient() {
     return (
       <Empty
         heading={t.t('library.signedOut')}
-        body="Follow a show and it turns up on this screen — with whatever landed since you last listened."
-        action={{ href: '/signin', label: 'Sign in' }}
-        secondary={{ href: '/search', label: 'Browse without an account' }}
+        body={t.t('library.signedOutBody')}
+        action={{ href: '/signin', label: t.t('common.signIn') }}
+        secondary={{ href: '/search', label: t.t('library.browseAnyway') }}
       />
     );
   }
@@ -66,8 +67,8 @@ export function LibraryClient() {
     return (
       <Empty
         heading={t.t('library.empty')}
-        body="Find a show worth coming back to. Everything you follow collects here, newest first."
-        action={{ href: '/search', label: 'Find something' }}
+        body={t.t('library.emptyBody')}
+        action={{ href: '/search', label: t.t('library.findSomething') }}
       />
     );
   }
@@ -172,7 +173,7 @@ const ShowRow = memo(function ShowRow({ show }: { show: LibraryPodcast }) {
         <p className="type-caption mt-1.5 mb-0 text-[var(--color-text-tertiary)]">
           {show.lastPublishedAt
             ? t.t('library.latest', { date: t.episodeDate(show.lastPublishedAt) })
-            : 'No episodes yet'}
+            : t.t('library.noEpisodes')}
         </p>
       </div>
 
@@ -195,7 +196,7 @@ const ShowRow = memo(function ShowRow({ show }: { show: LibraryPodcast }) {
               show's own title truncated to "Syntax -…", and the group's caption
               already says these are new since you subscribed. The count is the
               information; the noun was decoration. */}
-          <span aria-hidden="true">{show.newEpisodeCount} new</span>
+          <span aria-hidden="true">{t.t('library.newCount', { count: show.newEpisodeCount })}</span>
           <span className="sr-only">
             {t.t('library.newEpisodes', { count: show.newEpisodeCount })}
           </span>
@@ -232,25 +233,34 @@ function Empty({
   action?: { href: string; label: string };
   secondary?: { href: string; label: string };
 }) {
-  return (
-    <div className="py-10">
-      <h2 className="type-title2 m-0 max-w-[20ch] text-[var(--color-text-primary)]">{heading}</h2>
-      <p className="type-body mt-3 mb-0 max-w-[46ch] text-[var(--color-text-secondary)]">{body}</p>
+  /*
+    `plain`, not the dashed panel the playlists use.
 
-      {action || secondary ? (
-        <div className="mt-7 flex flex-wrap items-center gap-3">
-          {action ? (
-            <Link href={action.href as never} className="no-underline">
-              <Button>{action.label}</Button>
-            </Link>
-          ) : null}
-          {secondary ? (
-            <Link href={secondary.href as never} className="no-underline">
-              <Button variant="ghost">{secondary.label}</Button>
-            </Link>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
+    The Library's empty state is the *whole page*, not a container inside one —
+    there is nothing around it for a box to be distinguished from, and drawing
+    an edge would be the app putting a frame around an absence.
+  */
+  return (
+    <EmptyState
+      tone="plain"
+      title={heading}
+      body={body}
+      action={
+        action || secondary ? (
+          <>
+            {action ? (
+              <Link href={action.href as never} className="no-underline">
+                <Button>{action.label}</Button>
+              </Link>
+            ) : null}
+            {secondary ? (
+              <Link href={secondary.href as never} className="no-underline">
+                <Button variant="ghost">{secondary.label}</Button>
+              </Link>
+            ) : null}
+          </>
+        ) : null
+      }
+    />
   );
 }

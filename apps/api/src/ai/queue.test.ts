@@ -1,5 +1,5 @@
 /**
- * The queue, against a real Postgres.
+ * The queue, against isolated PGlite (not multi-connection PostgreSQL).
  *
  * These run on PGlite rather than a mock because the whole design rests on
  * database semantics — `FOR UPDATE SKIP LOCKED`, an upsert with a `WHERE` on the
@@ -7,11 +7,78 @@
  * is not the part that can be wrong.
  */
 
-import { episodes, podcasts, transcriptionJobs, users, type Database } from '@cue/db';
+import {
+  episodes,
+  podcasts,
+  transcriptionJobs,
+  transcripts,
+  aiUsage,
+  userApiKeys,
+  users,
+  type Database,
+} from '@cue/db';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createTestDatabase, type TestDatabase } from '../test/database.ts';
-import { claimNext, complete, enqueue, fail, heartbeat, isActive, jobFor, MAX_ATTEMPTS } from './queue.ts';
+import {
+  admit,
+  claimNext as claim,
+  complete as finish,
+  fail as failAttempt,
+  heartbeat as beat,
+  isActive,
+  jobFor,
+  MAX_ATTEMPTS,
+  type ClaimedJob,
+  type JobProgress,
+} from './queue.ts';
+import { loadConfig } from '../config.ts';
+import { encryptSecret } from './crypto.ts';
+import { utcDay } from './access.ts';
+import type { FastifyInstance } from 'fastify';
+
+const encryption = 'isolated-queue-encryption-test-secret';
+let latestLease: ClaimedJob;
+async function enqueue(
+  db: Database,
+  input: { episodeId: string; userId: string; quotaDay: string | null },
+) {
+  await db.delete(userApiKeys);
+  if (input.quotaDay === null)
+    await db.insert(userApiKeys).values({
+      userId: input.userId,
+      provider: 'groq',
+      secret: encryptSecret('own-test-key', encryption),
+      hint: 'test',
+    });
+  return admit(
+    {
+      db,
+      config: loadConfig({
+        DATABASE_URL: 'pglite://memory',
+        GROQ_API_KEY: 'operator-test-key',
+        API_KEY_ENCRYPTION_SECRET: encryption,
+      }),
+    } as FastifyInstance,
+    input.episodeId,
+    input.userId,
+  );
+}
+async function claimNext(db: Database) {
+  const lease = await claim(db);
+  if (lease) latestLease = lease;
+  return lease;
+}
+const heartbeat = (db: Database, _episodeId: string, progress: JobProgress) =>
+  beat(db, latestLease, progress);
+const fail = (db: Database, _episodeId: string, detail: string, terminal = false) =>
+  failAttempt(db, latestLease, detail, terminal);
+const complete = (db: Database, _episodeId: string) =>
+  finish(db, latestLease, {
+    segments: [{ index: 0, startMs: 0, endMs: 1000, text: 'test', speaker: null }],
+    audioDurationMs: 1000,
+    audioBytes: 100,
+  });
 
 /**
  * The harness owns the lifecycle; `db` is the same object typed as the
@@ -64,6 +131,9 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await db.delete(transcriptionJobs);
+  await db.delete(transcripts);
+  await db.delete(aiUsage);
+  await db.delete(userApiKeys);
 });
 
 /** Push the heartbeat into the past, standing in for a worker that died. */
@@ -80,14 +150,18 @@ describe('enqueue', () => {
 
     const job = await jobFor(db, episodeId);
     expect(job?.status).toBe('queued');
-    expect(job?.quotaDay).toBe('2026-08-16');
+    expect(job?.quotaDay).toBe(utcDay());
     expect(job?.attempts).toBe(0);
   });
 
   it('does not restart a job that is already running', async () => {
     await enqueue(db, { episodeId, userId: USER, quotaDay: null });
     await claimNext(db);
-    await heartbeat(db, episodeId, { stage: 'transcribing', done: 2, total: 5 });
+    await heartbeat(db, episodeId, {
+      stage: 'transcribing',
+      done: 2,
+      total: 5,
+    });
 
     // Someone presses the button again while it is working.
     await enqueue(db, { episodeId, userId: USER, quotaDay: null });
@@ -102,7 +176,7 @@ describe('enqueue', () => {
   it('revives a job that gave up, so the button works again', async () => {
     await enqueue(db, { episodeId, userId: USER, quotaDay: null });
     await claimNext(db);
-    await fail(db, episodeId, 'the audio was unreachable');
+    await fail(db, episodeId, 'the audio was unreachable', true);
 
     await enqueue(db, { episodeId, userId: USER, quotaDay: null });
 
@@ -158,7 +232,11 @@ describe('claimNext', () => {
     await enqueue(db, { episodeId, userId: USER, quotaDay: null });
     await claimNext(db);
     await silenceFor(240);
-    await heartbeat(db, episodeId, { stage: 'transcribing', done: 1, total: 3 });
+    await heartbeat(db, episodeId, {
+      stage: 'transcribing',
+      done: 1,
+      total: 3,
+    });
 
     // Slow is not the same as dead. Taking it here would duplicate an upload
     // that is actively in progress.
@@ -176,6 +254,7 @@ describe('claimNext', () => {
     // A job that reliably kills its worker must stop being retried, or it takes
     // down every job queued behind it too.
     expect(await claimNext(db)).toBeNull();
+    expect((await jobFor(db, episodeId))?.status).toBe('failed');
   });
 });
 
@@ -196,10 +275,9 @@ describe('settling', () => {
     // A retry is still coming, so the transcript must not be marked failed yet.
     expect((await fail(db, episodeId, 'first')).exhausted).toBe(false);
 
-    // Reviving resets the count, so exhausting it takes a full MAX_ATTEMPTS
-    // claims from here — not one fewer.
+    // A transient retry retains its attempt count and admitted reservation.
     await enqueue(db, { episodeId, userId: USER, quotaDay: null });
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    for (let attempt = 1; attempt < MAX_ATTEMPTS; attempt += 1) {
       await claimNext(db);
       await silenceFor(240);
     }

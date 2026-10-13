@@ -21,6 +21,7 @@ import { PressableScale } from '@/components/pressable-scale';
 import { ScreenMessage } from '@/components/screen-message';
 import { api } from '@/lib/api';
 import { playerActions, readPosition, usePlayerState } from '@/lib/player/store';
+import { transcriptQueryOptions } from '@/lib/transcript-query';
 import { MINI_PLAYER_HEIGHT, radius, space, type, useTheme } from '@/theme';
 
 /**
@@ -93,14 +94,7 @@ export default function TranscriptScreen() {
     staleTime: staleTime.podcast,
   });
 
-  const { data, isPending, error } = useQuery({
-    queryKey: queryKeys.episode.transcript(id),
-    queryFn: ({ signal }) => api.getTranscript(id, { signal }),
-    // A published transcript does not change. On a metered connection this is
-    // worth fetching once and not again.
-    staleTime: Infinity,
-    enabled: Boolean(episode?.transcriptUrl),
-  });
+  const { data, isPending, error } = useQuery(transcriptQueryOptions(id, Boolean(episode)));
 
   const transcript = data?.transcript ?? null;
   const segments = useMemo(() => transcript?.segments ?? [], [transcript]);
@@ -200,12 +194,7 @@ export default function TranscriptScreen() {
         accentColor: podcastData?.podcast.accentColor ?? null,
       });
 
-      void playerActions.play(playable).then(() => {
-        // After the load rather than as part of it: `play` resolves the stored
-        // resume position, and resume rules would rewrite an explicit target
-        // (rewinding it, or zeroing it near the end of the episode).
-        playerActions.seek(target);
-      });
+      void playerActions.playAt(playable, target);
 
       setFollowing(true);
     },
@@ -261,15 +250,6 @@ export default function TranscriptScreen() {
 
     if (episodePending) return <ScreenMessage title="Loading…" />;
 
-    if (!episode?.transcriptUrl) {
-      return (
-        <ScreenMessage
-          title="No transcript"
-          body="This publisher doesn’t offer one for this episode."
-        />
-      );
-    }
-
     if (isPending) return <ScreenMessage title="Loading the transcript…" />;
 
     if (error) {
@@ -280,6 +260,7 @@ export default function TranscriptScreen() {
         />
       );
     }
+    if (transcript?.status === 'processing') return <ScreenMessage title="Preparing the transcript…" />;
 
     if (!transcript || transcript.status === 'failed' || segments.length === 0) {
       return (

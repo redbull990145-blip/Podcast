@@ -3,6 +3,7 @@
 import { playableFromEpisode } from '@cue/core';
 import type { Episode } from '@cue/types';
 import * as m from 'motion/react-m';
+import { useTranslator } from '@/components/i18n/locale-provider';
 import { usePressScale, useTransition } from '@/lib/motion';
 import { usePlayerActions, usePlayerSelector } from '@/lib/player/store';
 
@@ -25,6 +26,7 @@ export function QueueButton({
   podcastArtworkUrl: string | null;
   accentColor?: string | null;
 }) {
+  const t = useTranslator();
   const actions = usePlayerActions();
 
   // Above the early return below, where they have to be: this component
@@ -55,7 +57,9 @@ export function QueueButton({
           }),
         );
       }}
-      aria-label={queued ? `Remove ${episode.title} from queue` : `Add ${episode.title} to queue`}
+      aria-label={t.t(queued ? 'queue.removeTitle' : 'episode.addToQueueTitle', {
+        title: episode.title,
+      })}
       aria-pressed={queued}
       whileTap={{ scale: press }}
       transition={transition}

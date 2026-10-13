@@ -33,6 +33,7 @@ import type {
   QueueMutation,
   RecommendedPodcast,
   SessionUser,
+  EpisodeProgress,
   StoredProgress,
   Transcript,
 } from '@cue/types';
@@ -101,6 +102,10 @@ export type ClientOptions = {
   baseUrl: string;
   /** Injected on native, where cookies are not the session transport. */
   getAuthToken?: () => string | null | Promise<string | null>;
+  /** Reject responses from a departed session before they enter a query cache. */
+  getSessionGeneration?: () => number;
+  getAccountId?: () => string | null;
+  onUnauthorized?: () => void;
   fetchImpl?: typeof fetch;
   /**
    * How to read a streaming answer.
@@ -114,6 +119,7 @@ export type ClientOptions = {
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
+  rawBody?: Blob;
   query?: Record<string, string | number | undefined | null>;
   signal?: AbortSignal;
 };
@@ -146,6 +152,12 @@ export function createClient(options: ClientOptions) {
   const baseUrl = options.baseUrl.replace(/\/$/, '');
   const sse = options.sse ?? fetchSse;
 
+  function assertSession(generation: number | undefined): void {
+    if (generation !== options.getSessionGeneration?.()) {
+      throw Object.assign(new Error('The account changed during this request'), { name: 'AbortError' });
+    }
+  }
+
   /**
    * Turn the banner's server-relative path into a URL an `<img>` can use.
    *
@@ -167,6 +179,11 @@ export function createClient(options: ClientOptions) {
 
 
   async function request<T>(path: string, init: RequestOptions = {}): Promise<T> {
+    const generation = options.getSessionGeneration?.();
+    const owner = options.getAccountId?.();
+    if (options.getAccountId && path.startsWith('/me/') && !owner) {
+      throw Object.assign(new Error('The account has not been verified'), { name: 'AbortError' });
+    }
     const url = new URL(`${baseUrl}${path}`);
 
     for (const [key, value] of Object.entries(init.query ?? {})) {
@@ -178,9 +195,12 @@ export function createClient(options: ClientOptions) {
     }
 
     const headers: Record<string, string> = { accept: 'application/json' };
+    if (owner && path !== '/me') headers['X-Cue-Account-Id'] = owner;
     if (init.body !== undefined) headers['content-type'] = 'application/json';
+    if (init.rawBody) headers['content-type'] = init.rawBody.type || 'application/octet-stream';
 
     const token = await options.getAuthToken?.();
+    assertSession(generation);
     if (token) headers['authorization'] = `Bearer ${token}`;
 
     let response: Response;
@@ -190,10 +210,11 @@ export function createClient(options: ClientOptions) {
         headers,
         // Cookies carry the session on web; harmless on native.
         credentials: 'include',
-        ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+        ...(init.rawBody ? { body: init.rawBody } : init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
         ...(init.signal ? { signal: init.signal } : {}),
       });
     } catch (error) {
+      assertSession(generation);
       // An aborted request is the caller's own doing — a navigation, a new
       // keystroke in search. Rethrow so it isn't reported as a network fault.
       //
@@ -209,16 +230,28 @@ export function createClient(options: ClientOptions) {
     }
 
     let payload: ApiResult<T>;
+    assertSession(generation);
+    const responseOwner = response.headers.get('X-Cue-Account-Id');
+    if (path !== '/me' && owner && responseOwner && responseOwner !== owner) {
+      options.onUnauthorized?.();
+      throw Object.assign(new Error('The response belongs to another account'), { name: 'AbortError' });
+    }
     try {
       payload = (await response.json()) as ApiResult<T>;
     } catch {
+      assertSession(generation);
       throw new ApiClientError(
         { code: 'internal', message: 'The server sent a response we could not read' },
         response.status,
       );
     }
 
-    if (!payload.ok) throw new ApiClientError(payload.error, response.status);
+    assertSession(generation);
+
+    if (!payload.ok) {
+      if (response.status === 401) options.onUnauthorized?.();
+      throw new ApiClientError(payload.error, response.status);
+    }
 
     return payload.data;
   }
@@ -228,13 +261,13 @@ export function createClient(options: ClientOptions) {
    * `{ok, data}` envelope, so they get their own thin path rather than being
    * forced through `request`.
    */
-  async function authRequest<T>(path: string, body: unknown): Promise<T> {
+  async function authRequest<T>(path: string, body: unknown, token?: string | null): Promise<T> {
     let response: Response;
     try {
       response = await doFetch(`${baseUrl}/auth${path}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json' },
-        credentials: 'include',
+        headers: { 'content-type': 'application/json', accept: 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+        credentials: token ? 'omit' : 'include',
         body: JSON.stringify(body),
       });
     } catch {
@@ -279,15 +312,15 @@ export function createClient(options: ClientOptions) {
      * token is ignored.
      */
     signUp(input: { email: string; password: string; name: string }) {
-      return authRequest<{ token: string; user: { id: string } }>('/sign-up/email', input);
+      return authRequest<{ token: string | null; user: { id: string } }>('/sign-up/email', input);
     },
 
     signIn(input: { email: string; password: string }) {
       return authRequest<{ token: string; user: { id: string } }>('/sign-in/email', input);
     },
 
-    signOut() {
-      return authRequest<Record<string, never>>('/sign-out', {});
+    async signOut(token?: string | null) {
+      return authRequest<Record<string, never>>('/sign-out', {}, token === undefined ? await options.getAuthToken?.() : token);
     },
 
     /**
@@ -298,7 +331,7 @@ export function createClient(options: ClientOptions) {
      * password they entered ninety seconds ago.
      */
     verifyEmail(input: { email: string; otp: string }) {
-      return authRequest<{ token: string; user: { id: string } }>(
+      return authRequest<{ token: string | null; user: { id: string } }>(
         '/email-otp/verify-email',
         input,
       );
@@ -319,8 +352,8 @@ export function createClient(options: ClientOptions) {
     },
 
     /** The signed-in user, or null. Never throws for an anonymous caller. */
-    getMe(): Promise<{ user: SessionUser | null }> {
-      return request('/me');
+    getMe(signal?: AbortSignal): Promise<{ user: SessionUser | null; sessionExpiresAt: string | null }> {
+      return request('/me', signal ? { signal } : {});
     },
 
     listSubscriptions(
@@ -345,8 +378,22 @@ export function createClient(options: ClientOptions) {
 
     // ------------------------------------------------------------ playback --
 
-    getProgress(episodeId: string): Promise<{ progress: StoredProgress | null }> {
-      return request(`/me/progress/${episodeId}`);
+    getProgress(episodeId: string, options: { signal?: AbortSignal } = {}): Promise<{ progress: StoredProgress | null }> {
+      return request(`/me/progress/${episodeId}`, options);
+    },
+
+    /**
+     * Progress for a page of episodes, in one request.
+     *
+     * What makes a show page able to say which episodes you have heard. The
+     * server answers only for episodes it has a row for, so the caller treats a
+     * missing id as untouched rather than expecting a null.
+     *
+     * Capped at 100 ids server-side; callers pass one page of a list, which is
+     * ten on the episode archive and at most a few dozen anywhere else.
+     */
+    listProgress(episodeIds: readonly string[]): Promise<{ items: EpisodeProgress[] }> {
+      return request('/me/progress', { query: { ids: episodeIds.join(',') } });
     },
 
     /** Report a position. The server reconciles and returns the resolved truth. */
@@ -359,8 +406,9 @@ export function createClient(options: ClientOptions) {
         deviceId: string;
         observedAt: number;
       },
+      signal?: AbortSignal,
     ): Promise<{ progress: StoredProgress; superseded: boolean }> {
-      return request(`/me/progress/${episodeId}`, { method: 'PUT', body });
+      return request(`/me/progress/${episodeId}`, { method: 'PUT', body, ...(signal ? { signal } : {}) });
     },
 
     /**
@@ -470,47 +518,11 @@ export function createClient(options: ClientOptions) {
      *
      * The file goes up as the whole body rather than in a multipart envelope —
      * there is one file and no other fields, so a boundary would be ceremony.
-     * This is the one call that does not go through `request`, which serialises
-     * its body as JSON and would turn a Blob into `{}`.
+     * The raw body path shares the same account fences as JSON requests.
      */
     async uploadPlaylistBanner(id: string, file: Blob): Promise<{ playlist: Playlist }> {
-      const headers: Record<string, string> = {
-        accept: 'application/json',
-        'content-type': file.type || 'application/octet-stream',
-      };
-
-      const token = await options.getAuthToken?.();
-      if (token) headers['authorization'] = `Bearer ${token}`;
-
-      let response: Response;
-      try {
-        response = await doFetch(`${baseUrl}/me/playlists/${id}/banner`, {
-          method: 'POST',
-          headers,
-          credentials: 'include',
-          body: file,
-        });
-      } catch (error) {
-        if (isAbortError(error)) throw error;
-        throw new ApiClientError(
-          { code: 'upstream_unavailable', message: 'Could not reach the server' },
-          0,
-        );
-      }
-
-      let payload: ApiResult<{ playlist: Playlist }>;
-      try {
-        payload = (await response.json()) as ApiResult<{ playlist: Playlist }>;
-      } catch {
-        throw new ApiClientError(
-          { code: 'internal', message: 'The server sent a response we could not read' },
-          response.status,
-        );
-      }
-
-      if (!payload.ok) throw new ApiClientError(payload.error, response.status);
-
-      return { playlist: withAbsoluteBanner(payload.data.playlist) };
+      const result = await request<{ playlist: Playlist }>(`/me/playlists/${id}/banner`, { method: 'POST', rawBody: file });
+      return { playlist: withAbsoluteBanner(result.playlist) };
     },
 
     /** Drop the picture; the playlist falls back to its colour. */
@@ -839,12 +851,16 @@ export function createClient(options: ClientOptions) {
         signal?: AbortSignal;
       },
     ): Promise<void> {
+      const generation = options.getSessionGeneration?.();
       const headers: Record<string, string> = {
         'content-type': 'application/json',
         accept: 'text/event-stream',
       };
+      const owner = options.getAccountId?.();
+      if (owner) headers['X-Cue-Account-Id'] = owner;
 
       const token = await options.getAuthToken?.();
+      assertSession(generation);
       if (token) headers['authorization'] = `Bearer ${token}`;
 
       try {
@@ -856,7 +872,7 @@ export function createClient(options: ClientOptions) {
             ...(params.language ? { language: params.language } : {}),
           }),
           ...(params.signal ? { signal: params.signal } : {}),
-          onFrame: (frame) => handleFrame(frame, params),
+          onFrame: (frame) => { assertSession(generation); handleFrame(frame, params); },
           /**
            * A failure *before* the stream opens is still a normal JSON
            * envelope — an unauthenticated caller, a spent quota, an episode
@@ -865,6 +881,8 @@ export function createClient(options: ClientOptions) {
            * for this one method.
            */
           onFailure: (status, raw) => {
+            assertSession(generation);
+            if (status === 401) options.onUnauthorized?.();
             let payload: ApiResult<unknown> | null;
             try {
               payload = JSON.parse(raw) as ApiResult<unknown>;

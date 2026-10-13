@@ -10,13 +10,16 @@ import type { Route } from 'next';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ApiKeyField } from '@/components/ai/api-key-field';
+import { Button } from '@/components/ui/button';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { LanguagePicker } from '@/components/i18n/language-picker';
+import { SleepTimerChoices, SleepTimerStatus } from '@/components/player/sleep-timer';
 import { SpeedScale } from '@/components/player/speed-control';
 import { ThemePicker } from '@/components/shell/theme-picker';
 import { readPreferences, updatePreferences } from '@/lib/player/store';
 import { setNowPlayingTint, useNowPlayingTint } from '@/lib/now-playing-tint';
 import { useSession, useSignOut } from '@/lib/session';
+import { PageShell } from '@/components/ui/page-shell';
 
 /**
  * Settings.
@@ -62,7 +65,7 @@ export function SettingsClient() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-[var(--measure-content)] px-5 py-10 md:px-10">
+    <PageShell>
       <header className="mb-10">
         <h1 className="type-display m-0 text-[var(--color-text-primary)]">{t.t('settings.title')}</h1>
       </header>
@@ -130,6 +133,16 @@ export function SettingsClient() {
             name={t.t('settings.skipForward')}
           />
         </Field>
+
+        {/* The same control the player has, for the same reason the speed row
+            above is: a second implementation of one setting is a second thing
+            that can disagree with the machine. Unlike the rest of this section
+            it is not a stored preference — it is a deadline on the running
+            player, so it reads as armed here only while it is armed there. */}
+        <Field label={t.t('player.sleepTimer')} hint={t.t('settings.sleepTimerHint')}>
+          <SleepTimerChoices />
+          <SleepTimerStatus className="mt-2.5" />
+        </Field>
       </Section>
 
       {/* Above AI and Account because it changes the words those sections are
@@ -169,18 +182,26 @@ export function SettingsClient() {
             </button>
           </div>
         ) : (
-          <Link
-            href={'/signin' as Route}
-            // `self-start` because the section is a stretching flex column; a
-            // full-bleed Sign in button shouts on a screen that is otherwise
-            // quiet.
-            className="type-callout inline-flex min-h-11 w-fit items-center self-start rounded-[var(--radius-md)] border-none bg-[var(--color-accent)] px-5 text-[var(--color-text-on-accent)] no-underline transition-opacity duration-[var(--duration-instant)] ease-standard hover:opacity-90 active:opacity-80"
-          >
-            {t.t('common.signIn')}
+          /*
+            Ink, and the shared button — it was neither.
+
+            This was the one primary action in the product painted in the
+            accent, which is the rule DESIGN.md calls "the most consequential in
+            the palette": the accent marks *what is playing*, so spending it on
+            Sign in puts the one colour that carries information on a control
+            that carries none. It was also hand-rolled — a `radius-md` rectangle
+            where every other control in the app is a pill — so this screen's
+            most important button was the only one shaped like a panel.
+
+            `self-start` is kept: the section is a stretching flex column, and a
+            full-bleed Sign in shouts on a screen that is otherwise quiet.
+          */
+          <Link href={'/signin' as Route} className="self-start no-underline">
+            <Button>{t.t('common.signIn')}</Button>
           </Link>
         )}
       </Section>
-    </div>
+    </PageShell>
   );
 }
 

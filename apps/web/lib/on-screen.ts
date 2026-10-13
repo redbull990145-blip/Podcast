@@ -27,11 +27,11 @@ import { useEffect, useState, type RefObject } from 'react';
  * a panel that renders nothing because a capability check failed is a much worse
  * failure than one that does some work it did not need to.
  */
-export function useOnScreen(ref: RefObject<Element | null>, rootMargin = '100% 0px'): boolean {
+export function useOnScreen(ref: RefObject<Element | null> | Element | null, rootMargin = '100% 0px'): boolean {
   const [onScreen, setOnScreen] = useState(true);
 
   useEffect(() => {
-    const element = ref.current;
+    const element = ref && 'current' in ref ? ref.current : ref;
     if (!element || typeof IntersectionObserver === 'undefined') return;
 
     const observer = new IntersectionObserver(

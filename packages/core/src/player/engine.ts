@@ -57,6 +57,8 @@ export interface PlaybackEngine {
    * sounds like a glitch.
    */
   load(url: string, startAtSec: number): Promise<void>;
+  /** Cancel a pending load/seek when its playback intent is replaced. */
+  cancelLoad?(): void;
   play(): Promise<void>;
   pause(): void;
   seek(positionSec: number): void;

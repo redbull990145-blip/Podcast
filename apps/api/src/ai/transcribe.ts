@@ -21,15 +21,25 @@
  * `queue.ts` for the state that replaced those maps.
  */
 
-import { episodes, transcripts, type Database, type StoredSegment } from '@cue/db';
+import { episodes, type StoredSegment } from '@cue/db';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { AppError } from '../errors.ts';
-import { claimQuota, keyFor, refundQuota } from './access.ts';
+import { abortable } from './deadline.ts';
+import { keyFor } from './access.ts';
 import { streamAudioChunks } from './audio.ts';
 import { transcribe as transcribeChunk, type TranscribedSegment } from './groq.ts';
 import type { Mp3Chunk } from './mp3.ts';
-import { complete, enqueue, fail, heartbeat, isActive, jobFor, type JobProgress } from './queue.ts';
+import {
+  admit,
+  complete,
+  fail,
+  heartbeat,
+  isActive,
+  jobFor,
+  type ClaimedJob,
+  type JobProgress,
+} from './queue.ts';
 
 /**
  * Upload budget per request.
@@ -74,45 +84,7 @@ export async function startTranscription(
   episodeId: string,
   userId: string,
 ): Promise<{ started: boolean; detail: string | null }> {
-  const [episode] = await app.db
-    .select({ id: episodes.id })
-    .from(episodes)
-    .where(eq(episodes.id, episodeId))
-    .limit(1);
-
-  if (!episode) throw new AppError('not_found', 'Episode not found');
-
-  const [existing] = await app.db
-    .select()
-    .from(transcripts)
-    .where(eq(transcripts.episodeId, episodeId))
-    .limit(1);
-
-  if (existing?.status === 'ready' && existing.segments.length > 0) {
-    return { started: false, detail: 'This episode already has a transcript' };
-  }
-
-  // Asked twice for the same episode: join the job that exists rather than
-  // starting a second one against the same audio.
-  if (await isActive(app.db, episodeId)) {
-    return { started: false, detail: 'Already being transcribed' };
-  }
-
-  /**
-   * Charged here, before the job is visible to a worker.
-   *
-   * Quota belongs to the asking, not to the doing: two people requesting the
-   * same episode at once must not both pass a limit of one, and someone must
-   * not be able to queue a hundred episodes and be billed for the first. What
-   * the job stores is the *day* it was charged to, so a worker in another
-   * process can put it back if the work never happens.
-   */
-  const { metered, day } = await claimQuota(app, userId);
-
-  await enqueue(app.db, { episodeId, userId, quotaDay: metered ? day : null });
-  await mark(app.db, episodeId, 'processing', null);
-
-  return { started: true, detail: null };
+  return admit(app, episodeId, userId);
 }
 
 /** How far along, read from the row so any instance can answer. */
@@ -121,7 +93,7 @@ export async function transcribeProgress(
   episodeId: string,
 ): Promise<TranscribeProgress | null> {
   const job = await jobFor(app.db, episodeId);
-  if (!job || job.status !== 'running' || !job.stage) return null;
+  if (!job || job.fundingSource === 'legacy' || job.status !== 'running' || !job.stage) return null;
 
   return {
     stage: job.stage as TranscribeProgress['stage'],
@@ -136,28 +108,6 @@ export async function transcribeProgress(
   };
 }
 
-async function mark(
-  db: Database,
-  episodeId: string,
-  status: 'processing' | 'failed',
-  detail: string | null,
-): Promise<void> {
-  const values = {
-    episodeId,
-    source: 'generated' as const,
-    status,
-    detail,
-    language: 'en',
-    segments: [] as StoredSegment[],
-    fetchedAt: new Date(),
-  };
-
-  await db
-    .insert(transcripts)
-    .values(values)
-    .onConflictDoUpdate({ target: transcripts.episodeId, set: values });
-}
-
 function detailOf(error: unknown): string {
   if (error instanceof AppError) return error.message;
   return 'Transcription failed. It can be tried again.';
@@ -166,88 +116,81 @@ function detailOf(error: unknown): string {
 /**
  * Do one job, start to finish.
  *
- * Called by the worker loop with a job it has already claimed. Everything that
- * can fail is inside the try: the caller's contract is that this settles the
- * job either way and never throws, because a rejection escaping here would take
- * the loop — and every job behind it — down with it.
+ * Provider/download failures are settled through the current lease. A database
+ * settlement error escapes so the worker backs off; no refund is pretended.
  */
+export const HEARTBEAT_MS = 30_000;
+export const JOB_DEADLINE_MS = 2 * 60 * 60_000;
+
 export async function runJob(
   app: FastifyInstance,
-  job: { episodeId: string; userId: string | null; quotaDay: string | null },
+  job: ClaimedJob,
+  options: { signal?: AbortSignal } = {},
 ): Promise<void> {
-  const { episodeId } = job;
-
+  const controller = new AbortController();
+  const parentAbort = () => controller.abort(options.signal?.reason);
+  if (options.signal?.aborted) parentAbort();
+  else options.signal?.addEventListener('abort', parentAbort, { once: true });
+  const deadline = setTimeout(
+    () =>
+      controller.abort(
+        Object.assign(new Error('Transcription job deadline exceeded'), {
+          name: 'TimeoutError',
+        }),
+      ),
+    JOB_DEADLINE_MS,
+  );
+  deadline.unref?.();
+  const beat = async (progress?: JobProgress): Promise<void> => {
+    controller.signal.throwIfAborted();
+    try {
+      if (!(await heartbeat(app.db, job, progress)))
+        throw Object.assign(new Error('The transcription lease was replaced'), {
+          name: 'LeaseLostError',
+        });
+    } catch (error) {
+      controller.abort(error);
+      throw error;
+    }
+  };
+  let beating: Promise<void> | null = null;
+  const timer = setInterval(() => {
+    if (beating || controller.signal.aborted) return;
+    beating = beat()
+      .catch((error) => {
+        controller.abort(error);
+      })
+      .finally(() => {
+        beating = null;
+      });
+  }, HEARTBEAT_MS);
+  timer.unref?.();
   try {
+    await beat();
     const [episode] = await app.db
       .select({ audioUrl: episodes.audioUrl })
       .from(episodes)
-      .where(eq(episodes.id, episodeId))
+      .where(eq(episodes.id, job.episodeId))
       .limit(1);
-
     if (!episode) throw new AppError('not_found', 'Episode not found');
     if (!job.userId) throw new AppError('bad_request', 'The account that asked for this is gone');
-
-    // Resolved now rather than carried from the request: this may be a different
-    // process, and a provider key is not something to store on a queue row.
-    const funding = await keyFor(app, job.userId);
-
-    await run(app, episodeId, episode.audioUrl, funding);
-    await complete(app.db, episodeId);
+    const funding = await keyFor(app, job.userId, job.fundingSource);
+    controller.signal.throwIfAborted();
+    await run(app, job, episode.audioUrl, funding, controller.signal, beat);
   } catch (error) {
     const detail = detailOf(error);
-    const { exhausted } = await fail(app.db, episodeId, detail);
-
-    /*
-      Some failures are answers, not accidents.
-
-      A missing episode, a deleted account, an enclosure that is too long or is
-      not audio: none of those change between attempt one and attempt three, so
-      spending two more attempts on them costs the listener several minutes of
-      "Writing captions…" and this server up to another 240MB of download to
-      reach a conclusion it already had. Terminal on the first failure instead —
-      the message is the same one it would have shown eventually, several
-      minutes earlier.
-    */
-    const terminal = isPermanent(error);
-
-    app.log.error(
-      { err: error, episodeId, exhausted, terminal },
-      'transcription attempt failed',
-    );
-
-    /*
-      Marked failed here unconditionally now — not only once `exhausted` or
-      `terminal`, which is the fix for the report this file exists to answer.
-
-      The comment this replaces reasoned that marking the transcript failed
-      "while a retry is still queued" would lie to a reader about to get one.
-      That retry does not exist. `fail()` in `queue.ts` always leaves the job
-      unreachable to `claimNext` — nothing distinguishes "one attempt left" from
-      "out of attempts" in what it claims — so the only way back from *any*
-      clean failure is a person pressing "Generate captions" again, which
-      `enqueue()` answers by reviving the job. `exhausted` also cannot become
-      true through that path: reviving resets `attempts` to zero, so a single
-      button press can never accumulate the count `MAX_ATTEMPTS` compares
-      against, and this branch was reached almost only by errors this codebase
-      already treats as terminal — the case it was supposedly distinguishing
-      from barely occurs.
-
-      So leaving the transcript at `processing` here left it there forever: no
-      further write was ever coming, the progress bar had nothing left to move
-      it, and the reader had no way to learn why or a button to press again —
-      `GenerateCaptions` only shows one once the status is no longer
-      `processing`. This is not the rare case; for an ordinary rate limit or a
-      dropped connection, it was the *only* case.
-    */
-    await mark(app.db, episodeId, 'failed', detail);
-
-    if (exhausted || terminal) {
-      // The work was charged for and will not happen. Refunded here rather than
-      // per attempt, because a retry spends nothing new.
-      if (job.userId && job.quotaDay) {
-        await refundQuota(app, job.userId, job.quotaDay).catch(() => undefined);
-      }
-    }
+    // Even cancellation/failure settlement must recheck the current token.
+    const result = await fail(app.db, job, detail, isPermanent(error));
+    if (result.owned)
+      app.log.warn(
+        { episodeId: job.episodeId, attempt: job.attempts, fundingSource: job.fundingSource, exhausted: result.exhausted },
+        'transcription attempt failed',
+      );
+  } finally {
+    clearInterval(timer);
+    clearTimeout(deadline);
+    options.signal?.removeEventListener('abort', parentAbort);
+    await beating;
   }
 }
 
@@ -259,19 +202,19 @@ export async function runJob(
  * working the day somebody improves the wording.
  */
 function isPermanent(error: unknown): boolean {
-  return (
-    error instanceof AppError &&
-    (error.code === 'bad_request' || error.code === 'not_found')
-  );
+  return error instanceof AppError && (error.code === 'bad_request' || error.code === 'not_found');
 }
 
 async function run(
   app: FastifyInstance,
-  episodeId: string,
+  job: ClaimedJob,
   audioUrl: string,
   funding: { key: string; byok: boolean },
+  signal: AbortSignal,
+  beat: (progress?: JobProgress) => Promise<void>,
 ): Promise<void> {
-  await heartbeat(app.db, episodeId, { stage: 'fetching', done: 0, total: 0 });
+  const episodeId = job.episodeId;
+  await beat({ stage: 'fetching', done: 0, total: 0 });
 
   const collected: StoredSegment[] = [];
   let uploaded = 0;
@@ -315,6 +258,7 @@ async function run(
   */
   const uploadChunk = async (piece: Mp3Chunk): Promise<void> => {
     const segments = await transcribeChunk({
+      signal,
       key: funding.key,
       byok: funding.byok,
       bytes: piece.bytes,
@@ -341,7 +285,7 @@ async function run(
         // wait are the countdown, and charging those would bill it repeatedly.
         if (remainingMs === waitMs) waitedMs += waitMs;
 
-        return heartbeat(app.db, episodeId, {
+        return beat({
           stage: 'waiting',
           done: uploaded,
           total: Math.max(estimatedChunks, uploaded),
@@ -369,7 +313,7 @@ async function run(
       declared from a stitched-per-request enclosure is a guess, and `uploaded`
       is a fact.
     */
-    await heartbeat(app.db, episodeId, {
+    await beat({
       stage: 'transcribing',
       done: uploaded,
       total: Math.max(estimatedChunks, uploaded),
@@ -390,16 +334,20 @@ async function run(
     }
   };
 
-  const outcome = await streamAudioChunks(audioUrl, CHUNK_BYTES, uploadChunk, {
-    onStarted: (declaredBytes) => {
-      if (declaredBytes === null) return;
-      estimatedChunks = Math.max(1, Math.ceil(declaredBytes / CHUNK_BYTES));
-      // Fire-and-forget: this is a courtesy update between two real stages,
-      // not a step anything downstream waits on, and the next real heartbeat
-      // is at most a few seconds behind it either way.
-      void heartbeat(app.db, episodeId, { stage: 'fetching', done: 0, total: estimatedChunks });
-    },
-  });
+  const outcome = await abortable(
+    streamAudioChunks(audioUrl, CHUNK_BYTES, uploadChunk, {
+      signal,
+      onStarted: (declaredBytes) => {
+        if (declaredBytes === null) return;
+        estimatedChunks = Math.max(1, Math.ceil(declaredBytes / CHUNK_BYTES));
+        // Fire-and-forget: this is a courtesy update between two real stages,
+        // not a step anything downstream waits on, and the next real heartbeat
+        // is at most a few seconds behind it either way.
+        void beat({ stage: 'fetching', done: 0, total: estimatedChunks }).catch(() => undefined);
+      },
+    }),
+    signal,
+  );
 
   if (outcome.status === 'error') {
     /*
@@ -457,29 +405,26 @@ async function run(
     segment.index = index;
   });
 
-  await heartbeat(app.db, episodeId, { stage: 'saving', done: uploaded, total: uploaded });
+  await beat({ stage: 'saving', done: uploaded, total: uploaded });
 
-  await app.db
-    .update(transcripts)
-    .set({
-      status: 'ready',
-      source: 'generated',
-      detail: null,
+  signal.throwIfAborted();
+  if (
+    !(await complete(app.db, job, {
       segments: collected,
-      // Recorded with the cues they describe, in the same write, so a transcript
-      // can never exist without the measurement that says what it is timed
-      // against. Measured by the streaming download itself now rather than by
-      // walking a finished buffer, but it is the same number either way — the
-      // total of every confirmed frame's duration.
       audioDurationMs: outcome.audioDurationMs,
       audioBytes: outcome.audioBytes,
-      fetchedAt: new Date(),
-    })
-    .where(eq(transcripts.episodeId, episodeId));
+    }))
+  ) {
+    throw Object.assign(new Error('The transcription lease was replaced before save'), {
+      name: 'LeaseLostError',
+    });
+  }
 
   app.log.info(
     {
       episodeId,
+      attempt: job.attempts,
+      fundingSource: job.fundingSource,
       chunks: uploaded,
       segments: collected.length,
       audioDurationMs: outcome.audioDurationMs,
@@ -605,7 +550,12 @@ export function placeChunk(
         text: word.text,
       })) ?? null;
 
-    placed.push({ startMs, endMs, text: segment.text, words: words?.length ? words : null });
+    placed.push({
+      startMs,
+      endMs,
+      text: segment.text,
+      words: words?.length ? words : null,
+    });
   }
 
   return placed;

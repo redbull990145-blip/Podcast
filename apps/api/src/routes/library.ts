@@ -29,7 +29,7 @@ export function libraryRoutes(app: FastifyInstance): void {
     // Deliberately not 401 for anonymous callers: "are you signed in?" is a
     // legitimate question with a legitimate negative answer, and answering it
     // with an error makes every client treat a normal state as a failure.
-    return ok({ user: request.user });
+    return ok({ user: request.user, sessionExpiresAt: request.sessionExpiresAt });
   });
 
   /**

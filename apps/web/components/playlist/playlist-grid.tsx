@@ -11,6 +11,7 @@ import { useTranslator } from '@/components/i18n/locale-provider';
 import { CreatePlaylist } from '@/components/playlist/create-playlist';
 import { CoverStack } from '@/components/playlist/cover-stack';
 import { api } from '@/lib/api';
+import { EmptyState } from '@/components/ui/empty-state';
 
 /**
  * Every playlist of one kind, as tiles.
@@ -174,12 +175,5 @@ function Placeholder() {
 }
 
 function Empty({ heading, body }: { heading: string; body: string }) {
-  return (
-    <div className="rounded-[var(--radius-lg)] border border-dashed border-[var(--color-border)] px-6 py-12 text-center">
-      <p className="type-title3 m-0 text-[var(--color-text-primary)]">{heading}</p>
-      <p className="type-callout mx-auto mt-2 mb-0 max-w-[var(--measure-prose)] text-[var(--color-text-secondary)]">
-        {body}
-      </p>
-    </div>
-  );
+  return <EmptyState title={heading} body={body} />;
 }

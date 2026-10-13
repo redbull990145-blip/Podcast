@@ -1,13 +1,19 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
+import { getTranslator } from '@/lib/i18n';
 import { LibraryTabs } from './library-tabs';
+import { PageShell } from '@/components/ui/page-shell';
 
 export const metadata: Metadata = { title: 'Library' };
 
-export default function LibraryPage() {
+export default async function LibraryPage() {
+  const t = await getTranslator();
+
   return (
-    <div className="mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
-      <h1 className="type-display mt-0 mb-8 text-[var(--color-text-primary)]">Library</h1>
+    <PageShell>
+      <h1 className="type-display mt-0 mb-8 text-[var(--color-text-primary)]">
+        {t.t('library.title')}
+      </h1>
 
       {/*
         `useSearchParams` opts its whole subtree into client rendering, and Next
@@ -19,6 +25,6 @@ export default function LibraryPage() {
       <Suspense fallback={null}>
         <LibraryTabs />
       </Suspense>
-    </div>
+    </PageShell>
   );
 }

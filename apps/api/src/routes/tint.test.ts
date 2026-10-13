@@ -15,6 +15,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../config.ts';
 import { buildServer } from '../server.ts';
+import * as transport from '../feed/pinned-fetch.ts';
 
 /**
  * Stand in for one artwork URL and one only.
@@ -27,11 +28,10 @@ import { buildServer } from '../server.ts';
  * break a suite it was never aimed at.
  */
 function mockArtworkFetch(url: string, answer: () => Promise<Response>) {
-  const real = globalThis.fetch;
+  const real = transport.fetchChecked;
 
-  return vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
-    const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    return target === url ? answer() : real(input, init);
+  return vi.spyOn(transport, 'fetchChecked').mockImplementation((check, init, fetchImpl) => {
+    return check.url.href === url ? answer() : real(check, init, fetchImpl);
   });
 }
 
@@ -120,7 +120,7 @@ describe('an episode with no artwork of its own', () => {
   });
 
   it('never reaches the network for it', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const fetchSpy = vi.spyOn(transport, 'fetchChecked');
     await tintOf(withoutArt);
     expect(fetchSpy).not.toHaveBeenCalled();
   });

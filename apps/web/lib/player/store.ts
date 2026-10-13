@@ -13,9 +13,11 @@ import {
 } from '@cue/core';
 import { useCallback, useRef, useSyncExternalStore } from 'react';
 import { api } from '@/lib/api';
+import { accountScope } from '@/lib/account';
 import { currentFrameStamp } from './frame-clock';
 import { readPreferences, writePreferences } from './preferences';
 import { WebAudioEngine } from './web-engine';
+import { holdWebProgress } from './progress-sync';
 
 /**
  * The player singleton.
@@ -58,9 +60,8 @@ function deviceId(): string {
  * the write — but a request that cannot succeed should not be sent.
  *
  * Three states rather than a boolean, because "not signed in" and "we have not
- * asked yet" are different. Suppressing during `unknown` would mean a listener
- * who hits play before `/me` returns silently loses their resume position, so
- * only a *confirmed* anonymous session stops a request.
+ * asked yet" are different. Private reads and writes wait for a verified
+ * identity, so work cannot accidentally be attributed to the next account.
  *
  * The player is a module singleton created outside React, so it cannot read the
  * session itself. The shell pushes it down once the query resolves.
@@ -74,7 +75,7 @@ export function setSyncState(next: SyncState): void {
 }
 
 function canSync(): boolean {
-  return syncState !== 'anonymous';
+  return syncState === 'authenticated' && accountScope.snapshot().accountId !== null;
 }
 
 /**
@@ -87,6 +88,7 @@ function canSync(): boolean {
 const PROGRESS_INTERVAL_MS = 15_000;
 let lastWrite = 0;
 let pendingEpisodeId: string | null = null;
+let playIntent = 0;
 
 function reportProgress(episodeId: string, record: ProgressRecord, force: boolean): void {
   // Checked before the debounce bookkeeping, so a signed-out session does not
@@ -97,19 +99,7 @@ function reportProgress(episodeId: string, record: ProgressRecord, force: boolea
   if (!force && now - lastWrite < PROGRESS_INTERVAL_MS) return;
   lastWrite = now;
 
-  void api
-    .reportProgress(episodeId, {
-      positionSec: Math.round(record.positionSec),
-      durationSec: record.durationSec,
-      completed: record.completed,
-      deviceId: record.deviceId,
-      observedAt: record.updatedAt,
-    })
-    .catch(() => {
-      // A dropped progress write is not worth interrupting listening for. The
-      // next one carries a later position anyway, so nothing is lost that the
-      // following heartbeat does not fix.
-    });
+  holdWebProgress({ episodeId, ...record, observedAt: record.updatedAt });
 }
 
 /**
@@ -139,6 +129,7 @@ export const NOW_PLAYING_SYNCED = 'cue:now-playing-synced';
  */
 function announceEpisodeStarted(episodeId: string, state: PlayerState): void {
   if (!canSync()) return;
+  const owner = accountScope.snapshot();
 
   void api
     .reportProgress(episodeId, {
@@ -149,6 +140,7 @@ function announceEpisodeStarted(episodeId: string, state: PlayerState): void {
       observedAt: Date.now(),
     })
     .then(() => {
+      if (!accountScope.matches(owner) || machine?.getState().current?.id !== episodeId) return;
       // The debounce is reset rather than bypassed: this *was* the write for
       // this window, and letting the next heartbeat fire immediately after
       // would send the same position twice.
@@ -156,7 +148,7 @@ function announceEpisodeStarted(episodeId: string, state: PlayerState): void {
       window.dispatchEvent(new Event(NOW_PLAYING_SYNCED));
     })
     .catch(() => {
-      // Home stays a beat behind, which is where it was before this existed.
+      // Local playback remains authoritative; history can retry later.
     });
 }
 
@@ -168,9 +160,8 @@ export function getPlayer(): PlayerMachine {
     engine,
     deviceId: deviceId(),
     preferences: readPreferences(),
-    onProgress: (record) => {
-      if (!pendingEpisodeId) return;
-      reportProgress(pendingEpisodeId, record, false);
+    onProgress: (record, context) => {
+      reportProgress(context.episodeId, record, context.force);
     },
     onQueueMutation: (mutation) => {
       if (!canSync()) return;
@@ -186,6 +177,10 @@ export function getPlayer(): PlayerMachine {
   machine.subscribe((state) => {
     const previous = pendingEpisodeId;
     pendingEpisodeId = state.current?.id ?? null;
+
+    // A new source owns a new timeline. Do not slew the old episode's clock
+    // into the new one, even when both positions happen to be near zero.
+    if (pendingEpisodeId !== previous) resyncClock();
 
     // Starting something new is the one progress event that cannot wait for the
     // debounce — see `announceEpisodeStarted`.
@@ -239,7 +234,7 @@ function flushProgress(): void {
   // simply not running produced here, once per page hide.
   fetch(url, {
     method: 'PUT',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'x-cue-account-id': accountScope.snapshot().accountId! },
     credentials: 'include',
     body: payload,
     keepalive: true,
@@ -391,6 +386,8 @@ export function usePlayerSelector<T>(selector: (state: PlayerState) => T): T {
  */
 const playerActions = {
     play: async (episode: PlayableEpisode) => {
+      const intent = ++playIntent;
+      const owner = accountScope.snapshot();
       const player = getPlayer();
       // Resume where this listener left off, reconciled server-side. There is
       // nothing stored for an anonymous listener, so the lookup is skipped
@@ -414,7 +411,7 @@ const playerActions = {
         }
       }
 
-      await player.play(episode, resumeFrom);
+      if (intent === playIntent && accountScope.matches(owner)) await player.play(episode, resumeFrom);
     },
     /**
      * Play from an exact point, ignoring wherever this listener had got to.
@@ -424,10 +421,11 @@ const playerActions = {
      * the episode last week.
      */
     playAt: async (episode: PlayableEpisode, positionSec: number) => {
+      playIntent += 1;
       await getPlayer().playAt(episode, positionSec);
     },
     toggle: () => void getPlayer().toggle(),
-    pause: () => getPlayer().pause(),
+    pause: () => { playIntent += 1; getPlayer().pause(); },
     // Every deliberate move of the playhead re-anchors the smoothing model.
     // Without it a small backwards seek is indistinguishable from drift.
     seek: (sec: number) => {
@@ -464,9 +462,9 @@ const playerActions = {
      */
     setVolume: (volume: number) => getPlayer().setVolume(volume),
     /** Close the mini bar. Flushes the position first — see `dismiss`. */
-    dismiss: () => getPlayer().dismiss(),
+    dismiss: () => { playIntent += 1; getPlayer().dismiss(); },
     setSleepTimer: (minutes: number | null) => getPlayer().setSleepTimer(minutes),
-    next: () => void getPlayer().next(),
+    next: () => { playIntent += 1; void getPlayer().next(); },
     enqueue: (...episodes: PlayableEpisode[]) => getPlayer().enqueue(...episodes),
     playNext: (episode: PlayableEpisode) => getPlayer().playNext(episode),
     removeFromQueue: (episodeId: string) => getPlayer().removeFromQueue(episodeId),
@@ -581,15 +579,17 @@ export { readPreferences };
 let hydrated = false;
 
 export async function hydrateQueue(): Promise<void> {
-  if (hydrated) return;
+  if (hydrated || !canSync()) return;
+  const owner = accountScope.snapshot();
   hydrated = true;
 
   try {
     const { items } = await api.getQueue();
+    if (!accountScope.matches(owner)) return;
     getPlayer().hydrateQueue(items.map(playableFromQueueEntry));
   } catch {
     // Signed out or offline. An empty local queue is the right fallback.
-    hydrated = false;
+    if (accountScope.matches(owner)) hydrated = false;
   }
 }
 
@@ -605,6 +605,14 @@ export async function hydrateQueue(): Promise<void> {
  * queue from every device they own.
  */
 export function resetQueue(): void {
+  playIntent += 1;
   hydrated = false;
-  getPlayer().hydrateQueue([]);
+  lastWrite = 0;
+  pendingEpisodeId = null;
+  machine?.resetAccount();
 }
+
+accountScope.subscribe(() => {
+  syncState = accountScope.snapshot().accountId ? 'authenticated' : 'anonymous';
+  resetQueue();
+});

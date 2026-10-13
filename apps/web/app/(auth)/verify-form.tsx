@@ -5,9 +5,11 @@ import { formatFieldErrors, verifyEmailInput, OTP_LENGTH } from '@cue/validation
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useTranslator } from '@/components/i18n/locale-provider';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { api } from '@/lib/api';
+import { beginAccountTransition } from '@/lib/account';
 
 /**
  * How long before another code can be requested.
@@ -29,6 +31,7 @@ const RESEND_COOLDOWN_SEC = 30;
  * to get right.
  */
 export function VerifyForm({ email, onDone }: { email: string; onDone: () => void }) {
+  const t = useTranslator();
   const router = useRouter();
   const queryClient = useQueryClient();
 
@@ -71,10 +74,12 @@ export function VerifyForm({ email, onDone }: { email: string; onDone: () => voi
     setNotice(null);
 
     try {
+      beginAccountTransition(queryClient);
       await api.verifyEmail(parsed.data);
 
       // Verifying signs the account in, so the cached anonymous session is now
       // wrong in exactly the way it is after any other sign-in.
+      beginAccountTransition(queryClient);
       await queryClient.invalidateQueries({ queryKey: queryKeys.session });
       onDone();
       router.push('/library');
@@ -83,7 +88,7 @@ export function VerifyForm({ email, onDone }: { email: string; onDone: () => voi
       if (caught instanceof ApiClientError) {
         setError(caught.message);
       } else {
-        setError('Something went wrong. Try again.');
+        setError(t.t('auth.failed'));
       }
       setBusy(false);
       // Select rather than clear: a mistyped digit is far more common than a
@@ -102,13 +107,13 @@ export function VerifyForm({ email, onDone }: { email: string; onDone: () => voi
 
     try {
       await api.sendVerificationOtp({ email });
-      setNotice('Sent. Check your email.');
+      setNotice(t.t('auth.resent'));
       setCooldown(RESEND_COOLDOWN_SEC);
       setCode('');
       inputRef.current?.focus();
     } catch (caught) {
       setError(
-        caught instanceof ApiClientError ? caught.message : 'Could not send another code.',
+        caught instanceof ApiClientError ? caught.message : t.t('auth.resendFailed'),
       );
     } finally {
       setBusy(false);
@@ -117,14 +122,19 @@ export function VerifyForm({ email, onDone }: { email: string; onDone: () => voi
 
   return (
     <form onSubmit={onSubmit} noValidate className="w-full">
-      <h1 className="type-display m-0 text-[var(--color-text-primary)]">Check your email</h1>
+      <h1 className="type-display m-0 text-[var(--color-text-primary)]">
+        {t.t('auth.verifyTitle')}
+      </h1>
+      {/* The address is inside the sentence rather than appended to it, because
+          where it falls is not the same in every language — and it stays a
+          `<strong>` so it can still be picked out of the line at a glance. */}
       <p className="type-callout mt-2 mb-8 text-[var(--color-text-secondary)]">
-        We sent a {OTP_LENGTH}-digit code to <strong>{email}</strong>.
+        {t.t('auth.verifyBody', { count: OTP_LENGTH, email })}
       </p>
 
       <Field
         ref={inputRef}
-        label="Verification code"
+        label={t.t('auth.verifyCode')}
         name="otp"
         // `inputMode` brings up the number pad on a phone; `one-time-code` is
         // what lets iOS and Android offer the code straight from the
@@ -152,19 +162,21 @@ export function VerifyForm({ email, onDone }: { email: string; onDone: () => voi
 
       <div className="mt-7">
         <Button type="submit" busy={busy}>
-          {busy ? 'Verifying…' : 'Verify'}
+          {busy ? t.t('auth.verifying') : t.t('auth.verify')}
         </Button>
       </div>
 
       <p className="type-callout mt-6 mb-0 text-[var(--color-text-secondary)]">
-        {'Didn’t get it? '}
+        {t.t('auth.noCode')}{' '}
         <button
           type="button"
           onClick={onResend}
           disabled={busy || cooldown > 0}
           className="text-[var(--color-accent-text)] underline decoration-[var(--color-border-strong)] underline-offset-4 hover:decoration-[var(--color-accent-text)] disabled:cursor-not-allowed disabled:opacity-60 disabled:no-underline"
         >
-          {cooldown > 0 ? `Send another in ${cooldown}s` : 'Send another'}
+          {cooldown > 0
+            ? t.t('auth.resendIn', { seconds: cooldown })
+            : t.t('auth.resend')}
         </button>
       </p>
     </form>

@@ -3,9 +3,9 @@
  *
  * Owns the queue, the current episode, position bookkeeping, speed and the
  * sleep timer. Talks to a `PlaybackEngine` through its interface and to the UI
- * by emitting state. Contains no DOM, no React, and no timers of its own — the
- * clock is injected, so "the sleep timer fires after 20 minutes" is a test that
- * runs in a millisecond.
+ * by emitting state. Contains no DOM or React. The clock is injected and the
+ * sleep deadline also has a cancellable timer, so expiry does not depend on
+ * playback-position events.
  *
  * The direction of data flow is the important part: **the engine reports, the
  * machine decides, the UI reads.** The UI never drives the engine directly, so
@@ -23,6 +23,9 @@ export type PlayableEpisode = {
   podcastId: string;
   title: string;
   audioUrl: string;
+  /** Canonical source retained when a platform selects an offline file. */
+  remoteAudioUrl?: string;
+  remoteArtworkUrl?: string | null;
   /** From the feed; often absent, and corrected once the engine reports. */
   durationSec: number | null;
   artworkUrl: string | null;
@@ -67,7 +70,7 @@ export type MachineOptions = {
   /** Injected so the sleep timer is testable without waiting. */
   now?: () => number;
   /** Called when position should be persisted. Debouncing is the caller's job. */
-  onProgress?: (progress: ProgressRecord) => void;
+  onProgress?: (progress: ProgressRecord, context: { episodeId: string; force: boolean }) => void;
   /**
    * Called when the queue changes locally and storage should follow. Never
    * called for changes that came *from* storage — see `hydrateQueue`.
@@ -97,16 +100,24 @@ const INITIAL: PlayerState = {
   error: null,
 };
 
+// Keep platform timer types out of this package's ES-only type surface.
+const timers = globalThis as typeof globalThis & {
+  setTimeout: (callback: () => void, delay: number) => unknown;
+  clearTimeout: (handle: unknown) => void;
+};
+
 export class PlayerMachine {
   private state: PlayerState = INITIAL;
   private readonly listeners = new Set<PlayerListener>();
   private readonly engine: PlaybackEngine;
   private readonly now: () => number;
-  private readonly onProgress: ((progress: ProgressRecord) => void) | undefined;
+  private readonly onProgress: MachineOptions['onProgress'];
   private readonly onQueueMutation: ((mutation: QueueMutation) => void) | undefined;
   private readonly deviceId: string;
   private preferences: PlaybackPreferences;
   private unsubscribeEngine: (() => void) | null = null;
+  private loadGeneration = 0;
+  private sleepTimer: unknown = null;
 
   constructor(options: MachineOptions) {
     this.engine = options.engine;
@@ -164,6 +175,9 @@ export class PlayerMachine {
   }
 
   private async start(episode: PlayableEpisode, startAt: number): Promise<void> {
+    this.reportProgress();
+    const generation = ++this.loadGeneration;
+    this.engine.cancelLoad?.();
     this.set({
       status: 'loading',
       current: episode,
@@ -177,12 +191,19 @@ export class PlayerMachine {
 
     try {
       await this.engine.load(episode.audioUrl, startAt);
+      if (generation !== this.loadGeneration) return;
       // Applied per source, not once at construction: both platforms reset
       // playback rate when a new source is loaded, so a saved 1.5× would
       // silently become 1× on the second episode.
       this.engine.setRate(this.state.rate);
       await this.engine.play();
+      if (generation !== this.loadGeneration) return;
+      if (this.state.queue.some((item) => item.id === episode.id)) {
+        this.set({ queue: this.state.queue.filter((item) => item.id !== episode.id) });
+        this.onQueueMutation?.({ type: 'remove', episodeId: episode.id });
+      }
     } catch (error) {
+      if (generation !== this.loadGeneration) return;
       this.set({
         status: 'error',
         error: error instanceof Error ? error.message : 'Could not play this episode',
@@ -192,9 +213,11 @@ export class PlayerMachine {
 
   async resume(): Promise<void> {
     if (!this.state.current) return;
+    const generation = this.loadGeneration;
     try {
       await this.engine.play();
     } catch (error) {
+      if (generation !== this.loadGeneration) return;
       this.set({
         status: 'error',
         error: error instanceof Error ? error.message : 'Could not resume',
@@ -203,6 +226,8 @@ export class PlayerMachine {
   }
 
   pause(): void {
+    this.loadGeneration += 1;
+    this.engine.cancelLoad?.();
     this.engine.pause();
     // Persist immediately: a pause is the strongest signal that someone is
     // about to walk away, and a position lost here is a place lost.
@@ -229,6 +254,8 @@ export class PlayerMachine {
    * irreversible action behind a small grey cross.
    */
   dismiss(): void {
+    this.loadGeneration += 1;
+    this.engine.cancelLoad?.();
     this.engine.pause();
     this.reportProgress();
 
@@ -240,10 +267,11 @@ export class PlayerMachine {
       error: null,
       sleepAtMs: null,
     });
+    this.scheduleSleepTimer();
   }
 
   async toggle(): Promise<void> {
-    if (this.state.status === 'playing') {
+    if (this.state.status === 'playing' || this.state.status === 'loading') {
       this.pause();
     } else {
       await this.resume();
@@ -310,15 +338,22 @@ export class PlayerMachine {
    * endless round trip the moment two are open.
    */
   hydrateQueue(episodes: PlayableEpisode[]): void {
-    this.set({ queue: episodes.filter((episode) => episode.id !== this.state.current?.id) });
+    const seen = new Set<string>();
+    this.set({ queue: episodes.filter((episode) => {
+      if (episode.id === this.state.current?.id || seen.has(episode.id)) return false;
+      seen.add(episode.id);
+      return true;
+    }) });
   }
 
   /** Append to the end of the queue. */
   enqueue(...episodes: PlayableEpisode[]): void {
     const existing = new Set(this.state.queue.map((item) => item.id));
-    const additions = episodes.filter(
-      (episode) => !existing.has(episode.id) && episode.id !== this.state.current?.id,
-    );
+    const additions = episodes.filter((episode) => {
+      if (existing.has(episode.id) || episode.id === this.state.current?.id) return false;
+      existing.add(episode.id);
+      return true;
+    });
     if (additions.length === 0) return;
 
     this.set({ queue: [...this.state.queue, ...additions] });
@@ -329,6 +364,7 @@ export class PlayerMachine {
 
   /** Put an episode at the front, so it plays after the current one. */
   playNext(episode: PlayableEpisode): void {
+    if (episode.id === this.state.current?.id) return;
     const rest = this.state.queue.filter((item) => item.id !== episode.id);
     this.set({ queue: [episode, ...rest] });
     this.onQueueMutation?.({ type: 'add', episodeId: episode.id, playNext: true });
@@ -343,7 +379,7 @@ export class PlayerMachine {
 
   reorderQueue(episodeIds: string[]): void {
     const byId = new Map(this.state.queue.map((item) => [item.id, item]));
-    const reordered = episodeIds
+    const reordered = [...new Set(episodeIds)]
       .map((id) => byId.get(id))
       .filter((item): item is PlayableEpisode => item !== undefined);
 
@@ -371,7 +407,7 @@ export class PlayerMachine {
     const [head, ...rest] = this.state.queue;
 
     if (!head) {
-      this.engine.pause();
+      this.pause();
       this.set({ status: 'ended' });
       return;
     }
@@ -395,6 +431,17 @@ export class PlayerMachine {
    */
   setSleepTimer(minutes: number | null): void {
     this.set({ sleepAtMs: minutes === null ? null : this.now() + minutes * 60_000 });
+    this.scheduleSleepTimer();
+  }
+
+  private scheduleSleepTimer(): void {
+    if (this.sleepTimer !== null) timers.clearTimeout(this.sleepTimer);
+    this.sleepTimer = null;
+    if (this.state.sleepAtMs === null) return;
+    this.sleepTimer = timers.setTimeout(() => {
+      this.sleepTimer = null;
+      if (!this.checkSleepTimer()) this.scheduleSleepTimer();
+    }, Math.min(2_147_483_647, Math.max(0, this.state.sleepAtMs - this.now())));
   }
 
   /** True when the deadline has passed and playback was stopped. */
@@ -402,15 +449,16 @@ export class PlayerMachine {
     const deadline = this.state.sleepAtMs;
     if (deadline === null || this.now() < deadline) return false;
 
-    this.engine.pause();
     this.set({ sleepAtMs: null });
-    this.reportProgress();
+    this.scheduleSleepTimer();
+    this.pause();
     return true;
   }
 
   // --------------------------------------------------------------- engine --
 
   private handleEngineEvent(event: EngineEvent): void {
+    if (!this.state.current) return;
     switch (event.type) {
       case 'loaded': {
         // The engine's duration is authoritative — feeds lie about it, and
@@ -424,7 +472,7 @@ export class PlayerMachine {
         // Checked on the position tick rather than by its own timer: the engine
         // already reports regularly, and a second timer is a second thing that
         // can drift out of step with playback.
-        this.checkSleepTimer();
+        if (!this.checkSleepTimer() && this.state.status === 'playing') this.reportProgress(false, false);
         break;
       }
 
@@ -462,9 +510,9 @@ export class PlayerMachine {
     }
   }
 
-  private reportProgress(forceComplete = false): void {
+  private reportProgress(forceComplete = false, force = true): void {
     const episode = this.state.current;
-    if (!episode || !this.onProgress) return;
+    if (!episode || !this.onProgress || this.state.status === 'loading') return;
 
     const positionSec = this.engine.getPosition();
 
@@ -474,7 +522,7 @@ export class PlayerMachine {
       updatedAt: this.now(),
       deviceId: this.deviceId,
       completed: forceComplete || isComplete(positionSec, this.state.durationSec),
-    });
+    }, { episodeId: episode.id, force });
   }
 
   /** Persist now — called on pause, unload, and app backgrounding. */
@@ -482,7 +530,20 @@ export class PlayerMachine {
     this.reportProgress();
   }
 
+  /** Drop the departed account's playback without reporting it to the next one. */
+  resetAccount(): void {
+    this.loadGeneration += 1;
+    this.set({ current: null, queue: [], status: 'idle', positionSec: 0, durationSec: null, buffering: false, error: null, sleepAtMs: null });
+    this.scheduleSleepTimer();
+    this.engine.cancelLoad?.();
+    this.engine.pause();
+  }
+
   destroy(): void {
+    if (this.sleepTimer !== null) timers.clearTimeout(this.sleepTimer);
+    this.sleepTimer = null;
+    this.loadGeneration += 1;
+    this.engine.cancelLoad?.();
     this.unsubscribeEngine?.();
     this.unsubscribeEngine = null;
     this.listeners.clear();

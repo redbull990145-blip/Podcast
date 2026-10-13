@@ -13,6 +13,7 @@
  */
 
 import { checkUrl } from '../feed/url-guard.ts';
+import { fetchChecked } from '../feed/pinned-fetch.ts';
 import { concatAllForFallback, Mp3ChunkStream, type Mp3Chunk } from './mp3.ts';
 
 const USER_AGENT = 'Cue/0.1 (+https://github.com/redbull990145-blip/Podcast)';
@@ -72,7 +73,7 @@ export type AudioError = {
  */
 async function resolveAudioResponse(
   url: string,
-  doFetch: typeof fetch,
+  doFetch: typeof fetch | undefined,
   signal: AbortSignal | undefined,
   extraHeaders: Record<string, string> = {},
 ): Promise<{ status: 'ok'; response: Response; finalUrl: URL } | AudioError> {
@@ -84,11 +85,11 @@ async function resolveAudioResponse(
 
     let response: Response;
     try {
-      response = await doFetch(check.url.href, {
+      response = await fetchChecked(check, {
         headers: { 'user-agent': USER_AGENT, accept: 'audio/*, */*;q=0.8', ...extraHeaders },
         redirect: 'manual',
         signal: signal ?? AbortSignal.timeout(TIMEOUT_MS),
-      });
+      }, doFetch);
     } catch (error) {
       return {
         status: 'error',
@@ -173,7 +174,7 @@ export async function streamAudioChunks(
     onStarted?: (declaredBytes: number | null) => void;
   } = {},
 ): Promise<StreamAudioOutcome> {
-  const resolved = await resolveAudioResponse(url, options.fetchImpl ?? fetch, options.signal);
+  const resolved = await resolveAudioResponse(url, options.fetchImpl, options.signal);
   if (resolved.status === 'error') return resolved;
 
   const { response } = resolved;
@@ -326,7 +327,7 @@ export async function fetchAudioRange(
 
   const resolved = await resolveAudioResponse(
     url,
-    options.fetchImpl ?? fetch,
+    options.fetchImpl,
     options.signal,
     { range: `bytes=${from}-${to}` },
   );

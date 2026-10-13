@@ -15,7 +15,7 @@
  * generic failure would leave the user unable to tell which one they had.
  */
 
-import { aiUsage, userApiKeys } from '@cue/db';
+import { aiUsage, userApiKeys, type Database, type DatabaseTransaction } from '@cue/db';
 import type { AiQuota } from '@cue/types';
 import { and, eq, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
@@ -41,23 +41,33 @@ export function utcDay(now: Date = new Date()): string {
 }
 
 /** The user's own key, decrypted for a single call, or null. */
-async function userKey(app: FastifyInstance, userId: string): Promise<string | null> {
+async function userKey(
+  app: FastifyInstance,
+  userId: string,
+  db: Database | DatabaseTransaction = app.db,
+): Promise<string | null> {
   const secret = app.config.ai.encryptionSecret;
-  if (!secret) return null;
 
-  const [row] = await app.db
+  const [row] = await db
     .select()
     .from(userApiKeys)
     .where(and(eq(userApiKeys.userId, userId), eq(userApiKeys.provider, 'groq')))
     .limit(1);
 
   if (!row) return null;
+  if (!secret)
+    throw new AppError(
+      'bad_request',
+      'Your saved Groq key cannot be read. Save it again in Settings.',
+    );
 
-  // Null here means the row cannot be decrypted — a rotated encryption secret,
-  // most likely. Falling through to the operator key keeps the feature working
-  // while the user re-saves theirs, which beats a hard failure they cannot
-  // diagnose.
-  return decryptSecret(row.secret, secret);
+  const key = decryptSecret(row.secret, secret);
+  if (!key)
+    throw new AppError(
+      'bad_request',
+      'Your saved Groq key cannot be read. Save it again in Settings.',
+    );
+  return key;
 }
 
 /**
@@ -105,25 +115,7 @@ export async function resolve(
    * The upsert increments and reports the new total in a single statement, so
    * two simultaneous requests get 1 and 2 rather than both reading 0.
    */
-  const [row] = await app.db
-    .insert(aiUsage)
-    .values({ userId, day, count: 1 })
-    .onConflictDoUpdate({
-      target: [aiUsage.userId, aiUsage.day],
-      set: { count: sql`${aiUsage.count} + 1` },
-    })
-    .returning({ count: aiUsage.count });
-
-  const used = row?.count ?? limit + 1;
-
-  if (used > limit) {
-    await refund(app, userId, day);
-    throw new AppError(
-      'rate_limited',
-      `That is your ${limit} AI requests for today. Add your own Groq key in Settings for unlimited use — the free tier covers this easily.`,
-      { retryAfterSec: secondsUntilUtcMidnight() },
-    );
-  }
+  await reserveOperatorQuota(app.db, userId, day, limit);
 
   return {
     key: operator,
@@ -150,9 +142,17 @@ export async function resolve(
 export async function keyFor(
   app: FastifyInstance,
   userId: string,
+  expected: 'byok' | 'operator',
 ): Promise<Funding> {
-  const own = await userKey(app, userId);
-  if (own) return { key: own, byok: true };
+  if (expected === 'byok') {
+    const own = await userKey(app, userId);
+    if (!own)
+      throw new AppError(
+        'bad_request',
+        'This job requires your own Groq key. Save it again in Settings.',
+      );
+    return { key: own, byok: true };
+  }
 
   const operator = app.config.ai.operatorKey;
   if (!operator) {
@@ -176,9 +176,10 @@ export async function keyFor(
 export async function claimQuota(
   app: FastifyInstance,
   userId: string,
+  db: Database | DatabaseTransaction = app.db,
 ): Promise<{ metered: boolean; day: string | null }> {
   // Their own key is their own bill: never counted, never capped.
-  const own = await userKey(app, userId);
+  const own = await userKey(app, userId, db);
   if (own) return { metered: false, day: null };
 
   if (!app.config.ai.operatorKey) {
@@ -191,36 +192,44 @@ export async function claimQuota(
   const day = utcDay();
   const limit = app.config.ai.dailyQuota;
 
-  const [row] = await app.db
+  await reserveOperatorQuota(db, userId, day, limit);
+  return { metered: true, day };
+}
+
+/** A denied reservation performs no increment and needs no compensating refund. */
+async function reserveOperatorQuota(
+  db: Database | DatabaseTransaction,
+  userId: string,
+  day: string,
+  limit: number,
+): Promise<void> {
+  if (limit <= 0) throw quotaExhausted(limit);
+  const [row] = await db
     .insert(aiUsage)
     .values({ userId, day, count: 1 })
     .onConflictDoUpdate({
       target: [aiUsage.userId, aiUsage.day],
       set: { count: sql`${aiUsage.count} + 1` },
+      setWhere: sql`${aiUsage.count} < ${limit}`,
     })
     .returning({ count: aiUsage.count });
 
-  const used = row?.count ?? limit + 1;
+  if (!row) throw quotaExhausted(limit);
+}
 
-  if (used > limit) {
-    await refund(app, userId, day);
-    throw new AppError(
-      'rate_limited',
-      `That is your ${limit} AI requests for today. Add your own Groq key in Settings for unlimited use — the free tier covers this easily.`,
-      { retryAfterSec: secondsUntilUtcMidnight() },
-    );
-  }
-
-  return { metered: true, day };
+function quotaExhausted(limit: number): AppError {
+  return new AppError(
+    'rate_limited',
+    `That is your ${limit} AI requests for today. Add your own Groq key in Settings for unlimited use — the free tier covers this easily.`,
+    { retryAfterSec: secondsUntilUtcMidnight() },
+  );
 }
 
 /**
  * Give a claimed unit back.
  *
- * Exported because the refund may happen in a different process than the claim
- * — a worker failing a job the API queued. The previous design held this as a
- * closure, which is exactly the state a restart destroys: the work was charged
- * for, the job died, and nobody was ever credited.
+ * Used by non-durable alignment requests. Transcription jobs settle only through
+ * queue.ts, which checks the current lease and reservation in one transaction.
  */
 export async function refundQuota(
   app: FastifyInstance,
@@ -244,11 +253,7 @@ async function refund(app: FastifyInstance, userId: string, day: string): Promis
 }
 
 function secondsUntilUtcMidnight(now: Date = new Date()): number {
-  const midnight = Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate() + 1,
-  );
+  const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
   return Math.max(1, Math.ceil((midnight - now.getTime()) / 1000));
 }
 

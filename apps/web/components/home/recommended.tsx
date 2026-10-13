@@ -180,7 +180,7 @@ function RecommendationCard({ podcast }: { podcast: RecommendedPodcast }) {
 
   return (
     <Link href={`/podcast/${podcast.id}` as Route} className="group block no-underline">
-      <div className="transition-transform duration-[var(--duration-fast)] ease-standard group-hover:-translate-y-0.5 group-active:translate-y-0 motion-reduce:transition-none motion-reduce:group-hover:translate-y-0">
+      <div className="cue-artwork-feedback">
         <Artwork
           src={podcast.artworkUrl}
           alt={podcast.title}

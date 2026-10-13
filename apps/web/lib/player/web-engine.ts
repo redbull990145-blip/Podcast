@@ -4,17 +4,24 @@ import { subscribeToFrames } from './frame-clock';
 /**
  * The web audio engine.
  *
- * The `<audio>` element is created **outside React and never unmounted**. That
+ * The engine and its active `<audio>` element live outside React. That
  * is the whole point: React owns what is on screen, and what is on screen
  * changes on every navigation. An element owned by a component would be torn
  * down and recreated by a route change, and playback would stop mid-sentence
  * — the single most unforgivable bug a podcast app can have.
  *
- * So the element lives in a module singleton, the machine talks to it through
+ * Source replacement gives each element its own event ownership. The engine
+ * lives in a module singleton, the machine talks to it through
  * the `PlaybackEngine` interface, and React only ever reads state.
  */
 export class WebAudioEngine implements PlaybackEngine {
-  private readonly audio: HTMLAudioElement;
+  private finishLoad: (() => void) | null = null;
+
+  cancelLoad(): void {
+    this.finishLoad?.();
+    this.finishLoad = null;
+  }
+  private audio: HTMLAudioElement;
   private readonly listeners = new Set<EngineListener>();
   /** Unsubscribes the position loop from the shared frame clock. */
   private stopFrames: (() => void) | null = null;
@@ -22,17 +29,24 @@ export class WebAudioEngine implements PlaybackEngine {
   private buffering = false;
 
   constructor() {
-    this.audio = new Audio();
+    this.audio = this.createAudio();
+  }
+
+  private createAudio(): HTMLAudioElement {
+    const audio = new Audio();
+    const listen = (type: string, callback: () => void): void => {
+      audio.addEventListener(type, () => { if (this.audio === audio) callback(); });
+    };
 
     // Podcast audio is large and streamed; `metadata` gets duration without
     // pulling the whole file before the user has pressed play.
-    this.audio.preload = 'metadata';
+    audio.preload = 'metadata';
     // Publisher CDNs vary wildly in CORS support. Leaving this unset keeps
     // plain playback working everywhere — it is only setting `crossOrigin`
     // that makes a non-CORS host fail outright.
-    this.audio.crossOrigin = null;
+    audio.crossOrigin = null;
 
-    this.audio.addEventListener('loadedmetadata', () => {
+    listen('loadedmetadata', () => {
       this.emit({
         type: 'loaded',
         // Live streams report Infinity; that is "unknown", not a duration.
@@ -40,21 +54,21 @@ export class WebAudioEngine implements PlaybackEngine {
       });
     });
 
-    this.audio.addEventListener('play', () => {
+    listen('play', () => {
       this.emit({ type: 'playing' });
       this.startPositionLoop();
     });
 
-    this.audio.addEventListener('pause', () => {
+    listen('pause', () => {
       this.setBuffering(false);
       this.emit({ type: 'paused' });
       this.stopPositionLoop();
     });
 
-    this.audio.addEventListener('ended', () => {
+    listen('ended', () => {
       this.setBuffering(false);
-      this.emit({ type: 'ended' });
       this.stopPositionLoop();
+      this.emit({ type: 'ended' });
     });
 
     /*
@@ -69,21 +83,22 @@ export class WebAudioEngine implements PlaybackEngine {
       transport showing a pause button over several seconds of silence every
       time somebody dragged the scrubber.
     */
-    this.audio.addEventListener('waiting', () => this.setBuffering(true));
-    this.audio.addEventListener('seeking', () => {
+    listen('waiting', () => this.setBuffering(true));
+    listen('seeking', () => {
       // Only a seek that has to fetch. Landing inside an already-buffered range
       // resolves within a frame or two, and flashing a spinner for that reads
       // as the app stuttering rather than as it working.
       if (!this.isBuffered(this.audio.currentTime)) this.setBuffering(true);
     });
-    this.audio.addEventListener('playing', () => this.setBuffering(false));
-    this.audio.addEventListener('canplay', () => this.setBuffering(false));
+    listen('playing', () => this.setBuffering(false));
+    listen('canplay', () => this.setBuffering(false));
 
-    this.audio.addEventListener('error', () => {
+    listen('error', () => {
       this.setBuffering(false);
       this.emit({ type: 'error', message: describeMediaError(this.audio.error) });
       this.stopPositionLoop();
     });
+    return audio;
   }
 
   /**
@@ -148,13 +163,13 @@ export class WebAudioEngine implements PlaybackEngine {
     });
   }
 
-  private stopPositionLoop(): void {
+  private stopPositionLoop(report = true): void {
     if (this.stopFrames === null) return;
     this.stopFrames();
     this.stopFrames = null;
     // One final reading, so the stored position matches where playback
     // actually stopped rather than the last throttled sample.
-    this.emit({ type: 'position', positionSec: this.audio.currentTime });
+    if (report) this.emit({ type: 'position', positionSec: this.audio.currentTime });
   }
 
   private emit(event: EngineEvent): void {
@@ -162,6 +177,17 @@ export class WebAudioEngine implements PlaybackEngine {
   }
 
   async load(url: string, startAtSec: number): Promise<void> {
+    this.cancelLoad();
+    if (this.audio.src) {
+      const previous = this.audio;
+      this.stopPositionLoop(false);
+      this.audio = this.createAudio();
+      this.audio.volume = previous.volume;
+      previous.pause();
+      previous.removeAttribute('src');
+      previous.load();
+      this.setBuffering(false);
+    }
     this.audio.src = url;
     this.audio.load();
 
@@ -170,7 +196,7 @@ export class WebAudioEngine implements PlaybackEngine {
     // Seeking before metadata arrives is ignored by the browser, so wait for
     // it. Loading and *then* seeking would play a fraction of a second from
     // zero first, which is audible and sounds like a glitch.
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve, reject) => {
       const seekWhenReady = () => {
         this.audio.currentTime = startAtSec;
         resolve();
@@ -189,9 +215,14 @@ export class WebAudioEngine implements PlaybackEngine {
       };
 
       const cleanup = () => {
+        clearTimeout(deadline);
         this.audio.removeEventListener('loadedmetadata', onLoaded);
         this.audio.removeEventListener('error', onError);
+        if (this.finishLoad === cancel) this.finishLoad = null;
       };
+
+      const cancel = () => { cleanup(); resolve(); };
+      const deadline = setTimeout(() => { cleanup(); reject(new Error('The episode took too long to load')); }, 15_000);
 
       const onLoaded = () => {
         cleanup();
@@ -200,6 +231,7 @@ export class WebAudioEngine implements PlaybackEngine {
 
       this.audio.addEventListener('loadedmetadata', onLoaded);
       this.audio.addEventListener('error', onError);
+      this.finishLoad = cancel;
     });
   }
 
@@ -243,6 +275,7 @@ export class WebAudioEngine implements PlaybackEngine {
   }
 
   destroy(): void {
+    this.cancelLoad();
     this.stopPositionLoop();
     this.listeners.clear();
     this.audio.pause();

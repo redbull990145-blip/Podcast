@@ -2,6 +2,7 @@
 
 import { icon } from '@cue/design';
 import * as m from 'motion/react-m';
+import { useTranslator } from '@/components/i18n/locale-provider';
 import { usePrefersReducedMotion, usePressScale, useTransition } from '@/lib/motion';
 
 /**
@@ -56,6 +57,7 @@ export function PlayPauseButton({
    */
   variant?: 'filled' | 'bare' | 'ink';
 }) {
+  const t = useTranslator();
   const bare = variant === 'bare';
   const ink = variant === 'ink';
   // A bare glyph has no edge to squash, so it needs to travel further before
@@ -67,7 +69,12 @@ export function PlayPauseButton({
     <m.button
       type="button"
       onClick={onToggle}
-      aria-label={playing ? 'Pause' : 'Play'}
+      /* Translated, which it was not. This is the most-pressed control in the
+         product and its accessible name was a bare English literal in an app
+         that ships Arabic and Hindi — so a screen reader in Cairo announced the
+         one button that matters in the wrong language. The keys already
+         existed; nothing here was ever asked for them. */
+      aria-label={playing ? t.t('episode.pause') : t.t('episode.play')}
       // Press feedback settles on a spring rather than a tween: a transport
       // control is held, and a spring is what makes it feel like an object
       // rather than a state toggle.
@@ -168,11 +175,21 @@ export function SkipButton({
   size = 44,
 }: {
   direction: 'back' | 'forward';
+  /**
+   * How far this control actually jumps.
+   *
+   * The listener's own interval, not the module default. It is drawn inside the
+   * arrow and spoken in the accessible name, so a value that disagrees with
+   * what the machine does is a control that lies twice — which is exactly what
+   * it did while callers passed `SKIP_BACK_SEC` and the machine used
+   * `preferences.skipBackSec`.
+   */
   seconds: number;
   onClick: () => void;
   /** Hit area. The glyph and its numeral scale with it. */
   size?: number;
 }) {
+  const t = useTranslator();
   const back = direction === 'back';
   const press = usePressScale(0.86);
   // `responsive` rather than `snappy`: these sit either side of the play
@@ -185,7 +202,10 @@ export function SkipButton({
     <m.button
       type="button"
       onClick={onClick}
-      aria-label={back ? `Skip back ${seconds} seconds` : `Skip forward ${seconds} seconds`}
+      /* `player.skipBack`/`player.skipForward` take the interval as a parameter,
+         so the announced number follows the listener's own setting rather than
+         a template baked in English around a constant. */
+      aria-label={t.t(back ? 'player.skipBack' : 'player.skipForward', { seconds })}
       whileTap={{ scale: press }}
       transition={transition}
       className="relative flex shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-[var(--color-text-primary)] transition-opacity hover:opacity-100"

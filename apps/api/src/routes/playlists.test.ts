@@ -41,7 +41,7 @@ async function createPlaylist(title = 'Long drives', as: string = cookie): Promi
   const response = await app.inject({
     method: 'POST',
     url: '/me/playlists',
-    headers: { cookie: as },
+    headers: { origin: app.config.corsOrigins[0], cookie: as },
     payload: { title, kind: 'episode' },
   });
 
@@ -53,7 +53,7 @@ async function createShowPlaylist(title = 'Meaning to start'): Promise<string> {
   const response = await app.inject({
     method: 'POST',
     url: '/me/playlists',
-    headers: { cookie },
+    headers: { origin: app.config.corsOrigins[0], cookie },
     payload: { title, kind: 'podcast' },
   });
 
@@ -64,7 +64,7 @@ function addShow(playlistId: string, podcastId: string, position?: 'start' | 'en
   return app.inject({
     method: 'POST',
     url: `/me/playlists/${playlistId}/podcasts`,
-    headers: { cookie },
+    headers: { origin: app.config.corsOrigins[0], cookie },
     payload: position ? { podcastId, position } : { podcastId },
   });
 }
@@ -73,7 +73,7 @@ async function showOrderOf(playlistId: string): Promise<string[]> {
   const response = await app.inject({
     method: 'GET',
     url: `/me/playlists/${playlistId}`,
-    headers: { cookie },
+    headers: { origin: app.config.corsOrigins[0], cookie },
   });
 
   return response
@@ -85,7 +85,7 @@ function addEpisode(playlistId: string, episodeId: string, position?: 'start' | 
   return app.inject({
     method: 'POST',
     url: `/me/playlists/${playlistId}/items`,
-    headers: { cookie },
+    headers: { origin: app.config.corsOrigins[0], cookie },
     payload: position ? { episodeId, position } : { episodeId },
   });
 }
@@ -94,7 +94,7 @@ async function orderOf(playlistId: string): Promise<string[]> {
   const response = await app.inject({
     method: 'GET',
     url: `/me/playlists/${playlistId}`,
-    headers: { cookie },
+    headers: { origin: app.config.corsOrigins[0], cookie },
   });
 
   return response
@@ -172,7 +172,7 @@ describe('creating and listing', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/me/playlists',
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
       payload: { title: '  Long drives  ', kind: 'episode', description: 'For the M6' },
     });
 
@@ -190,7 +190,7 @@ describe('creating and listing', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/me/playlists',
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
       payload: { title: '   ' },
     });
 
@@ -204,7 +204,7 @@ describe('creating and listing', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/me/playlists',
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
       payload: { title: 'Untitled', kind: 'episode', description: '' },
     });
 
@@ -219,7 +219,7 @@ describe('creating and listing', () => {
     const response = await app.inject({
       method: 'GET',
       url: '/me/playlists',
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
 
     expect(response.json().data.items.map((p: { title: string }) => p.title)).toEqual(['Mine']);
@@ -232,7 +232,7 @@ describe('creating and listing', () => {
     const response = await app.inject({
       method: 'GET',
       url: '/me/playlists',
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
 
     const playlist = response.json().data.items[0];
@@ -251,7 +251,7 @@ describe('creating and listing', () => {
     const response = await app.inject({
       method: 'GET',
       url: '/me/playlists',
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
 
     expect(response.json().data.items[0].artworkUrls).toHaveLength(4);
@@ -269,7 +269,7 @@ describe('creating and listing', () => {
     const response = await app.inject({
       method: 'GET',
       url: '/me/playlists',
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
 
     expect(response.json().data.items.map((p: { id: string }) => p.id)).toEqual([older, newer]);
@@ -285,7 +285,7 @@ describe('ownership', () => {
     const read = await app.inject({
       method: 'GET',
       url: `/me/playlists/${theirs}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
 
     expect(read.statusCode).toBe(404);
@@ -302,7 +302,7 @@ describe('ownership', () => {
     const read = await app.inject({
       method: 'GET',
       url: `/me/playlists/${theirs}`,
-      headers: { cookie: stranger },
+      headers: { origin: app.config.corsOrigins[0], cookie: stranger },
     });
     expect(read.json().data.playlist.items).toEqual([]);
   });
@@ -314,7 +314,7 @@ describe('ownership', () => {
     const response = await app.inject({
       method: 'PATCH',
       url: `/me/playlists/${theirs}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
       payload: { title: 'Mine now' },
     });
 
@@ -331,14 +331,14 @@ describe('ownership', () => {
     const response = await app.inject({
       method: 'DELETE',
       url: `/me/playlists/${theirs}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
     expect(response.statusCode).toBe(200);
 
     const read = await app.inject({
       method: 'GET',
       url: `/me/playlists/${theirs}`,
-      headers: { cookie: stranger },
+      headers: { origin: app.config.corsOrigins[0], cookie: stranger },
     });
     expect(read.statusCode).toBe(200);
   });
@@ -380,7 +380,7 @@ describe('items', () => {
       const response = await app.inject({
         method: 'DELETE',
         url: `/me/playlists/${id}/items/${episodeIds[0]}`,
-        headers: { cookie },
+        headers: { origin: app.config.corsOrigins[0], cookie },
       });
       expect(response.statusCode).toBe(200);
     }
@@ -397,7 +397,7 @@ describe('items', () => {
     const response = await app.inject({
       method: 'PUT',
       url: `/me/playlists/${id}/order`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
       payload: { episodeIds: reversed },
     });
 
@@ -415,7 +415,7 @@ describe('items', () => {
     const response = await app.inject({
       method: 'PUT',
       url: `/me/playlists/${id}/order`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
       payload: { episodeIds: [episodeIds[1], episodeIds[4], episodeIds[0]] },
     });
 
@@ -431,7 +431,7 @@ describe('items', () => {
     const response = await app.inject({
       method: 'GET',
       url: `/me/playlists/containing/${episodeIds[0]}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
 
     expect(response.json().data.playlistIds).toEqual([withIt]);
@@ -444,14 +444,14 @@ describe('items', () => {
     await app.inject({
       method: 'POST',
       url: `/me/playlists/${theirs}/items`,
-      headers: { cookie: stranger },
+      headers: { origin: app.config.corsOrigins[0], cookie: stranger },
       payload: { episodeId: episodeIds[0] },
     });
 
     const response = await app.inject({
       method: 'GET',
       url: `/me/playlists/containing/${episodeIds[0]}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
 
     expect(response.json().data.playlistIds).toEqual([]);
@@ -464,14 +464,14 @@ describe('editing', () => {
     await app.inject({
       method: 'PATCH',
       url: `/me/playlists/${id}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
       payload: { description: 'For the M6' },
     });
 
     const response = await app.inject({
       method: 'PATCH',
       url: `/me/playlists/${id}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
       payload: { title: 'Short hops' },
     });
 
@@ -486,7 +486,7 @@ describe('editing', () => {
     const response = await app.inject({
       method: 'PATCH',
       url: `/me/playlists/${id}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
       payload: {},
     });
 
@@ -497,12 +497,12 @@ describe('editing', () => {
     const id = await createPlaylist();
     await addEpisode(id, episodeIds[0]!);
 
-    await app.inject({ method: 'DELETE', url: `/me/playlists/${id}`, headers: { cookie } });
+    await app.inject({ method: 'DELETE', url: `/me/playlists/${id}`, headers: { origin: app.config.corsOrigins[0], cookie } });
 
     const read = await app.inject({
       method: 'GET',
       url: `/me/playlists/${id}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
     expect(read.statusCode).toBe(404);
 
@@ -553,7 +553,7 @@ describe('what a playlist will hold', () => {
     const response = await app.inject({
       method: 'PATCH',
       url: `/me/playlists/${playlistId}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
       // `kind` is not in the update schema at all, so this is an empty patch —
       // which is refused rather than silently succeeding at nothing.
       payload: { kind: 'podcast' },
@@ -569,7 +569,7 @@ describe('what a playlist will hold', () => {
     const shows = await app.inject({
       method: 'GET',
       url: '/me/playlists?kind=podcast',
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
 
     const items = shows.json().data.items as { title: string; kind: string }[];
@@ -587,7 +587,7 @@ describe('shows in a show playlist', () => {
     const response = await app.inject({
       method: 'GET',
       url: `/me/playlists/${playlistId}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
 
     const playlist = response.json().data.playlist;
@@ -619,7 +619,7 @@ describe('shows in a show playlist', () => {
     const response = await app.inject({
       method: 'PUT',
       url: `/me/playlists/${playlistId}/podcasts/order`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
       // A stale order computed against a list that has since changed is the
       // normal case, not an error — the unknown id is dropped, not rejected.
       payload: { podcastIds: [otherShowId, showId, strangerShowId] },
@@ -635,7 +635,7 @@ describe('shows in a show playlist', () => {
     const theirs = await app.inject({
       method: 'POST',
       url: '/me/playlists',
-      headers: { cookie: strangerCookie },
+      headers: { origin: app.config.corsOrigins[0], cookie: strangerCookie },
       payload: { title: 'Theirs', kind: 'podcast' },
     });
     const theirId = theirs.json().data.playlist.id as string;
@@ -653,7 +653,7 @@ describe('how a playlist looks', () => {
     const response = await app.inject({
       method: 'GET',
       url: `/me/playlists/${playlistId}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
 
     expect(response.json().data.playlist).toMatchObject({
@@ -668,7 +668,7 @@ describe('how a playlist looks', () => {
     const response = await app.inject({
       method: 'PATCH',
       url: `/me/playlists/${playlistId}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
       payload: { color: 'ocean', bannerText: '  Vol. 3  ', backgroundColor: 'ocean' },
     });
 
@@ -684,7 +684,7 @@ describe('how a playlist looks', () => {
     const response = await app.inject({
       method: 'PATCH',
       url: `/me/playlists/${playlistId}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
       payload: { color: '#ff0000' },
     });
 
@@ -699,7 +699,7 @@ describe('how a playlist looks', () => {
     const response = await app.inject({
       method: 'PATCH',
       url: `/me/playlists/${playlistId}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
       payload: { bannerKind: 'image' },
     });
 
@@ -712,7 +712,7 @@ describe('how a playlist looks', () => {
     const response = await app.inject({
       method: 'POST',
       url: `/me/playlists/${playlistId}/banner`,
-      headers: { cookie, 'content-type': 'image/png' },
+      headers: { origin: app.config.corsOrigins[0], cookie, 'content-type': 'image/png' },
       payload: Buffer.from('this is not a PNG, whatever the header says'),
     });
 
@@ -733,7 +733,7 @@ describe('how a playlist looks', () => {
     const upload = await app.inject({
       method: 'POST',
       url: `/me/playlists/${playlistId}/banner`,
-      headers: { cookie, 'content-type': 'image/png' },
+      headers: { origin: app.config.corsOrigins[0], cookie, 'content-type': 'image/png' },
       payload: png,
     });
 
@@ -766,7 +766,7 @@ describe('how a playlist looks', () => {
     const first = await app.inject({
       method: 'POST',
       url: `/me/playlists/${playlistId}/banner`,
-      headers: { cookie, 'content-type': 'image/png' },
+      headers: { origin: app.config.corsOrigins[0], cookie, 'content-type': 'image/png' },
       payload: png,
     });
     const firstUrl = first.json().data.playlist.banner.imageUrl as string;
@@ -774,7 +774,7 @@ describe('how a playlist looks', () => {
     const second = await app.inject({
       method: 'POST',
       url: `/me/playlists/${playlistId}/banner`,
-      headers: { cookie, 'content-type': 'image/png' },
+      headers: { origin: app.config.corsOrigins[0], cookie, 'content-type': 'image/png' },
       payload: png,
     });
     const secondUrl = second.json().data.playlist.banner.imageUrl as string;
@@ -798,14 +798,14 @@ describe('how a playlist looks', () => {
     await app.inject({
       method: 'POST',
       url: `/me/playlists/${playlistId}/banner`,
-      headers: { cookie, 'content-type': 'image/png' },
+      headers: { origin: app.config.corsOrigins[0], cookie, 'content-type': 'image/png' },
       payload: png,
     });
 
     const back = await app.inject({
       method: 'PATCH',
       url: `/me/playlists/${playlistId}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
       payload: { bannerKind: 'color' },
     });
 
@@ -816,7 +816,7 @@ describe('how a playlist looks', () => {
     const dropped = await app.inject({
       method: 'DELETE',
       url: `/me/playlists/${playlistId}/banner`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
 
     expect(dropped.json().data.playlist.banner).toMatchObject({

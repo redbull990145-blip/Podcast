@@ -1,9 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from './config.ts';
+import { buildServer } from './server.ts';
 
 const minimal = { DATABASE_URL: 'postgresql://user:pw@localhost:5432/db' };
 
 describe('loadConfig', () => {
+  it('requires a separate explicit opt-in before opening persistent PGlite', async () => {
+    expect(() => loadConfig({ DATABASE_URL: 'pglite://existing-database' })).toThrow(/PGLITE_AUTO_MIGRATE/);
+    const config = loadConfig(minimal);
+    await expect(buildServer({ ...config, databaseUrl: 'pglite://must-not-be-created' })).rejects.toThrow(/PGLITE_AUTO_MIGRATE/);
+  });
+  it('retains memory-only tests and permits only an explicit persistent migration opt-in', () => {
+    expect(loadConfig({ DATABASE_URL: 'pglite://memory' }).allowPersistentPgliteMigrations).toBe(false);
+    expect(loadConfig({ DATABASE_URL: 'pglite://' }).allowPersistentPgliteMigrations).toBe(false);
+    expect(loadConfig({ DATABASE_URL: 'pglite://approved-fixture', PGLITE_AUTO_MIGRATE: 'true' }).allowPersistentPgliteMigrations).toBe(true);
+    expect(() => loadConfig({ DATABASE_URL: 'pglite://fixture', PGLITE_AUTO_MIGRATE: 'yes' })).toThrow();
+  });
+  it('rejects the shipped development signing secret in production even when explicitly set', () => {
+    const developmentSecret = loadConfig(minimal).authSecret;
+    expect(() => loadConfig({ ...minimal, NODE_ENV: 'production', BETTER_AUTH_SECRET: developmentSecret })).toThrow(/BETTER_AUTH_SECRET/);
+  });
   it('refuses to start without a database URL', () => {
     // Failing at boot beats 500ing on the first request that needed it.
     expect(() => loadConfig({})).toThrow(/DATABASE_URL/);
@@ -47,10 +63,10 @@ describe('loadConfig', () => {
    * the fact that the value is simply blank.
    */
   describe('proxy trust', () => {
-    it('trusts exactly one hop by default', () => {
+    it('ignores forwarding headers by default', () => {
       // The default has to suit the deployment shape, because whoever forgets
       // to set it is the person who most needs it to be right.
-      expect(loadConfig(minimal).trustProxy).toBe(1);
+      expect(loadConfig(minimal).trustProxy).toBe(false);
     });
 
     it('turns 0 into false rather than trusting zero hops of a header', () => {
@@ -60,8 +76,12 @@ describe('loadConfig', () => {
       expect(loadConfig({ ...minimal, TRUST_PROXY_HOPS: '0' }).trustProxy).toBe(false);
     });
 
-    it('accepts a deeper chain for a CDN in front of a load balancer', () => {
-      expect(loadConfig({ ...minimal, TRUST_PROXY_HOPS: '2' }).trustProxy).toBe(2);
+    it('requires explicit proxy addresses instead of hop counts', () => {
+      expect(() => loadConfig({ ...minimal, TRUST_PROXY_HOPS: '2' })).toThrow(/TRUST_PROXY_ADDRESSES/);
+      expect(loadConfig({ ...minimal, TRUST_PROXY_ADDRESSES: '127.0.0.1, 10.0.0.0/24' }).trustProxy).toEqual(['127.0.0.1', '10.0.0.0/24']);
+      for (const address of ['0.0.0.0/0', '::/0', 'true', '10.0.0.1/99', '10.0.0.1/no']) {
+        expect(() => loadConfig({ ...minimal, TRUST_PROXY_ADDRESSES: address })).toThrow(/TRUST_PROXY_ADDRESSES/);
+      }
     });
 
     it('refuses a negative hop count', () => {

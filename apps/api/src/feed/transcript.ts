@@ -72,9 +72,11 @@ function toMs(
   // sub-millisecond precision we have no use for, so it is truncated rather
   // than rejected — and an absent fraction is simply zero.
   const millis = fraction ? Number(fraction.slice(0, 3).padEnd(3, '0')) : 0;
-  return (
+  if (Number(minutes) > 59 || Number(seconds) > 59) return Number.NaN;
+  const result = (
     Number(hours ?? 0) * 3_600_000 + Number(minutes) * 60_000 + Number(seconds) * 1000 + millis
   );
+  return Number.isSafeInteger(result) ? result : Number.NaN;
 }
 
 /**
@@ -136,7 +138,7 @@ export function timestampMapOffset(source: string): number {
   // A negative map would move cues before the start of the episode. Real files
   // do not do this; a file that does is mis-encoded, and trusting it would be
   // worse than ignoring the header.
-  return offset > 0 ? offset : 0;
+  return Number.isSafeInteger(offset) && offset > 0 ? offset : 0;
 }
 
 function cleanText(lines: string[]): { text: string; speaker: string | null } {
@@ -155,13 +157,13 @@ function cleanText(lines: string[]): { text: string; speaker: string | null } {
     }
   }
 
-  const text = lines
+  const text = decodeEntities(lines
     .join(' ')
     .replace(TAGS, '')
     // A caption file wraps for a video overlay, not for reading. Collapsing the
     // wrapping is what turns it back into prose.
     .replace(/\s+/g, ' ')
-    .trim();
+    .trim());
 
   return { text, speaker };
 }
@@ -218,7 +220,7 @@ export function parseTranscript(source: string): TranscriptSegment[] {
 
       // A cue that ends before it starts is corrupt. Keeping it would break the
       // binary search that finds the active line.
-      if (endMs < startMs) continue;
+      if (!Number.isSafeInteger(startMs) || !Number.isSafeInteger(endMs) || endMs < startMs) continue;
 
       // Up to the next timing line, or the end of the block for the last cue.
       const until = timingLines[cue + 1] ?? lines.length;
@@ -342,10 +344,12 @@ function decodeEntities(text: string): string {
     .replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, (whole, name: string) => {
       const named = HTML_ENTITIES[name.toLowerCase()];
       if (named) return named;
-      if (name.startsWith('#x') || name.startsWith('#X')) {
-        return String.fromCodePoint(Number.parseInt(name.slice(2), 16));
+      if (name.startsWith('#')) {
+        const point = /^#x/i.test(name) ? Number.parseInt(name.slice(2), 16) : Number(name.slice(1));
+        // Invalid Unicode scalars are malformed publisher input, not exceptions.
+        return Number.isInteger(point) && point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff)
+          ? String.fromCodePoint(point) : '\uFFFD';
       }
-      if (name.startsWith('#')) return String.fromCodePoint(Number(name.slice(1)));
       return whole;
     })
     .replace(/\s+/g, ' ')

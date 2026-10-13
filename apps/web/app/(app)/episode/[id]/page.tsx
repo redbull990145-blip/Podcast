@@ -14,6 +14,7 @@ import { ShowNotes } from '@/components/episode/show-notes';
 import { TranscriptPanel } from '@/components/transcript/transcript-panel';
 import { Artwork } from '@/components/media/artwork';
 import { catalogue } from '@/lib/api';
+import { PageShell } from '@/components/ui/page-shell';
 
 /*
   No `export const revalidate` here, deliberately.
@@ -130,7 +131,7 @@ export default async function EpisodePage({ params }: Params) {
       */}
       <EpisodeTint episodeId={episode.id} initialColor={tintColor} />
 
-      <div className="relative mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
+      <PageShell className="relative">
         <header className="mb-8 flex flex-col gap-6 sm:flex-row sm:items-start">
           <Artwork src={artwork} alt={podcast.title} size={192} priority />
 
@@ -216,23 +217,29 @@ export default async function EpisodePage({ params }: Params) {
           </section>
         </div>
 
-        {episode.transcriptUrl ? (
-          <section className="mt-10">
-            <h2 className="type-title3 mt-0 mb-4 text-[var(--color-text-primary)]">
-              {t.t('transcript.title')}
-            </h2>
-            {/* The publisher's own, read in place. It used to link out, which
-                made the one thing a transcript is *for* — following along and
-                jumping to what you half-remember — someone else's page. */}
-            <TranscriptPanel
-              episode={episode}
-              podcastTitle={podcast.title}
-              podcastArtworkUrl={podcast.artworkUrl}
-              accentColor={podcast.accentColor}
-            />
-          </section>
-        ) : null}
-      </div>
+        {/*
+          Rendered unconditionally, and it decides for itself whether it has
+          anything to show.
+
+          This used to be gated on `episode.transcriptUrl`, which reads as a
+          cheap way to avoid a pointless request and is in fact the reason no
+          Cue-generated transcript has ever appeared on this page: a transcript
+          we wrote ourselves belongs to an episode no publisher offered one for,
+          so that field is null for exactly the transcripts we made. The player
+          knew — `Captions` refuses to gate on it and says why — and this page
+          did not, so the same episode had a transcript in one place and none in
+          the other.
+
+          The heading moved into the panel with the decision. Keeping it here
+          would mean this page still had to know the answer.
+        */}
+        <TranscriptPanel
+          episode={episode}
+          podcastTitle={podcast.title}
+          podcastArtworkUrl={podcast.artworkUrl}
+          accentColor={podcast.accentColor}
+        />
+      </PageShell>
     </div>
   );
 }

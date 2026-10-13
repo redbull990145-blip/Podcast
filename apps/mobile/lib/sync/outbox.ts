@@ -1,8 +1,10 @@
 import { ApiClientError } from '@cue/api-client';
-import { dropSent, normalizeOutbox, queueProgress, type PendingProgress } from '@cue/core';
+import { dropSent, normalizeOutbox, queueProgress, type AccountSnapshot, type PendingProgress } from '@cue/core';
 import { File, Paths } from 'expo-file-system';
 import { api } from '@/lib/api';
+import { accountScope } from '@/lib/account';
 import { isOnline, subscribeConnectivity } from '@/lib/connectivity';
+import { hasOnlineSessionVerification, requireSessionRevalidation } from '@/lib/auth-token';
 
 /**
  * Listening positions that could not be sent.
@@ -21,14 +23,29 @@ import { isOnline, subscribeConnectivity } from '@/lib/connectivity';
 const FILE = new File(Paths.document, 'progress-outbox.json');
 
 let outbox: PendingProgress[] | null = null;
-let flushing = false;
+let snapshots: PendingProgress[] = [];
+let flushing: AccountSnapshot | null = null;
 let watching = false;
 
+accountScope.subscribe(() => {
+  outbox = null;
+  snapshots = [];
+  flushing = null;
+  // Explicit credential changes clear ownership before a new account is known.
+  // A verified identity after an app restart may recover only its own file.
+  if (!accountScope.snapshot().accountId) clearHeldProgress();
+});
+
 function load(): PendingProgress[] {
+  const { accountId } = accountScope.snapshot();
+  if (!accountId) return [];
   if (outbox) return outbox;
 
   try {
-    outbox = FILE.exists ? normalizeOutbox(JSON.parse(FILE.textSync())) : [];
+    const saved = FILE.exists ? JSON.parse(FILE.textSync()) as { accountId?: string; entries?: unknown; snapshots?: unknown } : null;
+    // Legacy unowned arrays cannot safely be assigned to whoever signs in next.
+    outbox = saved?.accountId === accountId ? normalizeOutbox(saved.entries) : [];
+    snapshots = saved?.accountId === accountId ? normalizeOutbox(saved.snapshots ?? saved.entries) : [];
   } catch {
     // Unreadable or truncated. Starting empty loses positions that were already
     // lost; crashing on launch would lose the app.
@@ -40,7 +57,7 @@ function load(): PendingProgress[] {
 
 function persist(): void {
   try {
-    FILE.write(JSON.stringify(outbox ?? []));
+    FILE.write(JSON.stringify({ accountId: accountScope.snapshot().accountId, entries: outbox ?? [], snapshots }));
   } catch {
     // Survives this session but not a restart. Not worth interrupting anyone.
   }
@@ -58,14 +75,31 @@ function watch(): void {
 
   subscribeConnectivity(() => {
     if (isOnline()) void flushProgress();
+    else requireSessionRevalidation();
   });
 }
 
 /** Hold a position until there is somewhere to send it. */
-export function holdProgress(entry: PendingProgress): void {
+export function holdProgress(entry: PendingProgress, owner: AccountSnapshot = accountScope.snapshot()): void {
+  if (!owner.accountId || !accountScope.matches(owner)) return;
   outbox = queueProgress(load(), entry);
+  snapshots = queueProgress(snapshots, entry);
   persist();
   watch();
+}
+
+/** Keep the last local observation even after its upload succeeds. */
+export function rememberProgress(entry: PendingProgress, owner: AccountSnapshot): void {
+  if (!owner.accountId || !accountScope.matches(owner)) return;
+  load();
+  snapshots = queueProgress(snapshots, entry);
+  persist();
+}
+
+export function localProgress(episodeId: string): PendingProgress | null {
+  if (!accountScope.snapshot().accountId) return null;
+  load();
+  return snapshots.find((entry) => entry.episodeId === episodeId) ?? null;
 }
 
 /**
@@ -87,17 +121,25 @@ export function holdProgress(entry: PendingProgress): void {
  * server answers, the same episode may already hold a newer position.
  */
 export async function flushProgress(): Promise<void> {
+  watch();
+  if (!isOnline() || !hasOnlineSessionVerification()) return;
   if (flushing) return;
+
+  const owner = accountScope.snapshot();
+  if (!owner.accountId) return;
 
   const held = load();
   if (held.length === 0) return;
 
-  flushing = true;
+  flushing = owner;
 
   const settled: PendingProgress[] = [];
 
   try {
     for (const entry of [...held].sort((a, b) => a.observedAt - b.observedAt)) {
+      if (!accountScope.matches(owner) || !isOnline() || !hasOnlineSessionVerification()) break;
+      const controller = new AbortController();
+      const deadline = setTimeout(() => controller.abort(), 15_000);
       try {
         await api.reportProgress(entry.episodeId, {
           positionSec: Math.round(entry.positionSec),
@@ -105,7 +147,7 @@ export async function flushProgress(): Promise<void> {
           completed: entry.completed,
           deviceId: entry.deviceId,
           observedAt: entry.observedAt,
-        });
+        }, controller.signal);
 
         settled.push(entry);
       } catch (error) {
@@ -114,14 +156,16 @@ export async function flushProgress(): Promise<void> {
           continue;
         }
         break;
+      } finally {
+        clearTimeout(deadline);
       }
     }
   } finally {
-    if (settled.length > 0) {
+    if (accountScope.matches(owner) && settled.length > 0) {
       outbox = dropSent(outbox ?? [], settled);
       persist();
     }
-    flushing = false;
+    if (flushing === owner) flushing = null;
   }
 }
 
@@ -147,6 +191,7 @@ function isPermanent(error: unknown): boolean {
  */
 export function clearHeldProgress(): void {
   outbox = [];
+  snapshots = [];
   persist();
 }
 

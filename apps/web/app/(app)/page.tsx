@@ -13,13 +13,15 @@ import { RecentlyPlayed } from '@/components/home/recently-played';
 import { Recommended } from '@/components/home/recommended';
 import { catalogue, ApiClientError } from '@/lib/api';
 import { getTranslator } from '@/lib/i18n';
+import { PageShell } from '@/components/ui/page-shell';
+import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
 
 /**
  * Home.
  *
- * Rendered on the server so the first paint carries real content rather than
- * a skeleton that resolves a moment later — the fastest loading state is the
- * one that never appears.
+ * The greeting and current episode render immediately. Public discovery
+ * streams beneath them, so a slow catalogue cannot block returning Home.
  *
  * The render itself is per-request — see the note above `HomePage` — but the
  * catalogue read behind it is cached for five minutes. Podcast metadata changes
@@ -61,8 +63,23 @@ import { getTranslator } from '@/lib/i18n';
   being dynamic, so the caching the number always described actually happens.
 */
 
-export default async function HomePage() {
-  const t = await getTranslator();
+export default function HomePage() {
+  return (
+    <PageShell>
+      <Masthead />
+      <ContinueListening />
+      <Suspense fallback={<LatestEpisodesSkeleton />}>
+        <HomeCatalogue />
+      </Suspense>
+    </PageShell>
+  );
+}
+
+/** Public discovery may wait for the API; the greeting and playback never do. */
+async function HomeCatalogue() {
+  // Start independent reads together rather than waiting for locale before
+  // starting the catalogue request.
+  const translation = getTranslator();
 
   let podcasts: Podcast[] = [];
   let failure: string | null = null;
@@ -77,25 +94,16 @@ export default async function HomePage() {
     // The API being down is a state to render, not a crash. A blank screen
     // with no explanation is the worst possible version of this.
     failure =
-      error instanceof ApiClientError ? error.message : t.t('common.unreachable');
+      error instanceof ApiClientError ? error.message : (await translation).t('common.unreachable');
   }
 
+  const t = await translation;
   const hasCatalogue = podcasts.length > 0;
 
   return (
-    <div className="mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
-      <Masthead />
-
-      {/*
-        Client-rendered while the page around it is static. What is in progress
-        is per-listener and changes by the minute, so it cannot share the page's
-        5-minute cache — and it must not stop the rest of Home from being served
-        instantly to everyone.
-      */}
-      <ContinueListening />
-
+    <>
       {failure ? <ErrorState t={t} message={failure} /> : null}
-      {!failure && !hasCatalogue ? <EmptyState t={t} /> : null}
+      {!failure && !hasCatalogue ? <EmptyCatalogue t={t} /> : null}
 
       {hasCatalogue ? (
         <>
@@ -132,7 +140,7 @@ export default async function HomePage() {
           <RecentlyPlayed />
         </>
       ) : null}
-    </div>
+    </>
   );
 }
 
@@ -146,7 +154,7 @@ export default async function HomePage() {
  * actually works when the catalogue is empty, which is search; the developer
  * hint survives as a development-only note, in English, where it belongs.
  */
-function EmptyState({ t }: { t: Translator }) {
+function EmptyCatalogue({ t }: { t: Translator }) {
   return (
     <Notice
       title={t.t('home.empty')}
@@ -213,25 +221,29 @@ function Notice({
   action: { href: string; label: string };
   children?: React.ReactNode;
 }) {
+  /*
+    The shared panel, and the shared button.
+
+    Both were hand-rolled here. The panel was the sixth copy of a treatment the
+    app already had five of; the action was a `rounded-full bg-ink px-5` anchor
+    — the right *colours*, arrived at independently, which is the way a design
+    system stops being one. `Button` is the same pill and cannot drift from
+    itself.
+  */
   return (
-    <div className="mb-14 rounded-[var(--radius-lg)] bg-[var(--color-surface)] px-6 py-10">
-      <h2 className="type-title3 m-0 text-[var(--color-text-primary)]">{title}</h2>
-      <p className="type-callout mt-2 mb-0 max-w-[52ch] text-[var(--color-text-secondary)]">
-        {body}
-      </p>
-      {detail ? (
-        <p className="type-caption mt-2 mb-0 max-w-[52ch] text-[var(--color-text-tertiary)]">
-          {detail}
-        </p>
-      ) : null}
-      <Link
-        href={action.href as Route}
-        className="mt-5 inline-flex min-h-11 items-center rounded-full bg-[var(--color-ink)] px-5 type-body-strong text-[var(--color-text-on-ink)] no-underline transition-opacity hover:opacity-90"
-      >
-        {action.label}
-      </Link>
+    <EmptyState
+      tone="panel"
+      title={title}
+      body={body}
+      {...(detail ? { detail } : {})}
+      action={
+        <Link href={action.href as Route} className="no-underline">
+          <Button>{action.label}</Button>
+        </Link>
+      }
+    >
       {children}
-    </div>
+    </EmptyState>
   );
 }
 

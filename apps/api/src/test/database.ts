@@ -10,12 +10,8 @@
  */
 
 import { PGlite } from '@electric-sql/pglite';
-import { schema } from '@cue/db';
+import { schema, runMigrations, type Database } from '@cue/db';
 import { drizzle } from 'drizzle-orm/pglite';
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
-
-const MIGRATIONS_DIR = join(import.meta.dirname, '../../../../packages/db/migrations');
 
 export type TestDatabase = ReturnType<typeof drizzle<typeof schema>> & {
   /** Empty every table without re-running migrations. */
@@ -43,17 +39,8 @@ export async function createTestDatabase(): Promise<TestDatabase> {
   const client = new PGlite();
   const db = drizzle(client, { schema });
 
-  const files = readdirSync(MIGRATIONS_DIR)
-    .filter((name) => name.endsWith('.sql'))
-    .sort();
-
-  for (const file of files) {
-    const sqlText = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');
-    for (const statement of sqlText.split('--> statement-breakpoint')) {
-      const trimmed = statement.trim();
-      if (trimmed.length > 0) await client.exec(trimmed);
-    }
-  }
+  // Exercise the application's transaction-owning runner on this memory-only DB.
+  await runMigrations(db as unknown as Database);
 
   return Object.assign(db, {
     $reset: async () => {

@@ -8,6 +8,7 @@
  */
 
 import { z } from 'zod';
+import { isIP } from 'node:net';
 
 /**
  * Treat a blank value as absent.
@@ -31,6 +32,7 @@ const envSchema = z.object({
   HOST: z.string().default('0.0.0.0'),
 
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required — see .env.example'),
+  PGLITE_AUTO_MIGRATE: z.enum(['true', 'false']).default('false'),
 
   /**
    * Redis is optional. It is a cache and a rate limiter, never the source of
@@ -62,20 +64,12 @@ const envSchema = z.object({
   CORS_ORIGINS: blankAsUnset(z.string().default('http://localhost:3000')),
 
   /**
-   * How many proxies sit in front of this API.
-   *
-   * This is a security control, not a formality. Fastify's `trustProxy: true`
-   * trusts the *entire* `X-Forwarded-For` chain and returns its leftmost entry —
-   * which is written by the caller, so `request.ip` becomes whatever they say
-   * it is, and every IP-keyed rate limit is bypassed by rotating a header. A
-   * hop count instead makes `proxy-addr` walk back exactly this many trusted
-   * hops and return the address the nearest trusted proxy actually observed.
-   *
-   * 1 is right for a single platform load balancer (Render, Koyeb, Fly). Behind
-   * Cloudflare *and* a platform LB it is 2. Set it to 0 when nothing proxies
-   * this server, so the socket address is used and headers are ignored entirely.
+   * Legacy hop-count configuration is rejected unless an explicit address
+   * allowlist is supplied. Chain length cannot establish proxy identity.
    */
-  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(1),
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(0),
+  /** Exact trusted proxy IPs/CIDRs; never infer trust from chain length. */
+  TRUST_PROXY_ADDRESSES: blankAsUnset(z.string().optional()),
 
   /**
    * The operator's Groq key, which funds the free tier.
@@ -164,11 +158,13 @@ export type Config = {
   port: number;
   host: string;
   databaseUrl: string;
+  /** Explicit opt-in only after approving migrations for this persistent local DB. */
+  allowPersistentPgliteMigrations: boolean;
   redis: { url: string; token: string } | null;
   podcastIndex: { key: string; secret: string } | null;
   corsOrigins: string[];
-  /** Hop count for `proxy-addr`, or `false` to ignore forwarding headers. */
-  trustProxy: number | false;
+  /** Verified proxy addresses, or false to ignore forwarding headers. */
+  trustProxy: string[] | false;
   authSecret: string;
   authUrl: string;
   /**
@@ -200,6 +196,14 @@ export type Config = {
  * copied into a deploy. Production rejects it outright.
  */
 const DEV_AUTH_SECRET = 'insecure-development-secret-do-not-use-in-production';
+
+export function assertLocalDatabaseApproval(databaseUrl: string, approved: boolean): void {
+  if (!databaseUrl.startsWith('pglite:')) return;
+  const path = databaseUrl.replace(/^pglite:(\/\/)?/, '');
+  if (path && path !== 'memory' && !approved) {
+    throw new Error('Persistent PGlite startup applies migrations; approve the exact pending migrations separately before setting PGLITE_AUTO_MIGRATE=true');
+  }
+}
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = envSchema.safeParse(env);
@@ -240,10 +244,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (value.NODE_ENV === 'production' && value.DATABASE_URL.startsWith('pglite:')) {
     throw new Error('DATABASE_URL must point at a real Postgres in production, not pglite:');
   }
+  assertLocalDatabaseApproval(value.DATABASE_URL, value.PGLITE_AUTO_MIGRATE === 'true');
 
   // A shipped default signing secret is the kind of thing that ends up in a
   // breach writeup, so production will not start without a real one.
-  if (value.NODE_ENV === 'production' && !value.BETTER_AUTH_SECRET) {
+  if (value.NODE_ENV === 'production' && (!value.BETTER_AUTH_SECRET || value.BETTER_AUTH_SECRET === DEV_AUTH_SECRET)) {
     throw new Error('BETTER_AUTH_SECRET is required in production');
   }
 
@@ -273,20 +278,32 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       ? { key: value.PODCASTINDEX_KEY, secret: value.PODCASTINDEX_SECRET }
       : null;
 
+  const proxies = value.TRUST_PROXY_ADDRESSES?.split(',').map((address) => address.trim()).filter(Boolean) ?? [];
+  for (const proxy of proxies) {
+    const [address = '', bits, extra] = proxy.split('/');
+    const family = isIP(address);
+    if (!family || extra !== undefined || (bits !== undefined && (!/^\d+$/.test(bits) || Number(bits) < 1 || Number(bits) > (family === 4 ? 32 : 128)))) {
+      throw new Error('TRUST_PROXY_ADDRESSES must contain explicit IP addresses or non-global CIDRs');
+    }
+  }
+  if (value.TRUST_PROXY_HOPS > 0 && proxies.length === 0) {
+    throw new Error('TRUST_PROXY_HOPS is no longer supported; configure verified TRUST_PROXY_ADDRESSES before deploying');
+  }
+
   return {
     nodeEnv: value.NODE_ENV,
     isProduction: value.NODE_ENV === 'production',
     port: value.PORT,
     host: value.HOST,
     databaseUrl: value.DATABASE_URL,
+    allowPersistentPgliteMigrations: value.PGLITE_AUTO_MIGRATE === 'true',
     redis,
     podcastIndex,
     corsOrigins: value.CORS_ORIGINS.split(',')
       .map((origin) => origin.trim())
       .filter(Boolean),
-    // 0 means "nothing in front of me" — express it as `false` so Fastify
-    // ignores forwarding headers rather than trusting zero hops of them.
-    trustProxy: value.TRUST_PROXY_HOPS === 0 ? false : value.TRUST_PROXY_HOPS,
+    // Without a verified allowlist, forwarding headers carry no authority.
+    trustProxy: proxies.length ? proxies : false,
     internalToken: value.INTERNAL_API_TOKEN ?? null,
     authSecret: value.BETTER_AUTH_SECRET ?? DEV_AUTH_SECRET,
     authUrl: value.BETTER_AUTH_URL ?? `http://localhost:${value.PORT}`,

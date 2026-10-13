@@ -23,13 +23,14 @@ import {
   podcasts,
   queueItems,
 } from '@cue/db';
-import { generateKey, reconcileProgress, type ProgressRecord } from '@cue/core';
+import { generateKey, type ProgressRecord } from '@cue/core';
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireUser } from '../auth/plugin.ts';
 import { serializeEpisode } from '../catalog/serialize.ts';
 import { badRequest, notFound, ok } from '../errors.ts';
+import { saveProgress } from '../playback/progress.ts';
 
 const progressInput = z.object({
   positionSec: z.number().min(0).max(24 * 60 * 60),
@@ -55,22 +56,6 @@ const reorderInput = z.object({
   episodeIds: z.array(z.uuid()).min(1).max(500),
 });
 
-function toRecord(row: {
-  positionSec: number;
-  durationSec: number | null;
-  completed: boolean;
-  deviceId: string;
-  updatedAt: Date;
-}): ProgressRecord {
-  return {
-    positionSec: row.positionSec,
-    durationSec: row.durationSec,
-    completed: row.completed,
-    deviceId: row.deviceId,
-    updatedAt: row.updatedAt.getTime(),
-  };
-}
-
 export function playbackRoutes(app: FastifyInstance): void {
   /**
    * Report a position.
@@ -83,19 +68,6 @@ export function playbackRoutes(app: FastifyInstance): void {
     const user = requireUser(request);
     const { id } = z.object({ id: z.uuid() }).parse(request.params);
     const input = progressInput.parse(request.body);
-
-    const [exists] = await app.db
-      .select({ id: episodes.id })
-      .from(episodes)
-      .where(eq(episodes.id, id))
-      .limit(1);
-    if (!exists) throw notFound('Episode');
-
-    const [stored] = await app.db
-      .select()
-      .from(playbackProgress)
-      .where(and(eq(playbackProgress.userId, user.id), eq(playbackProgress.episodeId, id)))
-      .limit(1);
 
     const incoming: ProgressRecord = {
       positionSec: Math.round(input.positionSec),
@@ -120,30 +92,7 @@ export function playbackRoutes(app: FastifyInstance): void {
       updatedAt: Math.min(input.observedAt ?? Date.now(), Date.now()),
     };
 
-    const decision = reconcileProgress(incoming, stored ? toRecord(stored) : null);
-    const winner = decision?.winner ?? incoming;
-
-    await app.db
-      .insert(playbackProgress)
-      .values({
-        userId: user.id,
-        episodeId: id,
-        positionSec: winner.positionSec,
-        durationSec: winner.durationSec,
-        completed: winner.completed,
-        deviceId: winner.deviceId,
-        updatedAt: new Date(winner.updatedAt),
-      })
-      .onConflictDoUpdate({
-        target: [playbackProgress.userId, playbackProgress.episodeId],
-        set: {
-          positionSec: winner.positionSec,
-          durationSec: winner.durationSec,
-          completed: winner.completed,
-          deviceId: winner.deviceId,
-          updatedAt: new Date(winner.updatedAt),
-        },
-      });
+    const winner = await saveProgress(app.db, user.id, id, incoming);
 
     // Return the resolved truth, not an acknowledgement: a client that lost
     // the reconciliation learns its real position in the same round trip.
@@ -158,6 +107,75 @@ export function playbackRoutes(app: FastifyInstance): void {
       },
       /** True when the server kept a different record than the one sent. */
       superseded: winner.deviceId !== incoming.deviceId || winner.positionSec !== incoming.positionSec,
+    });
+  });
+
+  /**
+   * Progress for a page of episodes, in one request.
+   *
+   * The gap this closes is the plainest one in the product: on a show page you
+   * could not tell which episodes you had already heard. Every other podcast
+   * app answers that, and Cue could not, for a structural reason rather than an
+   * oversight — progress is per-listener and the episode list is not.
+   *
+   * **Deliberately its own endpoint rather than a field on
+   * `GET /podcasts/:id/episodes`.** That route runs behind the `catalogue`
+   * preHandler, which is a *shared* cache: the same response is served to
+   * everybody, which is exactly why it is fast. Folding per-user rows into it
+   * would either poison that cache with one listener's history or force the
+   * route to be per-request, and the second is the mistake every page file in
+   * the web app has a comment about already. One extra call from a signed-in
+   * client is the cheaper half of that trade, and a signed-out one never makes
+   * it at all.
+   *
+   * Absent ids are absent from the response rather than present and null. The
+   * common case on an archive page is that most episodes have never been
+   * touched, and sending a row of nulls for each of them is most of the payload
+   * spent saying nothing.
+   */
+  app.get('/me/progress', async (request) => {
+    const user = requireUser(request);
+
+    const { ids } = z
+      .object({
+        /*
+          A comma-separated list, capped at one page of anything the app shows.
+
+          The cap is the reason this is safe to leave un-paginated: 100 uuids is
+          a ~3.7KB query string, comfortably inside every proxy's limit, and one
+          indexed lookup. Rejecting a longer list rather than truncating it —
+          silently answering about the first hundred of two hundred episodes
+          would render the rest as unplayed, which is worse than an error
+          because it looks like data.
+        */
+        ids: z
+          .string()
+          .transform((value) => value.split(',').filter(Boolean))
+          .pipe(z.array(z.uuid()).min(1).max(100)),
+      })
+      .parse(request.query);
+
+    const rows = await app.db
+      .select({
+        episodeId: playbackProgress.episodeId,
+        positionSec: playbackProgress.positionSec,
+        durationSec: playbackProgress.durationSec,
+        completed: playbackProgress.completed,
+        updatedAt: playbackProgress.updatedAt,
+      })
+      .from(playbackProgress)
+      .where(
+        and(eq(playbackProgress.userId, user.id), inArray(playbackProgress.episodeId, ids)),
+      );
+
+    return ok({
+      items: rows.map((row) => ({
+        episodeId: row.episodeId,
+        positionSec: row.positionSec,
+        durationSec: row.durationSec,
+        completed: row.completed,
+        updatedAt: row.updatedAt.toISOString(),
+      })),
     });
   });
 

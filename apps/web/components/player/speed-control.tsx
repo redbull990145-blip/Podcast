@@ -14,6 +14,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { createPortal } from 'react-dom';
 import { useTranslator } from '@/components/i18n/locale-provider';
 import { usePressScale, useTransition } from '@/lib/motion';
+import { useModalSheet } from '@/lib/modal-sheet';
 
 /**
  * Playback speed.
@@ -242,11 +243,7 @@ function SpeedPanel({
     queue link — so a keyboard user opens a speed panel and lands somewhere
     else entirely, with an open panel behind them they cannot get into.
   */
-  useEffect(() => {
-    panelRef.current?.querySelector<HTMLElement>('[data-autofocus]')?.focus();
-    // The ref is stable for the panel's whole life; listing it only satisfies
-    // the linter.
-  }, [panelRef]);
+  useModalSheet({ open: true, onClose, containerRef: panelRef });
 
   return createPortal(
     <m.div

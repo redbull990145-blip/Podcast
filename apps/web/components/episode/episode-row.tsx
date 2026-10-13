@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Artwork } from '@/components/media/artwork';
 import { PlayButton } from '@/components/episode/play-button';
 import { QueueButton } from '@/components/episode/queue-button';
+import { ListeningMark } from '@/components/episode/listening-state';
 
 type EpisodeRowProps = {
   episode: Episode;
@@ -41,12 +42,23 @@ export async function EpisodeRow({
   const date = t.episodeDate(episode.publishedAt);
 
   return (
-    <article className="flex items-center gap-4 border-b border-[var(--color-border)] px-1 py-4 last:border-b-0">
-      <Artwork
-        src={episode.artworkUrl ?? fallbackArtwork}
-        alt={podcastTitle}
-        size={56}
-      />
+    <article className="cue-episode-row flex items-center gap-4 border-b border-[var(--color-border)] px-1 py-4 last:border-b-0">
+      {/* The cover is the anchor for the listening mark, so it needs a
+          positioning context of its own — `Artwork` sets the radius, and
+          `rounded-[inherit]` inside the mark picks it up rather than restating
+          a number that scales with size. */}
+      <div className="relative shrink-0 rounded-[var(--radius-sm)]">
+        <Artwork
+          src={episode.artworkUrl ?? fallbackArtwork}
+          alt={podcastTitle}
+          size={56}
+        />
+        <ListeningMark
+          episodeId={episode.id}
+          accentColor={accentColor ?? null}
+          durationSec={episode.durationSec}
+        />
+      </div>
 
       <div className="min-w-0 flex-1">
         <div className="type-overline mb-1 text-[var(--color-text-tertiary)]">

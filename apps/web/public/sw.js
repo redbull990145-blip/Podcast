@@ -2,7 +2,7 @@
  * Cue's service worker.
  *
  * What this is for: opening the app with no connection and finding it there —
- * the shell, the pages you have visited, your library, the artwork — instead of
+ * a neutral offline shell, your verified account's library, and artwork — instead of
  * the browser's dinosaur. Not written with a library, because the whole of it
  * is four routing decisions and a cache trim, and the smallest Workbox setup is
  * a build-step, a config, and a runtime to hold four routing decisions.
@@ -36,7 +36,7 @@
  *
  * So: any change to the worker's CSP needs this bumped in the same commit.
  */
-const VERSION = 'v3';
+const VERSION = 'v5';
 
 const SHELL = `cue-shell-${VERSION}`;
 const STATIC = `cue-static-${VERSION}`;
@@ -59,6 +59,43 @@ const MEDIA_LIMIT = 220;
 
 /** Where the API lives, from the registration URL. Empty means "same origin". */
 const API_ORIGIN = new URL(self.location.href).searchParams.get('api') ?? '';
+let accountId = null;
+let accountExpiresAt = 0;
+let generation = 0;
+let purging = Promise.resolve();
+let privateCacheAvailable = true;
+
+function cacheWork(work) {
+  purging = purging.then(work).catch(() => {
+    // A failed purge must never make old private entries readable again.
+    privateCacheAvailable = false;
+  });
+  return purging;
+}
+
+function privateCache(name, owner) {
+  return `${name}-account-${encodeURIComponent(owner)}`;
+}
+
+function resetAccount(next = null) {
+  if (!next) accountExpiresAt = 0;
+  if (next === accountId) return purging;
+  const previous = accountId;
+  accountId = next;
+  generation += 1;
+  cacheWork(async () => {
+    if (previous) {
+      await caches.delete(privateCache(DATA, previous));
+      await caches.delete(privateCache(SHELL, previous));
+    }
+  });
+  return purging;
+}
+
+async function invalidateSession() {
+  await resetAccount();
+  for (const client of await self.clients.matchAll()) client.postMessage({ type: 'session-invalid' });
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -98,7 +135,15 @@ self.addEventListener('activate', (event) => {
  */
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'purge-data') {
-    event.waitUntil(caches.delete(DATA));
+    accountId = null;
+    accountExpiresAt = 0;
+    generation += 1;
+    // Serialize deletion with writes, including responses already in flight.
+    cacheWork(async () => {
+      const names = await caches.keys();
+      await Promise.all(names.filter((name) => name.startsWith(DATA) || name.startsWith(`${SHELL}-account-`)).map((name) => caches.delete(name)));
+    });
+    event.waitUntil(purging);
   }
 });
 
@@ -178,10 +223,18 @@ self.addEventListener('fetch', (event) => {
    * Passing it through costs nothing offline: the request simply fails, which
    * is what "we do not know who you are" already means to every caller.
    */
-  if (API_ORIGIN && url.origin === API_ORIGIN && url.pathname === '/me') return;
+  if (API_ORIGIN && url.origin === API_ORIGIN && url.pathname === '/me') {
+    event.respondWith(readSession(request));
+    return;
+  }
 
   if (API_ORIGIN && url.origin === API_ORIGIN) {
-    event.respondWith(staleWhileRevalidate(request, DATA));
+    if (url.pathname.startsWith('/me/')) {
+      event.respondWith(privateData(request));
+    } else if (/^\/categories$|^\/podcasts(?:\/(?:search|trending|[^/]+)(?:\/episodes)?)?$|^\/episodes\/[^/]+(?:\/tint)?$/.test(url.pathname)) {
+      event.respondWith(staleWhileRevalidate(request, DATA, event));
+    }
+    // Transcripts, AI status, auth, and unknown endpoints always stay live.
     return;
   }
 });
@@ -193,25 +246,17 @@ self.addEventListener('fetch', (event) => {
  * the page then loads — serving a stale HTML shell that asks for assets a
  * deploy has removed is a white screen, which is worse than a slow one.
  *
- * The fallback chain is the point: this page from cache if it has been seen,
- * then the offline page. Falling straight to a generic offline page would throw
- * away a perfectly good copy of the very page someone asked for.
+ * Application documents contain account hydration and request-specific nonces.
+ * Only the neutral offline document is safe to replay without a fresh session.
  */
 async function handleNavigation(request) {
   try {
-    const response = await fetch(request);
-
-    if (response.ok) {
-      const cache = await caches.open(SHELL);
-      await cache.put(request, response.clone());
-    }
-
-    return response;
+    // Even catalogue HTML carries account-specific hydration and a CSP nonce.
+    // A navigation has no account-intent header; only the neutral offline page
+    // can be safely replayed without establishing the current session.
+    return await fetch(request);
   } catch {
-    const cached = await caches.match(request, { ignoreSearch: true });
-    if (cached) return cached;
-
-    const offline = await caches.match(OFFLINE_URL);
+    const offline = await caches.open(SHELL).then((cache) => cache.match(OFFLINE_URL)).catch(() => null);
     if (offline) return offline;
 
     // The offline page was evicted and there is no network to fetch it with.
@@ -225,7 +270,7 @@ async function handleNavigation(request) {
 }
 
 async function cacheFirst(request, cacheName, limit) {
-  const cached = await caches.match(request);
+  const cached = await caches.open(cacheName).then((cache) => cache.match(request)).catch(() => null);
   if (cached) return cached;
 
   const response = await fetch(request);
@@ -234,36 +279,97 @@ async function cacheFirst(request, cacheName, limit) {
   // always 0 — and publisher artwork is exactly that. Caching it is fine; the
   // browser simply will not let us read it.
   if (response.ok || response.type === 'opaque') {
-    const cache = await caches.open(cacheName);
-    await cache.put(request, response.clone());
-    if (limit) await trim(cacheName, limit);
+    try {
+      const cache = await caches.open(cacheName);
+      await cache.put(request, response.clone());
+      if (limit) await trim(cacheName, limit);
+    } catch {
+      // Storage failure must not discard a usable network asset.
+    }
   }
 
   return response;
 }
 
+async function readSession(request) {
+  const admitted = generation;
+  const response = await fetch(request);
+  if (admitted !== generation) return response;
+  if (response.ok) {
+    const body = await response.clone().json().catch(() => null);
+    if (admitted === generation) {
+      const owner = body?.ok && typeof body.data?.user?.id === 'string' ? body.data.user.id : null;
+      const expiry = typeof body?.data?.sessionExpiresAt === 'string' ? Date.parse(body.data.sessionExpiresAt) : NaN;
+      // Older/malformed metadata cannot authorize an offline private read.
+      accountExpiresAt = Number.isFinite(expiry) ? expiry : 0;
+      await resetAccount(owner && accountExpiresAt > Date.now() ? owner : null);
+    }
+  } else if (response.status === 401) await invalidateSession();
+  return response;
+}
+
+async function privateData(request) {
+  await purging;
+  if (accountId && accountExpiresAt <= Date.now()) await invalidateSession();
+  const owner = accountId;
+  const admitted = generation;
+  // An older tab must not read the current tab's account cache while offline.
+  const intendedOwner = request.headers.get('X-Cue-Account-Id');
+  const canCache = privateCacheAvailable && owner && intendedOwner === owner;
+  try {
+    const response = await fetch(request);
+    if (admitted !== generation) return response;
+    if (response.status === 401 || (response.ok && owner && response.headers.get('X-Cue-Account-Id') !== owner)) {
+      await invalidateSession();
+      return response;
+    }
+    if (canCache && response.ok && response.status === 200) {
+      cacheWork(async () => {
+        if (admitted !== generation || accountExpiresAt <= Date.now()) return;
+        const cache = await caches.open(privateCache(DATA, owner));
+        if (admitted === generation && accountExpiresAt > Date.now()) await cache.put(request, response.clone());
+      });
+      await purging;
+    }
+    return response;
+  } catch {
+    if (canCache && privateCacheAvailable && admitted === generation && accountExpiresAt > Date.now()) {
+      const cached = await caches.open(privateCache(DATA, owner))
+        .then((cache) => cache.match(request)).catch(() => null);
+      if (cached && privateCacheAvailable && admitted === generation && accountExpiresAt > Date.now()) return cached;
+    }
+    return offlineData();
+  }
+}
+
+function offlineData() {
+  return new Response(JSON.stringify({ ok: false, error: { code: 'upstream_unavailable', message: 'Offline' } }), {
+    status: 503,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+  });
+}
+
 /**
  * Data: answer from cache immediately, refresh behind it.
  *
- * This is what makes the library render the moment the app opens rather than
- * after a round trip, and what makes it render at all on a train. The refresh
- * is fire-and-forget on purpose — waiting for it would give up the whole
- * benefit to guarantee freshness nobody asked for.
+ * Only allowlisted public catalogue data uses this strategy. Private reads
+ * verify the live session first and use their account cache only when offline.
  */
-async function staleWhileRevalidate(request, cacheName) {
-  const cache = await caches.open(cacheName);
-  const cached = await cache.match(request);
+async function staleWhileRevalidate(request, cacheName, event) {
+  const cache = await caches.open(cacheName).catch(() => null);
+  const cached = cache ? await cache.match(request).catch(() => null) : null;
 
   const network = fetch(request)
     .then(async (response) => {
       // Only successful, complete responses. A 401 cached here would keep
       // answering "signed out" after someone signed in.
-      if (response.ok && response.status === 200) {
-        await cache.put(request, response.clone());
+      if (cache && response.ok && response.status === 200) {
+        await cache.put(request, response.clone()).catch(() => undefined);
       }
       return response;
     })
     .catch(() => undefined);
+  event.waitUntil(network);
 
   if (cached) return cached;
 
@@ -272,10 +378,7 @@ async function staleWhileRevalidate(request, cacheName) {
 
   // Nothing cached and nothing reachable. A JSON error the client can parse,
   // rather than a network failure it has to guess at.
-  return new Response(JSON.stringify({ error: { code: 'offline', message: 'Offline' } }), {
-    status: 503,
-    headers: { 'content-type': 'application/json; charset=utf-8' },
-  });
+  return offlineData();
 }
 
 /** Keep a cache under a ceiling, dropping what was added longest ago. */

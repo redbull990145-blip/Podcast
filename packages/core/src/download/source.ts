@@ -24,10 +24,16 @@ import type { DownloadIndex, DownloadRecord } from './downloads.ts';
  */
 export function preferLocal(episode: PlayableEpisode, index: DownloadIndex): PlayableEpisode {
   const record = index[episode.id];
-  if (!record || record.status !== 'complete' || !record.fileUri) return episode;
+  if (!record || record.status !== 'complete' || !record.fileUri) {
+    if (!episode.remoteAudioUrl || episode.audioUrl === episode.remoteAudioUrl) return episode;
+    return { ...episode, audioUrl: episode.remoteAudioUrl, artworkUrl: episode.remoteArtworkUrl ?? null };
+  }
+  if (episode.audioUrl === record.fileUri && episode.artworkUrl === (record.artworkUri ?? episode.remoteArtworkUrl ?? episode.artworkUrl)) return episode;
 
   return {
     ...episode,
+    remoteAudioUrl: episode.remoteAudioUrl ?? episode.audioUrl,
+    remoteArtworkUrl: episode.remoteArtworkUrl ?? episode.artworkUrl,
     audioUrl: record.fileUri,
     // Artwork too: a Downloads screen full of grey squares is what happens
     // when the audio was saved and the cover was left behind on a CDN.
@@ -61,6 +67,8 @@ export function playableFromDownload(record: DownloadRecord): PlayableEpisode {
     podcastId: record.podcastId,
     title: record.title,
     audioUrl: record.fileUri ?? record.audioUrl,
+    remoteAudioUrl: record.audioUrl,
+    remoteArtworkUrl: record.artworkUrl,
     durationSec: record.durationSec,
     artworkUrl: record.artworkUri ?? record.artworkUrl,
     podcastTitle: record.podcastTitle,

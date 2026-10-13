@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { checkUrl, isBlockedAddress, normalizeFeedUrl } from './url-guard.ts';
 
 describe('isBlockedAddress', () => {
@@ -32,6 +32,9 @@ describe('isBlockedAddress', () => {
     expect(isBlockedAddress('::ffff:127.0.0.1')).not.toBeNull();
     expect(isBlockedAddress('::ffff:169.254.169.254')).not.toBeNull();
     expect(isBlockedAddress('::ffff:8.8.8.8')).toBeNull();
+    expect(isBlockedAddress('0:0:0:0:0:ffff:7f00:1')).not.toBeNull();
+    expect(isBlockedAddress('::ffff:a9fe:a9fe')).not.toBeNull();
+    expect(isBlockedAddress('0:0:0:0:0:0:0:1')).not.toBeNull();
   });
 
   it.each([
@@ -45,6 +48,10 @@ describe('isBlockedAddress', () => {
 
   it('allows a public IPv6 address', () => {
     expect(isBlockedAddress('2606:4700:4700::1111')).toBeNull();
+  });
+
+  it.each(['::127.0.0.1', '64:ff9b::a9fe:a9fe', '64:ff9b:1::a9fe:a9fe', '2002:7f00:1::', '2001:db8::1', '3fff::1', '100::1', '5f00::1'])('blocks non-public or translated IPv6 %s', (address) => {
+    expect(isBlockedAddress(address)).not.toBeNull();
   });
 
   it('rejects octal and overflowing octets that a resolver would read differently', () => {
@@ -89,6 +96,25 @@ describe('normalizeFeedUrl', () => {
 });
 
 describe('checkUrl', () => {
+  it('bounds DNS lookup and does not admit a late answer', async () => {
+    vi.useFakeTimers();
+    try {
+      let finish!: (addresses: string[]) => void;
+      const resolveHostname = vi.fn(() => new Promise<string[]>((resolve) => { finish = resolve; }));
+      const pending = checkUrl('https://fixture.invalid/feed', { resolveHostname });
+      await vi.advanceTimersByTimeAsync(15_001);
+      expect(await pending).toMatchObject({ allowed: false, reason: 'dns-failure' });
+      finish(['8.8.8.8']);
+      expect(resolveHostname).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+  it('does not start DNS after caller cancellation', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const resolveHostname = vi.fn().mockResolvedValue(['8.8.8.8']);
+    expect(await checkUrl('https://fixture.invalid/feed', { signal: controller.signal, resolveHostname })).toMatchObject({ allowed: false, reason: 'dns-failure' });
+    expect(resolveHostname).not.toHaveBeenCalled();
+  });
   it.each([
     ['file', 'file:///etc/passwd'],
     ['gopher', 'gopher://example.com/'],

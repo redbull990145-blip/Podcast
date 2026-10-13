@@ -30,6 +30,7 @@ export type {
   QueueEntry,
   RecommendationReason,
   RecommendedPodcast,
+  EpisodeProgress,
   StoredProgress,
   SessionUser,
   QueueItem,

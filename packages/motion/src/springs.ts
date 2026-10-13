@@ -44,7 +44,7 @@ export const spring = {
   gentle: { stiffness: 120, damping: 20, mass: 1 },
 
   /** The default. Anything moving without a strong opinion uses this. */
-  standard: { stiffness: 260, damping: 30, mass: 1 },
+  standard: { stiffness: 300, damping: 26, mass: 1 },
 
   /**
    * Direct feedback on a control the finger is on. ω₀ 21.1, ζ 0.71.
@@ -59,20 +59,14 @@ export const spring = {
   responsive: { stiffness: 400, damping: 27, mass: 0.9 },
 
   /** Small, immediate, near-instant settle. Toggles, checkmarks. */
-  snappy: { stiffness: 560, damping: 40, mass: 0.8 },
+  snappy: { stiffness: 560, damping: 32, mass: 0.8 },
 
   /**
-   * Large travel that should feel weighty: player expansion, sheets.
-   * ω₀ 12.2, ζ 0.82.
-   *
-   * Was 300/28/1.05 — ω₀ 16.9, which resolved in about 0.4s. For a surface
-   * that covers the entire window that is too eager; a panel the size of the
-   * screen that arrives in 0.4s reads as a `display` change with an animation
-   * painted over it. Dropping ω₀ by ~28% puts the settle near 0.55s, which is
-   * where full-screen presentation sits across the platforms that get this
-   * right, and holds ζ below 1 so it still overshoots once on the way in.
+   * Large travel: player expansion and sheets. A controlled rebound with a
+   * quicker arrival keeps the surface expressive without delaying access.
+   * ω₀ 14.1, ζ 0.80.
    */
-  expressive: { stiffness: 210, damping: 28, mass: 1.4 },
+  expressive: { stiffness: 240, damping: 27, mass: 1.2 },
 } as const satisfies Record<string, Spring>;
 
 export type SpringToken = keyof typeof spring;

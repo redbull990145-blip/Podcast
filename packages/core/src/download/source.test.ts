@@ -42,6 +42,13 @@ function index(...records: DownloadRecord[]): DownloadIndex {
 }
 
 describe('preferLocal', () => {
+  it('restores the publisher audio and artwork after deleting a queued download', () => {
+    const local = preferLocal(EPISODE, index(record()));
+    const restored = preferLocal(local, EMPTY_INDEX);
+    expect(restored.audioUrl).toBe(EPISODE.audioUrl);
+    expect(restored.artworkUrl).toBe(EPISODE.artworkUrl);
+    expect(preferLocal(local, index(record()))).toBe(local);
+  });
   it('plays the file on disk instead of the publisher’s URL', () => {
     const resolved = preferLocal(EPISODE, index(record()));
 
@@ -89,6 +96,8 @@ describe('playableFromDownload', () => {
       podcastId: 'show-1',
       title: 'The one about caching',
       audioUrl: 'file:///audio/e1.mp3',
+      remoteAudioUrl: 'https://cdn.example.com/e1.mp3',
+      remoteArtworkUrl: 'https://cdn.example.com/cover.jpg',
       durationSec: 2400,
       artworkUrl: 'file:///art/e1.jpg',
       podcastTitle: 'A Show',

@@ -10,9 +10,11 @@ import { Artwork } from '@/components/media/artwork';
 import { ShowNotice } from '@/components/podcast/show-notice';
 import { SubscribeButton } from '@/components/podcast/subscribe-button';
 import { EpisodeRow } from '@/components/episode/episode-row';
+import { ListeningStateProvider } from '@/components/episode/listening-state';
 import { EpisodePager } from '@/components/podcast/episode-pager';
 import { AddPodcastToPlaylist } from '@/components/playlist/add-podcast-to-playlist';
 import { catalogue } from '@/lib/api';
+import { PageShell } from '@/components/ui/page-shell';
 
 /*
   No `export const revalidate` here, deliberately.
@@ -188,7 +190,7 @@ export default async function PodcastPage({ params, searchParams }: Params) {
         />
       ) : null}
 
-      <div className="relative mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
+      <PageShell className="relative">
       {/*
         Cover and identity, side by side.
 
@@ -287,7 +289,7 @@ export default async function PodcastPage({ params, searchParams }: Params) {
           />
         </Suspense>
       </section>
-      </div>
+      </PageShell>
     </div>
   );
 }
@@ -355,19 +357,29 @@ async function EpisodeArchive({
 
   return (
     <>
-      <div>
-        {archive.items.map((episode) => (
-          <EpisodeRow
-            key={episode.id}
-            episode={episode}
-            fallbackArtwork={podcast.artworkUrl}
-            podcastTitle={podcast.title}
-            accentColor={podcast.accentColor}
-            {...(tint ? { tint } : {})}
-            requiresAccount={podcast.source === 'directory'}
-          />
-        ))}
-      </div>
+      {/*
+        One progress lookup for the page, not one per row.
+
+        The provider is here rather than around each `EpisodeRow` because the
+        question — "which of these have I heard" — is about the *page*, and the
+        ten ids it needs are only knowable at this level. Signed out it renders
+        its children and asks nothing.
+      */}
+      <ListeningStateProvider episodeIds={archive.items.map((episode) => episode.id)}>
+        <div>
+          {archive.items.map((episode) => (
+            <EpisodeRow
+              key={episode.id}
+              episode={episode}
+              fallbackArtwork={podcast.artworkUrl}
+              podcastTitle={podcast.title}
+              accentColor={podcast.accentColor}
+              {...(tint ? { tint } : {})}
+              requiresAccount={podcast.source === 'directory'}
+            />
+          ))}
+        </div>
+      </ListeningStateProvider>
 
       <EpisodePager
         page={archive.page}

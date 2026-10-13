@@ -6,6 +6,7 @@ import { useTranslator } from '@/components/i18n/locale-provider';
 import { PlaylistGrid } from '@/components/playlist/playlist-grid';
 import { Button } from '@/components/ui/button';
 import { useSession } from '@/lib/session';
+import { EmptyState } from '@/components/ui/empty-state';
 
 /**
  * Every playlist this listener has, both kinds, one under the other.
@@ -28,19 +29,15 @@ export function PlaylistsClient() {
 
   if (!isSignedIn) {
     return (
-      <div className="rounded-[var(--radius-lg)] border border-dashed border-[var(--color-border)] px-6 py-12 text-center">
-        <p className="type-title3 m-0 text-[var(--color-text-primary)]">
-          {t.t('playlists.signedOut')}
-        </p>
-        <p className="type-callout mx-auto mt-2 mb-0 max-w-[var(--measure-prose)] text-[var(--color-text-secondary)]">
-          {t.t('playlists.signedOutBody')}
-        </p>
-        <div className="mt-5 flex justify-center">
+      <EmptyState
+        title={t.t('playlists.signedOut')}
+        body={t.t('playlists.signedOutBody')}
+        action={
           <Link href={'/signin' as Route} className="no-underline">
             <Button>{t.t('common.signIn')}</Button>
           </Link>
-        </div>
-      </div>
+        }
+      />
     );
   }
 

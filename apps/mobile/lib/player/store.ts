@@ -4,6 +4,7 @@ import {
   playableFromQueueEntry,
   preferLocal,
   preferLocalAll,
+  reconcileProgress,
   type PlayableEpisode,
   type PlaybackPreferences,
   type PlaybackRate,
@@ -15,9 +16,11 @@ import * as SecureStore from 'expo-secure-store';
 import { useCallback, useRef, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 import { api } from '@/lib/api';
+import { accountScope } from '@/lib/account';
 import { isOnline } from '@/lib/connectivity';
 import { currentDownloads, subscribeDownloads } from '@/lib/downloads/store';
-import { clearHeldProgress, holdProgress } from '@/lib/sync/outbox';
+import { clearHeldProgress, holdProgress, localProgress, rememberProgress } from '@/lib/sync/outbox';
+import { hasOnlineSessionVerification } from '@/lib/auth-token';
 import { NativeAudioEngine } from './native-engine';
 import { readPreferences, writePreferences } from './preferences';
 
@@ -87,7 +90,7 @@ function randomId(): string {
  */
 const PROGRESS_INTERVAL_MS = 15_000;
 let lastWrite = 0;
-let pendingEpisodeId: string | null = null;
+let playIntent = 0;
 
 /**
  * Whether there is anyone to sync *to*.
@@ -98,9 +101,8 @@ let pendingEpisodeId: string | null = null;
  * bytes spent on a request that cannot succeed.
  *
  * Three states rather than a boolean, because "not signed in" and "we have not
- * asked yet" are different. Only a *confirmed* anonymous session suppresses a
- * request; during `unknown` the resume lookup still goes out, so someone who
- * opens the app and immediately presses play does not lose their position.
+ * asked yet" are different. Private reads and writes wait for a verified
+ * identity, so work cannot accidentally be attributed to the next account.
  */
 type SyncState = 'unknown' | 'anonymous' | 'authenticated';
 
@@ -111,13 +113,14 @@ export function setSyncState(next: SyncState): void {
 }
 
 function canSync(): boolean {
-  return syncState !== 'anonymous';
+  return syncState === 'authenticated' && accountScope.snapshot().accountId !== null;
 }
 
 function reportProgress(episodeId: string, record: ProgressRecord, force: boolean): void {
   // Checked before the debounce bookkeeping, so a signed-out session does not
   // leave `lastWrite` set and swallow the first real write after a sign-in.
   if (!canSync()) return;
+  const owner = accountScope.snapshot();
 
   const now = Date.now();
   if (!force && now - lastWrite < PROGRESS_INTERVAL_MS) return;
@@ -135,14 +138,17 @@ function reportProgress(episodeId: string, record: ProgressRecord, force: boolea
     // rewind a device that was genuinely ahead.
     observedAt: record.updatedAt,
   };
+  rememberProgress(held, owner);
 
   // Known offline: hold it rather than firing a request that cannot land. On a
   // phone this is not an edge case — it is the tunnel, the lift, the flight.
-  if (!isOnline()) {
-    holdProgress(held);
+  if (!isOnline() || !hasOnlineSessionVerification()) {
+    holdProgress(held, owner);
     return;
   }
 
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), 15_000);
   void api
     .reportProgress(episodeId, {
       positionSec: Math.round(held.positionSec),
@@ -150,13 +156,13 @@ function reportProgress(episodeId: string, record: ProgressRecord, force: boolea
       completed: held.completed,
       deviceId: held.deviceId,
       observedAt: held.observedAt,
-    })
+    }, controller.signal)
     .catch(() => {
       // Connectivity we believed in but did not have — a captive portal, a
       // half-attached cell. Held for the next reconnect rather than dropped:
       // this write is where someone's place in an episode lives.
-      holdProgress(held);
-    });
+      holdProgress(held, owner);
+    }).finally(() => clearTimeout(deadline));
 }
 
 export function getPlayer(): PlayerMachine {
@@ -167,9 +173,8 @@ export function getPlayer(): PlayerMachine {
     engine,
     deviceId: deviceId(),
     preferences: readPreferences(),
-    onProgress: (record) => {
-      if (!pendingEpisodeId) return;
-      reportProgress(pendingEpisodeId, record, false);
+    onProgress: (record, context) => {
+      reportProgress(context.episodeId, record, context.force);
     },
     onQueueMutation: (mutation) => {
       if (!canSync()) return;
@@ -186,7 +191,6 @@ export function getPlayer(): PlayerMachine {
   let lastEpisodeId: string | null = null;
 
   machine.subscribe((state) => {
-    pendingEpisodeId = state.current?.id ?? null;
 
     if (state.current && state.current.id !== lastEpisodeId) {
       lastEpisodeId = state.current.id;
@@ -372,6 +376,8 @@ export function usePlayerActions() {
 
 export const playerActions = {
   play: async (episode: PlayableEpisode) => {
+    const intent = ++playIntent;
+    const owner = accountScope.snapshot();
     const player = getPlayer();
 
     // Play the copy on disk when there is one. Done here rather than inside the
@@ -382,27 +388,43 @@ export const playerActions = {
     // Resume where this listener left off, reconciled server-side. There is
     // nothing stored for an anonymous listener, so the lookup is skipped
     // rather than sent and refused.
-    let resumeFrom: ProgressRecord | null = null;
-    if (canSync()) {
+    const local = canSync() ? localProgress(episode.id) : null;
+    let resumeFrom: ProgressRecord | null = local ? { ...local, updatedAt: local.observedAt } : null;
+    if (canSync() && isOnline()) {
+      const controller = new AbortController();
+      let deadline: ReturnType<typeof setTimeout> | undefined;
       try {
-        const { progress } = await api.getProgress(episode.id);
+        // Bound the wait as well as the transport: a native fetch that ignores
+        // cancellation must not keep a downloaded episode from playing.
+        const { progress } = await Promise.race([
+          api.getProgress(episode.id, { signal: controller.signal }),
+          new Promise<never>((_resolve, reject) => {
+            deadline = setTimeout(() => {
+              controller.abort();
+              reject(new Error('Progress lookup timed out'));
+            }, 15_000);
+          }),
+        ]);
         if (progress) {
-          resumeFrom = {
+          const remote = {
             positionSec: progress.positionSec,
             durationSec: progress.durationSec,
             completed: progress.completed,
             deviceId: progress.deviceId,
             updatedAt: new Date(progress.updatedAt).getTime(),
           };
+          resumeFrom = reconcileProgress(resumeFrom, remote)?.winner ?? null;
         }
       } catch {
         // Offline, or the request failed. Starting from wherever this device
         // last knew about is the right fallback — better than refusing to play
         // an episode that is sitting on the handset.
+      } finally {
+        clearTimeout(deadline);
       }
     }
 
-    await player.play(source, resumeFrom);
+    if (intent === playIntent && accountScope.matches(owner)) await player.play(source, resumeFrom);
   },
   /**
    * Play from an exact point, ignoring wherever this listener had got to.
@@ -412,10 +434,11 @@ export const playerActions = {
    * episode last week.
    */
   playAt: async (episode: PlayableEpisode, positionSec: number) => {
+    playIntent += 1;
     await getPlayer().playAt(preferLocal(episode, currentDownloads()), positionSec);
   },
   toggle: () => void getPlayer().toggle(),
-  pause: () => getPlayer().pause(),
+  pause: () => { playIntent += 1; getPlayer().pause(); },
   seek: (sec: number) => getPlayer().seek(sec),
   skipBack: () => getPlayer().skipBack(),
   skipForward: () => getPlayer().skipForward(),
@@ -428,7 +451,7 @@ export const playerActions = {
     writePreferences(player.getPreferences());
   },
   setSleepTimer: (minutes: number | null) => getPlayer().setSleepTimer(minutes),
-  next: () => void getPlayer().next(),
+  next: () => { playIntent += 1; void getPlayer().next(); },
   // Resolved on the way in, so an episode that was already saved plays from
   // disk when the queue reaches it — including with no connection left.
   enqueue: (...episodes: PlayableEpisode[]) =>
@@ -466,18 +489,20 @@ export { readPreferences };
 let hydrated = false;
 
 export async function hydrateQueue(): Promise<void> {
-  if (hydrated) return;
+  if (hydrated || !canSync()) return;
+  const owner = accountScope.snapshot();
   hydrated = true;
 
   try {
     const { items } = await api.getQueue();
+    if (!accountScope.matches(owner)) return;
     getPlayer().hydrateQueue(
       preferLocalAll(items.map(playableFromQueueEntry), currentDownloads()),
     );
   } catch {
     // Signed out or offline. An empty local queue is the right fallback, and
     // the next launch will try again.
-    hydrated = false;
+    if (accountScope.matches(owner)) hydrated = false;
   }
 }
 
@@ -493,11 +518,21 @@ export async function hydrateQueue(): Promise<void> {
  * queue from every device they own.
  */
 export function resetQueue(): void {
+  playIntent += 1;
   hydrated = false;
-  getPlayer().hydrateQueue([]);
+  lastWrite = 0;
+  machine?.resetAccount();
 
   // Held positions belonged to the person who just left. Flushing them after
   // the next sign-in would write their listening history onto someone else's
   // account — signing out is not a reason to sync harder.
   clearHeldProgress();
 }
+
+accountScope.subscribe(() => {
+  playIntent += 1;
+  syncState = accountScope.snapshot().accountId ? 'authenticated' : 'anonymous';
+  hydrated = false;
+  lastWrite = 0;
+  machine?.resetAccount();
+});

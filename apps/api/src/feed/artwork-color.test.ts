@@ -25,6 +25,14 @@ const asFetch = (fn: (url: string, init?: unknown) => Promise<Response>) =>
   fn as unknown as typeof fetch;
 
 describe('extractArtworkColor SSRF guard', () => {
+  it('keeps artwork body failures from rejecting an ingest', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) { controller.error(new Error('publisher disconnected')); },
+    });
+    await expect(extractArtworkColor('http://198.51.100.10/cover.png', {
+      fetchImpl: asFetch(async () => new Response(body)),
+    })).resolves.toBeNull();
+  });
   it.each([
     ['loopback', 'http://127.0.0.1/cover.png'],
     ['cloud metadata', 'http://169.254.169.254/latest/meta-data/'],

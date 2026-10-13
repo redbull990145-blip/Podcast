@@ -119,7 +119,7 @@ export function middleware(request: NextRequest) {
   /*
     The nonce travels to the render on a request header rather than a module
     variable or an async-local store, because that is the channel Next itself
-    reads: given `x-nonce`, it stamps every script tag it generates — the
+    reads: given the request CSP, it stamps every script tag it generates — the
     bootstrap, the chunk tags, the flight-data pushes — with the same value.
     Without it those tags would be nonce-less and a `script-src` this strict
     would refuse to run the app at all. app/layout.tsx reads the same header
@@ -127,9 +127,12 @@ export function middleware(request: NextRequest) {
   */
   const headers = new Headers(request.headers);
   headers.set('x-nonce', nonce);
+  const contentSecurityPolicy = policy(nonce);
+  headers.set('Content-Security-Policy', contentSecurityPolicy);
+  headers.delete('Content-Security-Policy-Report-Only');
 
   const response = NextResponse.next({ request: { headers } });
-  response.headers.set('Content-Security-Policy', policy(nonce));
+  response.headers.set('Content-Security-Policy', contentSecurityPolicy);
 
   return response;
 }

@@ -1,5 +1,8 @@
 name: Keepalive
 
+# This job calls only the public API and does not need a GitHub credential.
+permissions: {}
+
 # Supabase pauses a free-tier project after 7 days with no activity, and
 # unpausing is a manual click in their dashboard. A read every few days costs
 # nothing and keeps the project awake.

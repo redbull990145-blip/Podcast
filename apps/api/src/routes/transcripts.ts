@@ -13,10 +13,10 @@
  * and the same size cap.
  */
 
-import { episodes, transcripts } from '@cue/db';
+import { episodes, transcriptionJobs, transcripts, type TranscriptRow } from '@cue/db';
 import type { Transcript, TranscriptAlignment } from '@cue/types';
 import { uuidParam } from '@cue/validation';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, getTableColumns, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { fetchFeed } from '../feed/fetch.ts';
 import {
@@ -86,6 +86,13 @@ const MEASURE_SETTLE_MS = 2500;
  */
 const TRANSCRIPT_REVISION = 1;
 
+// Keep the PostgreSQL timestamp precision; Date truncates historical microseconds.
+type VersionedTranscriptRow = TranscriptRow & { fetchedAtVersion: string };
+const versionedColumns = {
+  ...getTableColumns(transcripts),
+  fetchedAtVersion: sql<string>`to_char(${transcripts.fetchedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+};
+
 export function transcriptRoutes(app: FastifyInstance): void {
   app.get(
     '/episodes/:id/transcript',
@@ -93,16 +100,12 @@ export function transcriptRoutes(app: FastifyInstance): void {
     async (request) => {
       const { id } = uuidParam.parse(request.params);
 
-      const [episode] = await app.db
-        .select()
-        .from(episodes)
-        .where(eq(episodes.id, id))
-        .limit(1);
+      const [episode] = await app.db.select().from(episodes).where(eq(episodes.id, id)).limit(1);
 
       if (!episode) throw notFound('Episode');
 
       const [cached] = await app.db
-        .select()
+        .select(versionedColumns)
         .from(transcripts)
         .where(eq(transcripts.episodeId, id))
         .limit(1);
@@ -120,7 +123,8 @@ export function transcriptRoutes(app: FastifyInstance): void {
 
       const stale =
         outdated ||
-        (cached?.status === 'failed' &&
+        (cached?.source === 'feed' &&
+          cached.status === 'failed' &&
           Date.now() - cached.fetchedAt.getTime() > FAILURE_TTL_MS);
 
       if (cached && !stale) {
@@ -172,8 +176,11 @@ export function transcriptRoutes(app: FastifyInstance): void {
             ? 'The publisher’s transcript is no longer at that address'
             : 'Could not reach the publisher’s transcript';
 
-        const row = await store(app, id, [], 'failed', detail, null);
-        return ok({ transcript: toWire(row), detail });
+        const { row } = await store(app, id, [], 'failed', detail, null, cached);
+        return ok({
+          transcript: row ? toWire(row) : null,
+          detail: row?.detail ?? null,
+        });
       }
 
       /**
@@ -191,8 +198,11 @@ export function transcriptRoutes(app: FastifyInstance): void {
 
       if (segments.length === 0) {
         const detail = 'The publisher’s transcript had no readable lines';
-        const row = await store(app, id, [], 'failed', detail, null);
-        return ok({ transcript: toWire(row), detail });
+        const { row } = await store(app, id, [], 'failed', detail, null, cached);
+        return ok({
+          transcript: row ? toWire(row) : null,
+          detail: row?.detail ?? null,
+        });
       }
 
       /**
@@ -200,13 +210,14 @@ export function transcriptRoutes(app: FastifyInstance): void {
        * transcript has no timings to be wrong, and a column saying what its
        * non-existent timings were measured against would be noise.
        */
-      const row = await store(
+      const { row, published } = await store(
         app,
         id,
         segments,
         'ready',
         null,
         null,
+        cached,
         isTimed(segments) ? measured : null,
       );
 
@@ -218,13 +229,16 @@ export function transcriptRoutes(app: FastifyInstance): void {
        * a generated transcript or re-derived by a newer parser, and a late write
        * must not overwrite either.
        */
-      if (!measured && isTimed(segments)) {
+      if (published && row && !measured && isTimed(segments)) {
         void measurement
-          .then((late) => (late ? recordMeasurement(app, id, late) : undefined))
+          .then((late) => (late ? recordMeasurement(app, row, late) : undefined))
           .catch(() => undefined);
       }
 
-      return ok({ transcript: toWire(row), detail: null });
+      return ok({
+        transcript: row ? toWire(row) : null,
+        detail: row?.detail ?? null,
+      });
     },
   );
 }
@@ -290,7 +304,7 @@ async function settled<T>(promise: Promise<T | null>, ms: number): Promise<T | n
 /** Write a measurement that arrived after its request had already been answered. */
 async function recordMeasurement(
   app: FastifyInstance,
-  episodeId: string,
+  observed: VersionedTranscriptRow,
   measured: { audioDurationMs: number; audioBytes: number },
 ): Promise<void> {
   await app.db
@@ -298,11 +312,14 @@ async function recordMeasurement(
     .set(measured)
     .where(
       and(
-        eq(transcripts.episodeId, episodeId),
+        eq(transcripts.episodeId, observed.episodeId),
         // Only the row this measurement was taken for. A generated transcript
         // that landed in the meantime describes different audio entirely.
         eq(transcripts.source, 'feed'),
         eq(transcripts.revision, TRANSCRIPT_REVISION),
+        eq(transcripts.status, 'ready'),
+        sql`${transcripts.fetchedAt} = ${observed.fetchedAtVersion}::timestamptz`,
+        eq(transcripts.segments, observed.segments),
       ),
     );
 }
@@ -314,6 +331,7 @@ async function store(
   status: 'ready' | 'failed',
   detail: string | null,
   language: string | null,
+  observed: VersionedTranscriptRow | undefined,
   measured: { audioDurationMs: number; audioBytes: number } | null = null,
 ) {
   const values = {
@@ -325,19 +343,50 @@ async function store(
     segments,
     audioDurationMs: measured?.audioDurationMs ?? null,
     audioBytes: measured?.audioBytes ?? null,
+    alignment: null,
     revision: TRANSCRIPT_REVISION,
     fetchedAt: new Date(),
   };
 
-  // Upsert rather than insert: two readers opening the same episode at once
-  // both get here, and the loser of that race must not 500.
-  const [row] = await app.db
-    .insert(transcripts)
-    .values(values)
-    .onConflictDoUpdate({ target: transcripts.episodeId, set: values })
-    .returning();
-
-  return row!;
+  // Use the queue's episode -> job lock order. A publisher fetch runs outside
+  // this transaction; its result cannot replace work admitted while it waited.
+  return app.db.transaction(async (tx) => {
+    const [episode] = await tx
+      .select({ id: episodes.id })
+      .from(episodes)
+      .where(eq(episodes.id, episodeId))
+      .for('update');
+    if (!episode) throw notFound('Episode');
+    const [job] = await tx
+      .select({ episodeId: transcriptionJobs.episodeId })
+      .from(transcriptionJobs)
+      .where(eq(transcriptionJobs.episodeId, episodeId))
+      .for('update');
+    const [current] = await tx
+      .select(versionedColumns)
+      .from(transcripts)
+      .where(eq(transcripts.episodeId, episodeId));
+    if (
+      job ||
+      current?.source === 'generated' ||
+      (current &&
+        (!observed ||
+          current.fetchedAtVersion !== observed.fetchedAtVersion ||
+          current.source !== observed.source ||
+          current.status !== observed.status ||
+          current.revision !== observed.revision ||
+          JSON.stringify(current.segments) !== JSON.stringify(observed.segments))) ||
+      (!current && observed)
+    ) {
+      return { row: current ?? null, published: false };
+    }
+    const [row] = await tx
+      .insert(transcripts)
+      .values(values)
+      .onConflictDoUpdate({ target: transcripts.episodeId, set: values })
+      .returning(versionedColumns);
+    return { row: row!, published: true };
+  });
 }
 
 export function toWire(row: {

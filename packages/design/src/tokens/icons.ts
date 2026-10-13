@@ -109,6 +109,18 @@ export const icon = {
   volumeHigh: 'M4.5 9.5h3L11 6v12l-3.5-3.5h-3zM14 9.9a3.3 3.3 0 0 1 0 4.2M16.6 7.6a7 7 0 0 1 0 8.8',
   /** The cone with the arcs struck through — silence, not merely quiet. */
   volumeMuted: 'M4.5 9.5h3L11 6v12l-3.5-3.5h-3zM15 10l4.5 4M19.5 10 15 14',
+
+  /**
+   * The sleep timer: a crescent, not a clock face.
+   *
+   * A clock would be the literal drawing and the wrong one — this control does
+   * not tell the time, it says *stop at some point after I have fallen asleep*,
+   * and every audio product that has one draws a moon for exactly that reason.
+   * It is also the only glyph in this set that has to read at 20px against a
+   * photograph, so it is one closed shape rather than a dial with hands that
+   * would silt up at that size.
+   */
+  sleep: 'M20.5 14.4A8.5 8.5 0 0 1 9.6 3.5a8.5 8.5 0 1 0 10.9 10.9Z',
 } as const satisfies Record<string, IconPath>;
 
 export type IconToken = keyof typeof icon;

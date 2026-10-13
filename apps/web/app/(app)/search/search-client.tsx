@@ -14,11 +14,13 @@ import { memo, useState } from 'react';
 import { Artwork } from '@/components/media/artwork';
 import { PodcastTile } from '@/components/podcast/podcast-tile';
 import { SectionHeader } from '@/components/ui/section-header';
+import { Skeleton } from '@/components/ui/skeleton';
 import { api, ApiClientError } from '@/lib/api';
 import { useOnline } from '@/lib/connectivity';
 import { useCanTravel, useTransition } from '@/lib/motion';
 import { useDebounced } from '@/lib/use-debounced';
 import { useSession } from '@/lib/session';
+import { EmptyState } from '@/components/ui/empty-state';
 
 /**
  * Languages offered as a filter.
@@ -28,8 +30,17 @@ import { useSession } from '@/lib/session';
  * picker that names every language in one language is the clearest sign it was
  * built for one audience.
  */
+/*
+  `null` for the first entry, resolved through the catalog at render.
+
+  Every other label here is deliberately in its own script and must never be
+  translated — someone scanning for Hindi finds हिन्दी faster than a row saying
+  "Hindi", which is the whole point of the list. "Any language" is the one
+  option that is not the name of a language, so it is the one that has to be
+  said in the reader's own.
+*/
 const LANGUAGES = [
-  { code: '', label: 'Any language' },
+  { code: '', label: null },
   { code: 'en', label: 'English' },
   { code: 'es', label: 'Español' },
   { code: 'pt', label: 'Português' },
@@ -181,7 +192,11 @@ export function SearchClient({
       </p>
 
       {searching ? (
-        <div className="mt-8 max-w-[var(--measure-wide)]">
+        /* The width cap moved to the page frame — see `PageShell`. Asking for
+           `--measure-wide` here never did anything: this was inside a parent
+           already capped at `--measure-content`, and a child cannot be wider
+           than its parent. */
+        <div className="mt-8">
           {search.error ? <SearchError error={search.error} searching /> : null}
 
           {!search.error && search.isPending ? (
@@ -225,13 +240,23 @@ export function SearchClient({
           ) : null}
         </div>
       ) : tooShort ? (
-        <div className="mt-8 max-w-[var(--measure-wide)]">
+        <div className="mt-8">
           <Advice title={t.t('search.tooShort')} body={t.t('search.tooShortBody')} />
         </div>
       ) : browsing ? (
         <CategoryResults slug={category} />
       ) : (
-        <>
+        /*
+          The resting state keeps the *content* cap, and the results do not.
+
+          They are two different kinds of answer. Results are rows — artwork,
+          a title, an author, one button — and the extra 240px of the wide
+          frame goes into the title, which is the part anybody is reading.
+          Browse is a grid of covers, and a grid that keeps widening stops
+          being a grid and becomes a wall; four category tiles and six trending
+          covers were composed against 1440 and should stay there.
+        */
+        <div className="max-w-[var(--measure-content)]">
           {/*
             What this listener would probably like, before what everyone likes.
 
@@ -264,7 +289,7 @@ export function SearchClient({
             trendingPending={trending.isPending}
             trendingError={trending.error}
           />
-        </>
+        </div>
       )}
     </div>
   );
@@ -403,7 +428,7 @@ function SearchField({
   return (
     <div className="flex max-w-[var(--measure-prose)] flex-col gap-3 sm:flex-row">
       <label className="relative flex flex-1 items-center">
-        <span className="sr-only">Search podcasts</span>
+        <span className="sr-only">{t.t('search.fieldLabel')}</span>
 
         <svg
           aria-hidden="true"
@@ -449,7 +474,7 @@ function SearchField({
       </label>
 
       <label className="block">
-        <span className="sr-only">Filter by language</span>
+        <span className="sr-only">{t.t('search.filterLanguage')}</span>
         <select
           value={language}
           onChange={(event) => onLanguage(event.target.value)}
@@ -457,7 +482,7 @@ function SearchField({
         >
           {LANGUAGES.map((option) => (
             <option key={option.code} value={option.code}>
-              {option.label}
+              {option.label ?? t.t('search.anyLanguage')}
             </option>
           ))}
         </select>
@@ -568,7 +593,7 @@ const CategoryBrowse = memo(function CategoryBrowse({
             pending={trendingPending}
             error={trendingError}
           />
-          <TrendingCovers results={trending} />
+          <TrendingCovers results={trending} pending={trendingPending} />
         </div>
       </div>
     </section>
@@ -607,6 +632,17 @@ function CategoryTile({
   const cover = category.accentColor ? deriveCover(category.accentColor) : null;
   const settle = useTransition('standard');
   const travel = useCanTravel();
+  const queryClient = useQueryClient();
+  const [approached, setApproached] = useState(false);
+  const warm = () => {
+    setApproached(true);
+    void queryClient.prefetchQuery({
+      queryKey: queryKeys.discover.inCategory(category.slug),
+      queryFn: () => api.getPodcasts({ category: category.slug, limit: 40 }),
+      staleTime: staleTime.podcast,
+      retry: false,
+    });
+  };
 
   /*
     A tile that reads as a surface rather than as a missing image.
@@ -635,6 +671,9 @@ function CategoryTile({
     >
       <Link
         href={`/search?category=${category.slug}` as Route}
+        prefetch={approached ? true : null}
+        onPointerEnter={warm}
+        onFocus={warm}
         className={[
           'group relative flex flex-col justify-between overflow-hidden no-underline',
           compact
@@ -803,8 +842,28 @@ const TrendingRanked = memo(function TrendingRanked({
       </h2>
 
       {error ? <SearchError error={error} searching={false} /> : null}
+
+      {/*
+        Held space rather than the word "Loading…".
+
+        This screen already reserves the real shape everywhere else it waits —
+        the library rows, the resume hero, the episode archive — and said the
+        word here instead, so the same wait read as two different kinds of
+        event depending on which half of the page you were looking at. Eight
+        rows, which is exactly what lands.
+      */}
       {!error && pending ? (
-        <p className="type-callout text-[var(--color-text-secondary)]">Loading…</p>
+        <div aria-hidden="true" className="flex flex-col gap-[15px] pt-1.5">
+          {Array.from({ length: RANKED }, (_, index) => (
+            <div key={index} className="flex items-baseline gap-4">
+              <Skeleton w={16} h={12} />
+              <span className="flex min-w-0 flex-1 flex-col gap-2">
+                <Skeleton w={`${52 + ((index * 7) % 30)}%`} h={13} />
+                <Skeleton w="24%" h={11} />
+              </span>
+            </div>
+          ))}
+        </div>
       ) : null}
 
       <ul className="m-0 list-none p-0">
@@ -870,13 +929,18 @@ const RankedRow = memo(function RankedRow({
 // field is not one of the things that moves a cover.
 const TrendingCovers = memo(function TrendingCovers({
   results,
+  pending,
 }: {
   results: PodcastSearchResult[];
+  pending: boolean;
 }) {
   const t = useTranslator();
   const covers = results.slice(RANKED, RANKED + COVERS);
 
-  if (covers.length === 0) return null;
+  // Absent once the answer is in and there is nothing in it, held while the
+  // answer is still coming — two different states that both render nothing
+  // without this, and only one of them should.
+  if (covers.length === 0 && !pending) return null;
 
   return (
     <section aria-labelledby="more-trending-heading">
@@ -888,11 +952,22 @@ const TrendingCovers = memo(function TrendingCovers({
       </h2>
 
       <ul className="m-0 grid list-none grid-cols-3 gap-x-4 gap-y-5 p-0">
-        {covers.map((result) => (
-          <li key={result.feedUrl}>
-            <CoverCard result={result} />
-          </li>
-        ))}
+        {covers.length > 0
+          ? covers.map((result) => (
+              <li key={result.feedUrl}>
+                <CoverCard result={result} />
+              </li>
+            ))
+          : Array.from({ length: COVERS }, (_, index) => (
+              <li key={index} aria-hidden="true">
+                {/* Square, like the cover it stands in for, and sized by the
+                    grid track rather than by a number — the covers themselves
+                    are `responsive`, so a fixed width here would hold a
+                    different shape from the one that arrives. */}
+                <Skeleton w="100%" h="auto" shape="block" className="aspect-square" />
+                <Skeleton w="70%" h={13} className="mt-2.5" />
+              </li>
+            ))}
       </ul>
     </section>
   );
@@ -1066,7 +1141,7 @@ const ResultRow = memo(function ResultRow({
 
       {error ? (
         <p role="alert" className="type-caption mt-0 mb-3 px-1 text-[var(--color-danger)]">
-          {error instanceof ApiClientError ? error.message : 'Could not open that show.'}
+          {error instanceof ApiClientError ? error.message : t.t('search.openFailed')}
         </p>
       ) : null}
     </div>
@@ -1082,16 +1157,9 @@ const ResultRow = memo(function ResultRow({
  * results area reads as a page that failed to finish rendering.
  */
 function Advice({ title, body }: { title: string; body?: string }) {
-  return (
-    <div>
-      <p className="type-title3 m-0 text-[var(--color-text-primary)]">{title}</p>
-      {body ? (
-        <p className="type-callout mt-1.5 mb-0 max-w-[52ch] text-[var(--color-text-secondary)]">
-          {body}
-        </p>
-      ) : null}
-    </div>
-  );
+  // `plain`: this stands where the results were going to, on a page that has a
+  // field and a heading above it. A panel here would look like a result.
+  return <EmptyState tone="plain" title={title} {...(body ? { body } : {})} />;
 }
 
 function SearchError({ error, searching }: { error: unknown; searching: boolean }) {
@@ -1113,14 +1181,20 @@ function SearchError({ error, searching }: { error: unknown; searching: boolean 
 
   // A server without PodcastIndex credentials is a setup problem, not a bug,
   // and saying so is more useful than "something went wrong".
+  /*
+    The credentials line is the one string here that stays in English on
+    purpose: it names two environment variables and is addressed to whoever is
+    running the server, not to a listener. Everything either side of it is a
+    sentence a reader is meant to act on, and those go through the catalog.
+  */
   const message =
     error instanceof ApiClientError && error.code === 'upstream_unavailable'
       ? 'Search needs PODCASTINDEX_KEY and PODCASTINDEX_SECRET in .env.'
       : error instanceof Error
         ? error.message
         : searching
-          ? 'Search failed.'
-          : 'Could not load trending shows.';
+          ? t.t('search.failed')
+          : t.t('search.trendingFailed');
 
   return <Advice title={t.t('common.unreachable')} body={message} />;
 }

@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
+import { getTranslator } from '@/lib/i18n';
 import { PlaylistsClient } from './playlists-client';
+import { PageShell } from '@/components/ui/page-shell';
 
 // The root layout's template appends "· Cue"; repeating it here would produce
 // "Playlists · Cue · Cue".
@@ -12,11 +14,15 @@ export const metadata: Metadata = { title: 'Playlists' };
  * changes as they build it, and there is nothing for a search engine to index
  * or a stranger to land on.
  */
-export default function PlaylistsPage() {
+export default async function PlaylistsPage() {
+  const t = await getTranslator();
+
   return (
-    <div className="mx-auto w-full max-w-[var(--measure-content)] px-5 py-8 md:px-10 md:py-12">
-      <h1 className="type-display mt-0 mb-8 text-[var(--color-text-primary)]">Playlists</h1>
+    <PageShell>
+      <h1 className="type-display mt-0 mb-8 text-[var(--color-text-primary)]">
+        {t.t('playlists.title')}
+      </h1>
       <PlaylistsClient />
-    </div>
+    </PageShell>
   );
 }

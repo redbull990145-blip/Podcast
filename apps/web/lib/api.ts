@@ -1,4 +1,6 @@
 import { createClient } from '@cue/api-client';
+import { accountScope } from './account';
+import { purgeCachedData } from './connectivity';
 
 /**
  * The API base URL.
@@ -11,7 +13,7 @@ import { createClient } from '@cue/api-client';
 const baseUrl =
   process.env['NEXT_PUBLIC_API_URL']?.replace(/\/$/, '') ?? 'http://localhost:8080';
 
-export const api = createClient({ baseUrl });
+export const api = createClient({ baseUrl, getSessionGeneration: accountScope.generation, getAccountId: () => accountScope.snapshot().accountId, onUnauthorized: () => { accountScope.set(null, true); purgeCachedData(); } });
 
 /**
  * How long a catalogue read stays fresh in Next's Data Cache.

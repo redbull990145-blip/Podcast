@@ -102,6 +102,41 @@ function episode(id: string, overrides: Partial<PlayableEpisode> = {}): Playable
 
 const NOW = 1_786_000_000_000;
 
+describe('replaced playback intents', () => {
+  it('does not play a load that completed after account reset', async () => {
+    const engine = new FakeEngine();
+    let finish!: () => void;
+    vi.spyOn(engine, 'load').mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const onProgress = vi.fn();
+    const player = new PlayerMachine({ engine, onProgress });
+    player.enqueue(episode('queued-A'));
+    const old = player.play(episode('A'));
+    player.resetAccount(); finish(); await old;
+    expect(engine.playCalls).toBe(0);
+    expect(player.getState()).toMatchObject({ current: null, queue: [], status: 'idle' });
+    expect(onProgress).not.toHaveBeenCalled();
+    engine.emit({ type: 'position', positionSec: 99 });
+    expect(player.getState().positionSec).toBe(0);
+  });
+  it('does not let an older load failure replace the current episode state', async () => {
+    const engine = new FakeEngine();
+    let fail!: (error: Error) => void;
+    vi.spyOn(engine, 'load').mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { fail = reject; }));
+    const player = new PlayerMachine({ engine });
+    const old = player.play(episode('A')); await player.play(episode('B'));
+    fail(new Error('A failed late')); await old;
+    expect(player.getState()).toMatchObject({ current: { id: 'B' }, status: 'playing', error: null });
+  });
+  it('does not start a pending load after dismiss or pause', async () => {
+    for (const command of ['dismiss', 'pause'] as const) {
+      const engine = new FakeEngine(); let finish!: () => void;
+      vi.spyOn(engine, 'load').mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+      const player = new PlayerMachine({ engine }); const old = player.play(episode('A'));
+      player[command](); finish(); await old; expect(engine.playCalls).toBe(0);
+    }
+  });
+});
+
 let engine: FakeEngine;
 let clock: number;
 let progress: ProgressRecord[];
@@ -403,6 +438,30 @@ describe('sleep timer', () => {
 });
 
 describe('progress reporting', () => {
+  it('reports periodic ticks and forces pause and departure with their original episode', async () => {
+    const report = vi.fn();
+    const player = new PlayerMachine({ engine, onProgress: report });
+    await player.play(episode('a'));
+    engine.advanceTo(42);
+    expect(report).toHaveBeenLastCalledWith(expect.objectContaining({ positionSec: 42 }), { episodeId: 'a', force: false });
+    player.pause();
+    expect(report).toHaveBeenLastCalledWith(expect.objectContaining({ positionSec: 42 }), { episodeId: 'a', force: true });
+    await player.play(episode('b'));
+    expect(report).toHaveBeenLastCalledWith(expect.objectContaining({ positionSec: 42 }), { episodeId: 'a', force: true });
+    player.destroy();
+  });
+
+  it('does not attribute an old engine position to a still-loading replacement', async () => {
+    const report = vi.fn();
+    const player = new PlayerMachine({ engine, onProgress: report });
+    await player.play(episode('a')); engine.advanceTo(90);
+    const finishers: (() => void)[] = [];
+    engine.load = () => new Promise<void>((resolve) => { finishers.push(resolve); });
+    const first = player.play(episode('b'));
+    const second = player.play(episode('c'));
+    expect(report.mock.calls.map((call) => call[1].episodeId)).toEqual(['a', 'a']);
+    finishers.forEach((finish) => finish()); await Promise.all([first, second]); player.destroy();
+  });
   it('persists immediately on pause', async () => {
     await machine.play(episode('a'));
     engine.advanceTo(742);
@@ -432,6 +491,42 @@ describe('progress reporting', () => {
   it('does not report progress with nothing playing', () => {
     machine.flush();
     expect(progress).toHaveLength(0);
+  });
+});
+
+describe('reliable queue and sleep deadlines', () => {
+  it('consumes a manually selected queued episode after successful start exactly once', async () => {
+    const mutate = vi.fn(); const player = new PlayerMachine({ engine, onQueueMutation: mutate });
+    player.enqueue(episode('b'), episode('c'));
+    await player.play(episode('b')); await player.play(episode('b'));
+    expect(player.getState().queue.map((item) => item.id)).toEqual(['c']);
+    expect(mutate.mock.calls.filter((call) => call[0].type === 'remove')).toEqual([[{ type: 'remove', episodeId: 'b' }]]);
+    player.destroy();
+  });
+  it('retains a manually selected queue item when loading fails', async () => {
+    machine.enqueue(episode('b')); engine.breakNextLoad(); await machine.play(episode('b'));
+    expect(machine.getState().queue.map((item) => item.id)).toEqual(['b']);
+  });
+  it('deduplicates batch enqueue, hydration and reorder, and ignores playing next on current', async () => {
+    machine.enqueue(episode('b'), episode('b'));
+    expect(machine.getState().queue).toHaveLength(1);
+    machine.hydrateQueue([episode('b'), episode('b'), episode('c')]);
+    machine.reorderQueue(['c', 'c', 'b']);
+    expect(machine.getState().queue.map((item) => item.id)).toEqual(['c', 'b']);
+    await machine.play(episode('a')); machine.playNext(episode('a'));
+    expect(machine.getState().queue.map((item) => item.id)).toEqual(['c', 'b']);
+  });
+  it('expires while buffering without position events and cancels the timer on destruction', async () => {
+    vi.useFakeTimers();
+    try {
+      const report = vi.fn(); const player = new PlayerMachine({ engine, onProgress: report });
+      await player.play(episode('a')); player.setSleepTimer(1);
+      engine.emit({ type: 'buffering', active: true });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(player.getState()).toMatchObject({ status: 'paused', sleepAtMs: null });
+      expect(report).toHaveBeenLastCalledWith(expect.anything(), { episodeId: 'a', force: true });
+      player.setSleepTimer(1); player.destroy(); expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
   });
 });
 

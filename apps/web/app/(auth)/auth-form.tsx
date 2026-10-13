@@ -7,9 +7,12 @@ import { useRef, useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@cue/api-client';
 import Link from 'next/link';
+import type { MessageKey } from '@cue/i18n';
+import { useTranslator } from '@/components/i18n/locale-provider';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { api } from '@/lib/api';
+import { beginAccountTransition } from '@/lib/account';
 import { VerifyForm } from './verify-form';
 
 type Mode = 'signin' | 'signup';
@@ -23,24 +26,35 @@ type Mode = 'signin' | 'signup';
  */
 const EMAIL_NOT_VERIFIED = 'EMAIL_NOT_VERIFIED';
 
+/**
+ * What differs between the two modes, as catalog keys rather than as prose.
+ *
+ * The table stays — it is the thing that keeps sign-in and sign-up one
+ * component — but every string in it was English, so this whole screen rendered
+ * in one language in an app that ships four. Holding keys instead means the
+ * shape of the difference is still declared in one place and the words are
+ * still the translators'.
+ *
+ * `switchHref` is the one entry that is not a key: it is a route.
+ */
 const COPY = {
   signin: {
-    heading: 'Welcome back',
-    action: 'Sign in',
-    working: 'Signing in…',
-    switchText: 'New here?',
-    switchAction: 'Create an account',
+    heading: 'auth.signinHeading',
+    action: 'auth.signIn',
+    working: 'auth.signingIn',
+    switchText: 'auth.newHere',
+    switchAction: 'auth.signUp',
     switchHref: '/signup',
   },
   signup: {
-    heading: 'Make an account',
-    action: 'Create account',
-    working: 'Creating…',
-    switchText: 'Already have one?',
-    switchAction: 'Sign in',
+    heading: 'auth.signupHeading',
+    action: 'auth.createAccount',
+    working: 'auth.creating',
+    switchText: 'auth.alreadyHaveOne',
+    switchAction: 'auth.signIn',
     switchHref: '/signin',
   },
-} as const;
+} as const satisfies Record<Mode, { switchHref: string } & Record<string, MessageKey | string>>;
 
 /**
  * Sign in and sign up, sharing one form.
@@ -54,6 +68,7 @@ const COPY = {
  * scolding them for not having finished typing.
  */
 export function AuthForm({ mode }: { mode: Mode }) {
+  const t = useTranslator();
   const copy = COPY[mode];
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -103,6 +118,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
     setError(null);
 
     try {
+      beginAccountTransition(queryClient);
       if (mode === 'signup') {
         const created = await api.signUp(signUpInput.parse({ email, password, name }));
 
@@ -131,6 +147,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
       // The session cookie is set; anything cached for the previous (anonymous)
       // visitor is now wrong.
+      beginAccountTransition(queryClient);
       await queryClient.invalidateQueries({ queryKey: queryKeys.session });
       router.push('/library');
       router.refresh();
@@ -184,15 +201,17 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
   return (
     <form ref={formRef} onSubmit={onSubmit} noValidate className="w-full">
-      <h1 className="type-display m-0 text-[var(--color-text-primary)]">{copy.heading}</h1>
+      <h1 className="type-display m-0 text-[var(--color-text-primary)]">
+        {t.t(copy.heading)}
+      </h1>
       <p className="type-callout mt-2 mb-8 text-[var(--color-text-secondary)]">
-        Your library and your place in every episode, on every device.
+        {t.t('auth.lede')}
       </p>
 
       <div className="flex flex-col gap-4">
         {mode === 'signup' ? (
           <Field
-            label="Name"
+            label={t.t('auth.name')}
             name="name"
             value={name}
             onChange={(event) => setName(event.target.value)}
@@ -202,7 +221,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         ) : null}
 
         <Field
-          label="Email"
+          label={t.t('auth.email')}
           name="email"
           type="email"
           inputMode="email"
@@ -213,7 +232,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         />
 
         <Field
-          label="Password"
+          label={t.t('auth.password')}
           name="password"
           type="password"
           value={password}
@@ -222,7 +241,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
           // saved one on signin — the single highest-value attribute on this form.
           autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
           error={fieldErrors['password']}
-          {...(mode === 'signup' ? { hint: 'At least 8 characters.' } : {})}
+          {...(mode === 'signup' ? { hint: t.t('auth.passwordHint') } : {})}
         />
       </div>
 
@@ -237,17 +256,17 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
       <div className="mt-7">
         <Button type="submit" busy={busy}>
-          {busy ? copy.working : copy.action}
+          {t.t(busy ? copy.working : copy.action)}
         </Button>
       </div>
 
       <p className="type-callout mt-6 mb-0 text-[var(--color-text-secondary)]">
-        {copy.switchText}{' '}
+        {t.t(copy.switchText)}{' '}
         <Link
           href={copy.switchHref as never}
           className="text-[var(--color-accent-text)] underline decoration-[var(--color-border-strong)] underline-offset-4 hover:decoration-[var(--color-accent-text)]"
         >
-          {copy.switchAction}
+          {t.t(copy.switchAction)}
         </Link>
       </p>
     </form>

@@ -14,10 +14,7 @@ type ButtonProps = {
 /**
  * The one button.
  *
- * Press feedback is a 60ms scale to 0.97 — small enough that nobody would
- * describe it, absent enough that its removal makes the control feel dead.
- * That is the whole brief for a button: confirm the touch landed, then get out
- * of the way.
+ * A short press confirms the touch; release returns with the shared spring.
  *
  * A busy button keeps its label and its width. Swapping the text for a spinner
  * reflows the row and loses the one piece of information the user needs, which
@@ -41,9 +38,7 @@ export function Button({
     // 44px minimum target — below this a control is a bug on a touch device.
     'min-h-[44px] type-body-strong',
     'cursor-pointer select-none border',
-    'transition-[transform,background-color,border-color,opacity]',
-    'duration-[var(--duration-instant)] ease-standard',
-    'active:scale-[0.97]',
+    'cue-button',
     'disabled:cursor-not-allowed disabled:opacity-55 disabled:active:scale-100',
     // Motion-sensitive users keep the colour change and lose the squash.
     'motion-reduce:active:scale-100',

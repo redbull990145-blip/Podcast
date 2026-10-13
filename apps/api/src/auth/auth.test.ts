@@ -7,9 +7,11 @@
  * another's, no matter which transport they authenticate with.
  */
 
-import { podcasts } from '@cue/db';
+import { podcasts, sessions } from '@cue/db';
+import { eq } from 'drizzle-orm';
+import { createClient } from '@cue/api-client';
 import type { FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../config.ts';
 import { buildServer } from '../server.ts';
 
@@ -48,13 +50,45 @@ afterAll(async () => {
 });
 
 describe('sessions', () => {
+  it('distinguishes a temporary verification outage from an anonymous /me response', async () => {
+    const lookup = vi.spyOn(app.auth.api, 'getSession').mockRejectedValueOnce(new Error('Synthetic verification outage'));
+    try {
+      const response = await app.inject({ method: 'GET', url: '/me', headers: { authorization: 'Bearer synthetic-token' } });
+      expect(response.statusCode).toBe(502); expect(response.json().error.code).toBe('upstream_unavailable');
+      expect(response.headers['cache-control']).toBe('private, no-store');
+    } finally { lookup.mockRestore(); }
+  });
+  it('reports the actual resolved expiry and rejects that credential after expiry', async () => {
+    const account = await signUp('offline-expiry@example.com');
+    const [row] = await app.db.select().from(sessions).where(eq(sessions.userId, account.userId));
+    const verified = await app.inject({ method: 'GET', url: '/me', headers: { authorization: `Bearer ${account.token}` } });
+    expect(verified.json().data).toMatchObject({ user: { id: account.userId }, sessionExpiresAt: row!.expiresAt.toISOString() });
+    await app.db.update(sessions).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(sessions.userId, account.userId));
+    const expired = await app.inject({ method: 'GET', url: '/me', headers: { authorization: `Bearer ${account.token}` } });
+    expect(expired.json().data).toEqual({ user: null, sessionExpiresAt: null });
+  });
+  it('revokes the departing native session with the real bearer transport', async () => {
+    const a = await signUp('revoke-a@example.com');
+    const b = await signUp('revoke-b@example.com');
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      const result = await app.inject({ method: 'POST', url: new URL(url).pathname, headers: init.headers as Record<string, string>, payload: init.body as string });
+      return new Response(result.body, { status: result.statusCode });
+    }) as typeof fetch;
+    const client = createClient({ baseUrl: 'http://localhost:8080', getAuthToken: () => null, fetchImpl });
+    await client.signOut(a.token);
+    const aSession = await app.inject({ method: 'GET', url: '/me', headers: { authorization: `Bearer ${a.token}` } });
+    const bSession = await app.inject({ method: 'GET', url: '/me', headers: { authorization: `Bearer ${b.token}` } });
+    expect(aSession.json().data.user).toBeNull();
+    expect(bSession.json().data.user.id).toBe(b.userId);
+  });
   it('reports an anonymous caller rather than erroring', async () => {
     // "Are you signed in?" has a legitimate negative answer. Returning 401
     // would make every client treat a normal state as a failure.
     const response = await app.inject({ method: 'GET', url: '/me' });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ ok: true, data: { user: null } });
+    expect(response.json()).toEqual({ ok: true, data: { user: null, sessionExpiresAt: null } });
+    expect(response.headers['cache-control']).toBe('private, no-store');
   });
 
   it('authenticates the web client by cookie', async () => {
@@ -63,10 +97,12 @@ describe('sessions', () => {
     const response = await app.inject({
       method: 'GET',
       url: '/me',
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
 
     expect(response.json().data.user.id).toBe(userId);
+    expect(response.headers['x-cue-account-id']).toBe(userId);
+    expect(response.headers['cache-control']).toBe('private, no-store');
   });
 
   it('authenticates the Android client by bearer token', async () => {
@@ -121,6 +157,14 @@ describe('sessions', () => {
 });
 
 describe('subscriptions', () => {
+  it('rejects a cookie that changed accounts after the tab selected an action', async () => {
+    const a = await signUp('intent-a@example.com');
+    const b = await signUp('intent-b@example.com');
+    const response = await app.inject({ method: 'PUT', url: `/me/subscriptions/${podcastId}`, headers: { cookie: b.cookie, origin: app.config.corsOrigins[0], 'x-cue-account-id': a.userId } });
+    expect(response.statusCode).toBe(403);
+    const library = await app.inject({ method: 'GET', url: '/me/subscriptions', headers: { cookie: b.cookie } });
+    expect(library.json().data.items).toEqual([]);
+  });
   let podcastId: string;
 
   beforeAll(async () => {
@@ -149,10 +193,10 @@ describe('subscriptions', () => {
     await app.inject({
       method: 'PUT',
       url: `/me/subscriptions/${podcastId}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
 
-    const list = await app.inject({ method: 'GET', url: '/me/subscriptions', headers: { cookie } });
+    const list = await app.inject({ method: 'GET', url: '/me/subscriptions', headers: { origin: app.config.corsOrigins[0], cookie } });
     expect(list.json().data.items).toHaveLength(1);
     expect(list.json().data.items[0].title).toBe('Test Show');
   });
@@ -165,18 +209,18 @@ describe('subscriptions', () => {
     const first = await app.inject({
       method: 'PUT',
       url: `/me/subscriptions/${podcastId}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
     const second = await app.inject({
       method: 'PUT',
       url: `/me/subscriptions/${podcastId}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
 
     expect(first.statusCode).toBe(200);
     expect(second.statusCode).toBe(200);
 
-    const list = await app.inject({ method: 'GET', url: '/me/subscriptions', headers: { cookie } });
+    const list = await app.inject({ method: 'GET', url: '/me/subscriptions', headers: { origin: app.config.corsOrigins[0], cookie } });
     expect(list.json().data.items).toHaveLength(1);
   });
 
@@ -186,7 +230,7 @@ describe('subscriptions', () => {
     const response = await app.inject({
       method: 'DELETE',
       url: `/me/subscriptions/${podcastId}`,
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
 
     expect(response.statusCode).toBe(200);
@@ -199,7 +243,7 @@ describe('subscriptions', () => {
     const response = await app.inject({
       method: 'PUT',
       url: '/me/subscriptions/00000000-0000-4000-8000-000000000000',
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
 
     expect(response.statusCode).toBe(404);
@@ -211,7 +255,7 @@ describe('subscriptions', () => {
     const response = await app.inject({
       method: 'PUT',
       url: '/me/subscriptions/not-a-uuid',
-      headers: { cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie },
     });
 
     expect(response.statusCode).toBe(400);
@@ -226,13 +270,13 @@ describe('subscriptions', () => {
     await app.inject({
       method: 'PUT',
       url: `/me/subscriptions/${podcastId}`,
-      headers: { cookie: alice.cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie: alice.cookie },
     });
 
     const bobsLibrary = await app.inject({
       method: 'GET',
       url: '/me/subscriptions',
-      headers: { cookie: bob.cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie: bob.cookie },
     });
 
     expect(bobsLibrary.json().data.items).toEqual([]);
@@ -245,19 +289,19 @@ describe('subscriptions', () => {
     await app.inject({
       method: 'PUT',
       url: `/me/subscriptions/${podcastId}`,
-      headers: { cookie: carol.cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie: carol.cookie },
     });
 
     await app.inject({
       method: 'DELETE',
       url: `/me/subscriptions/${podcastId}`,
-      headers: { cookie: dave.cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie: dave.cookie },
     });
 
     const carolsLibrary = await app.inject({
       method: 'GET',
       url: '/me/subscriptions',
-      headers: { cookie: carol.cookie },
+      headers: { origin: app.config.corsOrigins[0], cookie: carol.cookie },
     });
 
     expect(carolsLibrary.json().data.items).toHaveLength(1);

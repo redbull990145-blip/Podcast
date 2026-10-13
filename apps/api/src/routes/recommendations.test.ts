@@ -97,7 +97,7 @@ async function listen(
   const response = await app.inject({
     method: 'PUT',
     url: `/me/progress/${episodeIds.get(title)![index]}`,
-    headers: { cookie },
+    headers: { origin: app.config.corsOrigins[0], cookie },
     payload: {
       positionSec: Math.round(3600 * (options.fraction ?? 0.9)),
       durationSec: 3600,
@@ -113,7 +113,7 @@ async function follow(title: string): Promise<void> {
   const response = await app.inject({
     method: 'PUT',
     url: `/me/subscriptions/${showIds.get(title)}`,
-    headers: { cookie },
+    headers: { origin: app.config.corsOrigins[0], cookie },
   });
 
   expect(response.statusCode).toBe(200);
@@ -131,7 +131,7 @@ async function rail(
   const response = await app.inject({
     method: 'GET',
     url: `/me/recommendations?limit=${limit}`,
-    headers: { cookie },
+    headers: { origin: app.config.corsOrigins[0], cookie },
   });
 
   expect(response.statusCode).toBe(200);

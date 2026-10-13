@@ -16,11 +16,7 @@ export function PodcastTile({ podcast, priority = false }: { podcast: Podcast; p
       href={`/podcast/${podcast.id}` as never}
       className="group block no-underline"
     >
-      {/* A 2px lift on hover — enough to say "this is the thing you are
-          pointing at" without the grid appearing to breathe. Gated on
-          `motion-reduce` because it is travel, and unlike Motion's inline
-          transforms a CSS class the media query can actually reach. */}
-      <div className="transition-transform duration-[var(--duration-fast)] ease-standard group-hover:-translate-y-0.5 group-active:translate-y-0 motion-reduce:transition-none motion-reduce:group-hover:translate-y-0">
+      <div className="cue-artwork-feedback">
         <Artwork
           src={podcast.artworkUrl}
           alt={podcast.title}

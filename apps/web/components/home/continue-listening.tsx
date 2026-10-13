@@ -18,6 +18,7 @@ import { Artwork } from '@/components/media/artwork';
 import { api } from '@/lib/api';
 import { usePressScale, useTransition } from '@/lib/motion';
 import { useFrameLoop } from '@/lib/player/frame-clock';
+import { continueListeningEntries, type ResumeEntry } from '@/lib/player/continue-listening';
 import { readPosition, usePlayerActions, usePlayerSelector } from '@/lib/player/store';
 import { useSession } from '@/lib/session';
 import { isLightNow, useThemeChoice } from '@/lib/theme';
@@ -52,8 +53,11 @@ export function ContinueListening() {
     staleTime: 30_000,
   });
 
-  const items = data?.items ?? [];
-  const [lead, ...rest] = items;
+  // Identity follows the same stable snapshot as the mini/full player. A
+  // progress write or a slow history response must never choose what is playing.
+  const current = usePlayerSelector((state) => state.current);
+  const liveDurationSec = usePlayerSelector((state) => state.durationSec);
+  const { lead, rest } = continueListeningEntries(data?.items ?? [], current, liveDurationSec);
 
   /*
     Reserve the space before knowing whether anything goes in it.
@@ -71,7 +75,7 @@ export function ContinueListening() {
     placeholder stands: guessing "signed out" there is how the shift comes back
     for exactly the people it was hurting.
   */
-  if (sessionLoading || (isSignedIn && isPending)) {
+  if (!lead && (sessionLoading || (isSignedIn && isPending))) {
     return <ContinueSkeleton />;
   }
 
@@ -155,7 +159,7 @@ function ContinueSkeleton() {
  * keeps this testable without a React tree.
  */
 function remainingOf(
-  entry: ContinueEntry,
+  entry: ResumeEntry,
   t: Translator,
 ): { left: string | null; fraction: number } {
   const total = entry.durationSec ?? entry.episode.durationSec;
@@ -176,7 +180,7 @@ function remainingOf(
  * spends thirty pixels of the narrowest layout in the app on decoration. On a
  * desktop the room exists and the panel earns its corners.
  */
-function ResumeHero({ entry }: { entry: ContinueEntry }) {
+function ResumeHero({ entry }: { entry: ResumeEntry }) {
   const t = useTranslator();
   const { play, playAt, toggle } = usePlayerActions();
   const { left, fraction } = remainingOf(entry, t);
@@ -230,7 +234,12 @@ function ResumeHero({ entry }: { entry: ContinueEntry }) {
     ? tintedScheme(entry.accentColor, isLight ? 'light' : 'dark')
     : null;
 
-  const playable = playableFromQueueEntry(entry);
+  const playable = {
+    ...entry.episode,
+    artworkUrl: entry.episode.artworkUrl ?? entry.podcastArtworkUrl,
+    podcastTitle: entry.podcastTitle,
+    accentColor: entry.accentColor,
+  };
 
   const press = usePressScale(0.97);
   const settle = useTransition('responsive');
@@ -331,6 +340,7 @@ function ResumeHero({ entry }: { entry: ContinueEntry }) {
           <div className="mt-5 max-w-[480px] md:mt-6">
             {isCurrent ? (
               <LiveProgress
+                key={entry.episode.id}
                 entry={entry}
                 playing={isPlaying}
                 fill={tint?.fill}
@@ -642,7 +652,7 @@ function LiveProgress({
   fill,
   fallbackFraction,
 }: {
-  entry: ContinueEntry;
+  entry: ResumeEntry;
   playing: boolean;
   fill?: string;
   /** Used until the engine has a position to give — a fresh tab resuming. */
@@ -663,10 +673,8 @@ function LiveProgress({
   const shownSecRef = useRef(-1);
 
   const write = useCallback(() => {
-    if (!total || total <= 0) return;
-
     const position = readPosition();
-    scaleX.set(Math.min(1, Math.max(0, position / total)));
+    scaleX.set(total && total > 0 ? Math.min(1, Math.max(0, position / total)) : 0);
 
     const whole = Math.floor(position);
     if (whole !== shownSecRef.current) {
@@ -675,13 +683,12 @@ function LiveProgress({
     }
   }, [total, scaleX]);
 
-  // See `LiveTrack`: the loop runs only while the playhead is actually moving,
-  // and a paused seek is picked up by the one-shot rather than by a loop that
-  // never sleeps.
-  useFrameLoop(Boolean(playing && total && total > 0), write);
+  // The clock remains useful even when a feed has no duration. The one-shot
+  // also initializes a newly selected episode and handles paused seeks.
+  useFrameLoop(playing, write);
 
   useEffect(() => {
-    if (!playing) write();
+    write();
   }, [playing, pausedPositionSec, write]);
 
   const left = total && total > 0 ? t.duration(Math.max(0, total - positionSec)) : null;

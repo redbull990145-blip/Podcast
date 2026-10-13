@@ -23,6 +23,7 @@
 import { hexToRgb, rgbToHex, rgbToOklab } from '@cue/design';
 import type { Palette, Swatch } from '@vibrant/color';
 import { checkUrl } from './url-guard.ts';
+import { fetchChecked } from './pinned-fetch.ts';
 import { SharpImage, Vibrant } from './vibrant.ts';
 
 /** Artwork is small; anything larger is not a cover. */
@@ -65,7 +66,7 @@ export type ExtractOptions = { fetchImpl?: typeof fetch };
  * Vibrant is handed the bytes this returns and never the URL. Its own loader
  * would fetch an `http://` source quite happily, and knows none of the above.
  */
-async function fetchArtwork(url: string, doFetch: typeof fetch): Promise<Buffer | null> {
+async function fetchArtwork(url: string, doFetch?: typeof fetch): Promise<Buffer | null> {
   let currentUrl = url;
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
@@ -74,11 +75,11 @@ async function fetchArtwork(url: string, doFetch: typeof fetch): Promise<Buffer 
 
     let response: Response;
     try {
-      response = await doFetch(check.url.href, {
+      response = await fetchChecked(check, {
         signal: AbortSignal.timeout(TIMEOUT_MS),
         headers: { 'user-agent': USER_AGENT, accept: 'image/*' },
         redirect: 'manual',
-      });
+      }, doFetch);
     } catch {
       return null;
     }
@@ -94,9 +95,9 @@ async function fetchArtwork(url: string, doFetch: typeof fetch): Promise<Buffer 
     if (!response.ok) return null;
 
     const declared = Number(response.headers.get('content-length') ?? '0');
-    if (declared > MAX_BYTES) return null;
+    if (declared > MAX_BYTES) { await response.body?.cancel(); return null; }
 
-    return readCappedImage(response);
+    try { return await readCappedImage(response); } catch { return null; }
   }
 
   return null;
@@ -259,7 +260,7 @@ export async function extractArtworkColor(
 ): Promise<string | null> {
   if (!artworkUrl) return null;
 
-  const doFetch = options.fetchImpl ?? fetch;
+  const doFetch = options.fetchImpl;
 
   // Artwork is decoration. A CDN being slow — or a URL the SSRF guard refuses —
   // must never fail an ingest that otherwise succeeded, so any problem here is

@@ -4,7 +4,9 @@ import { formatTimestamp } from '@cue/core';
 import { useMotionValue } from 'motion/react';
 import * as m from 'motion/react-m';
 import { useEffect, useRef, useState } from 'react';
+import { useTranslator } from '@/components/i18n/locale-provider';
 import { useFrameLoop } from '@/lib/player/frame-clock';
+import { usePlaybackPreferences } from '@/lib/player/preferences';
 import { readPosition, usePlayerActions } from '@/lib/player/store';
 
 /**
@@ -44,7 +46,10 @@ export function ProgressBar({
    */
   inline?: boolean;
 }) {
+  const t = useTranslator();
   const { seek } = usePlayerActions();
+  /* The same intervals the skip buttons move by — see below. */
+  const preferences = usePlaybackPreferences();
   const trackRef = useRef<HTMLDivElement>(null);
 
   const progress = useMotionValue(0);
@@ -111,7 +116,7 @@ export function ProgressBar({
       <div
         ref={trackRef}
         role="slider"
-        aria-label="Seek"
+        aria-label={t.t('player.seek')}
         aria-valuemin={0}
         aria-valuemax={durationSec ?? 0}
         aria-valuenow={Math.round(scrubbing ?? elapsed)}
@@ -120,10 +125,15 @@ export function ProgressBar({
         aria-disabled={!seekable}
         onKeyDown={(event) => {
           if (!seekable) return;
-          // Keyboard seeking in the same increments as the skip controls, so
-          // the two agree about what "a step" means.
-          if (event.key === 'ArrowRight') seek(readPosition() + 30);
-          if (event.key === 'ArrowLeft') seek(readPosition() - 15);
+          /*
+            The same increments as the skip controls — which is what the comment
+            here always claimed and what the code did not do. These were literal
+            30 and 15 while the buttons beside them moved by the listener's own
+            interval, so choosing 10s back in Settings left the keyboard still
+            jumping 15 and the two controls disagreeing about what a step is.
+          */
+          if (event.key === 'ArrowRight') seek(readPosition() + preferences.skipForwardSec);
+          if (event.key === 'ArrowLeft') seek(readPosition() - preferences.skipBackSec);
         }}
         onPointerDown={(event) => {
           if (!seekable) return;

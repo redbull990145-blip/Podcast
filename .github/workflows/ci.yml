@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -80,6 +83,18 @@ jobs:
       # to `http://localhost:8080`, and `apiOrigin()` in next.config.ts returns
       # null, which silently narrows the service worker's CSP to `'self'` and
       # stops it caching anything from the API.
+      - name: Validate deployment inputs without printing credentials
+        env:
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          for name in NEXT_PUBLIC_API_URL CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Required deployment input $name is unavailable."
+              exit 1
+            fi
+          done
       - run: npm run deploy --workspace @cue/web
         env:
           NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
