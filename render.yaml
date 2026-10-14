@@ -29,6 +29,13 @@ services:
       - key: NODE_ENV
         value: production
 
+      # Clear legacy hop-count settings retained by existing services. A
+      # positive hop count without verified proxy addresses stops startup.
+      # Zero keeps forwarding headers untrusted unless an address allowlist
+      # is explicitly configured below.
+      - key: TRUST_PROXY_HOPS
+        value: '0'
+
       # Set only provider-verified IP addresses/CIDRs. Hop counts cannot prove
       # proxy identity. With no addresses the API ignores forwarding headers.
       # This local declaration does not establish Render's proxy addresses.

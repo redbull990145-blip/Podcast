@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+# Exact public encryption-test fixtures, never deployment credentials.
+# Keep both the filename and literal value constrained; do not exclude tests.
+[[allowlists]]
+description = "Fixed public encryption-test data in current and historical tests"
+condition = "AND"
+paths = ['''(?:^|[/\\])(?:apps[/\\]api[/\\]src[/\\]ai[/\\]crypto\.test\.ts|lib[/\\]crypto[/\\]api-keys\.test\.ts)$''']
+regexTarget = "secret"
+regexes = ['''^(?:v9dKq2mA0pR7wZ4sT1uYx6Nb3EcHjLg8|sk-test-abcdef1234567890)$''']

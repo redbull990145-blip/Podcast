@@ -11,7 +11,8 @@ import {
 } from '@/components/home/latest-episodes';
 import { RecentlyPlayed } from '@/components/home/recently-played';
 import { Recommended } from '@/components/home/recommended';
-import { catalogue, ApiClientError } from '@/lib/api';
+import { ApiClientError } from '@/lib/api';
+import { catalogue } from '@/lib/catalogue';
 import { getTranslator } from '@/lib/i18n';
 import { PageShell } from '@/components/ui/page-shell';
 import { Button } from '@/components/ui/button';
@@ -58,7 +59,7 @@ import { EmptyState } from '@/components/ui/empty-state';
   definition, so the segment config was inert and the page re-fetched the
   catalogue on every single visit.
 
-  The 300 seconds now lives on the `catalogue` client in lib/api.ts, which
+  The 300 seconds now lives on the `catalogue` client in lib/catalogue.ts, which
   caches at the fetch layer instead. That layer is not affected by the route
   being dynamic, so the caching the number always described actually happens.
 */

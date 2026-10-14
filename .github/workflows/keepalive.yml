@@ -1,67 +1,33 @@
 name: Keepalive
 
-# This job calls only the public API and does not need a GitHub credential.
-permissions: {}
+# Checkout needs read access; the probe calls only the public readiness URL.
+permissions:
+  contents: read
 
-# Supabase pauses a free-tier project after 7 days with no activity, and
-# unpausing is a manual click in their dashboard. A read every few days costs
-# nothing and keeps the project awake.
 on:
   schedule:
-    # 06:00 UTC, twice a week — comfortably inside the 7-day window even if a
-    # run is skipped, which GitHub does on repositories with no recent pushes.
-    - cron: '0 6 * * 1,4'
-    # Every 10 minutes, for Render rather than Supabase. A free Render service
-    # sleeps after ~15 idle minutes and takes tens of seconds to wake, which
-    # arrives as a request that hangs or 503s — the first person to open the app
-    # after a quiet spell pays for it, and it reads as the app being broken.
-    #
-    # This reduces cold starts; it cannot remove them. GitHub delays and drops
-    # scheduled runs when its shared runners are busy, and explicitly does not
-    # guarantee the interval. A paid instance that never sleeps is the only
-    # complete fix.
-    - cron: '*/10 * * * *'
+    # Readiness touches Postgres as well as waking Render. Run off the busy
+    # hour boundary. GitHub can delay or skip runs, so this reduces cold starts
+    # without guaranteeing an always-awake API.
+    - cron: '7,17,27,37,47,57 * * * *'
   workflow_dispatch:
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
 
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 6
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - name: Touch the database
         env:
-          API_URL: ${{ secrets.API_URL }}
-        run: |
-          # Fails the run rather than skipping it.
-          #
-          # This used to `exit 0` with a note, which meant a keepalive with no
-          # `API_URL` secret reported success on every one of its runs while
-          # doing nothing at all — the one failure mode you cannot notice,
-          # because the workflow's whole job is to be invisible when it works.
-          # Measured 2026-08-23: the API answered its first request in 52.9s,
-          # a cold start this workflow exists to prevent, with a green tick on
-          # every scheduled run behind it.
-          #
-          # A red X on a repository you own is the cheapest possible alarm. If
-          # you are reading this in a fork and do not want the noise, delete
-          # the workflow rather than restore the silent pass.
-          if [ -z "$API_URL" ]; then
-            echo "::error::API_URL secret is not set — this keepalive is doing nothing."
-            echo "Set it to the API's base URL (no trailing slash), e.g. https://podcast-68rl.onrender.com"
-            echo "Without it: Render sleeps after ~15 idle minutes (~50s cold start for the"
-            echo "next visitor), and a free Supabase project pauses after 7 idle days."
-            exit 1
-          fi
-
-          # /health/ready runs a real query, which is what counts as activity.
-          # /health would not touch Postgres at all.
-          status=$(curl --silent --show-error --max-time 30 \
-            --output /tmp/body --write-out '%{http_code}' \
-            "$API_URL/health/ready")
-
-          cat /tmp/body
-          echo
-
-          if [ "$status" != "200" ]; then
-            echo "Readiness check returned $status"
-            exit 1
-          fi
+          # Public URLs can be repository variables. The default applies only
+          # to this repository; forks must configure their own API endpoint.
+          API_URL: ${{ vars.API_URL || vars.NEXT_PUBLIC_API_URL || secrets.API_URL || (github.repository == 'redbull990145-blip/Podcast' && 'https://podcast-68rl.onrender.com') || '' }}
+        run: node scripts/keepalive.mjs

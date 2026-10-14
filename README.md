@@ -45,9 +45,11 @@ npm install
 printf 'DATABASE_URL=pglite://.pglite-dev\nNEXT_PUBLIC_API_URL=http://localhost:8080\n' > .env
 ```
 
-`pglite://` runs Postgres in-process against a local directory. It applies its
-own migrations on first boot, so there is nothing to set up. Fill it with real
-podcasts:
+`pglite://` runs Postgres in-process against a local directory. Review the
+pending SQL in `packages/db/migrations` and approve it for that directory before
+setting `PGLITE_AUTO_MIGRATE=true` in your local environment. Persistent local
+data stays protected until that explicit opt-in; tests use disposable memory
+databases. After approval, startup applies migrations. Fill it with real podcasts:
 
 ```bash
 npm run seed -w @cue/api
@@ -103,6 +105,23 @@ Search and trending additionally need `PODCASTINDEX_KEY` and
 search returns a clear "not configured" error rather than failing obscurely.
 See `.env.example` for where each value comes from.
 
+## Protecting secrets
+
+`.env.example` contains placeholders only. Real `.env*` files, local databases,
+credentials and build output stay ignored; configure production secrets in the
+hosting provider's secret settings. Only API/web base URLs use `NEXT_PUBLIC_`
+or `EXPO_PUBLIC_`. Never give an operator key, password or token either prefix.
+The web catalogue client lives in `lib/catalogue.ts` with a `server-only`
+boundary; browser components use `lib/api.ts`.
+
+CI checks tracked private-file paths, scans the available Git history using
+checksum-verified Gitleaks, and scans generated public browser assets. Findings
+are fully redacted in logs. The scanner allows only exact public encryption-test
+fixtures in their exact test files. Run `node scripts/check-public-files.mjs`
+before committing; it reports filenames and reasons without file contents.
+See [the secret exposure verification](docs/secret-exposure-verification.md)
+for the measured scope and results.
+
 ## Deploying
 
 The two halves deploy to two places, because they are two different shapes of
@@ -151,6 +170,14 @@ The Durable Object backing the revalidation queue is declared by the
 present and nothing special is needed. Fill in the values `render.yaml` declares
 with `sync: false`.
 
+For an existing Render service, clear legacy `TRUST_PROXY_HOPS` by setting it
+to `0` in the live environment as well as the Blueprint. A positive hop count
+without verified `TRUST_PROXY_ADDRESSES` prevents startup. Configure only verified
+proxy addresses; with no allowlist, the API ignores forwarding headers and
+proxy traffic can share an IP rate limit. Verify the new deployment's commit
+and both `/health` and `/health/ready`, since an unsuccessful deploy can leave
+an older healthy version serving.
+
 The two must agree on each other's addresses, and getting this wrong fails
 *silently* — as a CORS error in the browser console, not as a failed deploy:
 
@@ -170,6 +197,20 @@ necessarily `SameSite=None; Secure`, which the API already sets when
 happily without them, but rate limiting is disabled entirely when they are
 absent — including the throttle that stands between the sign-in endpoint and an
 online password-guessing attack.
+
+### Keepalive
+
+The scheduled workflow requests `/health/ready`, which verifies the API and
+database. Set repository variable `API_URL` or `NEXT_PUBLIC_API_URL` to your
+HTTPS API base URL. The existing `API_URL` secret remains supported. This
+repository defaults to `https://podcast-68rl.onrender.com`; forks must configure
+their own endpoint. Three attempts with a 90-second timeout accommodate Render
+cold starts; permanent HTTP errors and invalid readiness responses still fail.
+Logs omit endpoint values and response bodies. GitHub can delay scheduled runs,
+so this reduces cold starts without guaranteeing continuous availability.
+
+See [the deployment failure investigation](docs/deployment-failure-verification.md)
+for the Keepalive configuration failure and Render startup repair.
 
 ### Transcription runs in a worker
 

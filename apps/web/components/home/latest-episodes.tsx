@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { Artwork } from '@/components/media/artwork';
 import { PlayButton } from '@/components/episode/play-button';
 import { PagedRail } from '@/components/ui/paged-rail';
-import { catalogue } from '@/lib/api';
+import { catalogue } from '@/lib/catalogue';
 import { getTranslator } from '@/lib/i18n';
 
 /** How many shows to ask, and how many picks to keep. */

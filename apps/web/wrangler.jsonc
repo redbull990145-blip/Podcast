@@ -58,7 +58,7 @@
    * the `revalidate` exports on the home, podcast and episode pages were inert
    * anyway. That was true, and it is no longer: those exports have been
    * removed, and the caching they were reaching for now lives on the
-   * `catalogue` client in lib/api.ts, which asks for `next: { revalidate: 300 }`
+   * `catalogue` client in lib/catalogue.ts, which asks for `next: { revalidate: 300 }`
    * on every public catalogue read.
    *
    * Without a bucket bound, the adapter's incremental cache defaults to
