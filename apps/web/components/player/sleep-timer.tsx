@@ -188,7 +188,7 @@ export function SleepTimerButton({
           which is what keeps the armed state readable to somebody who does not
           separate the two fills. */}
       {armed && minutesLeft !== null ? (
-        <span className="type-timecode leading-none">{minutesLeft}</span>
+        <span className="cue-button type-timecode leading-none">{minutesLeft}</span>
       ) : null}
     </button>
   );

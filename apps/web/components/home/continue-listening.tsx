@@ -8,15 +8,14 @@ import { useTranslator } from '@/components/i18n/locale-provider';
 import { colorVarStyle, deriveTint, tintedScheme } from '@cue/design';
 import type { ContinueEntry } from '@cue/types';
 import { useQuery } from '@tanstack/react-query';
-import { duration } from '@cue/motion';
-import { animate, AnimatePresence, useMotionValue, useReducedMotion } from 'motion/react';
+import { animate, useMotionValue } from 'motion/react';
 import * as m from 'motion/react-m';
 import type { Route } from 'next';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Artwork } from '@/components/media/artwork';
 import { api } from '@/lib/api';
-import { usePressScale, useTransition } from '@/lib/motion';
+import { usePrefersReducedMotion, usePressScale, useTransition } from '@/lib/motion';
 import { useFrameLoop } from '@/lib/player/frame-clock';
 import { continueListeningEntries, type ResumeEntry } from '@/lib/player/continue-listening';
 import { readPosition, usePlayerActions, usePlayerSelector } from '@/lib/player/store';
@@ -243,39 +242,33 @@ function ResumeHero({ entry }: { entry: ResumeEntry }) {
 
   const press = usePressScale(0.97);
   const settle = useTransition('responsive');
-  const reduced = useReducedMotion();
+  const reduced = usePrefersReducedMotion();
 
-  /**
-   * A pop on the button itself, every time play/pause flips.
-   *
-   * Driven from a motion value rather than declared as an `animate` prop,
-   * because it has to re-run on a change that does not alter the value it
-   * animates: the button ends at scale 1 either way, so a declarative
-   * `animate={{ scale: 1 }}` has nothing to transition and simply never fires.
-   * Firing it imperatively is what makes the second press feel like the first.
-   *
-   * Skipped on mount. A hero that flinches as the page settles is the app
-   * reacting to its own arrival, and the listener did nothing.
-   */
+  // Feedback belongs to this control's activation, not shared playback state.
   const pop = useMotionValue(1);
-  const popped = useRef(false);
-
+  const [activation, setActivation] = useState(0);
+  const popAnimation = useRef<ReturnType<typeof animate> | null>(null);
   useEffect(() => {
-    if (!popped.current) {
-      popped.current = true;
-      return;
+    if (reduced) {
+      popAnimation.current?.stop();
+      pop.set(1);
     }
+    return () => popAnimation.current?.stop();
+  }, [pop, reduced]);
 
-    if (reduced) return;
-
-    const controls = animate(pop, [1, 0.92, 1.05, 1], {
-      duration: 0.42,
-      times: [0, 0.18, 0.55, 1],
-      ease: 'easeOut',
-    });
-
-    return () => controls.stop();
-  }, [isPlaying, pop, reduced]);
+  function activate() {
+    setActivation((value) => value + 1);
+    popAnimation.current?.stop();
+    if (!reduced) {
+      popAnimation.current = animate(pop, [1, 0.94, 1.035, 1], {
+        duration: 0.32,
+        times: [0, 0.2, 0.6, 1],
+        ease: 'easeOut',
+      });
+    }
+    if (isCurrent) toggle();
+    else void play(playable, entry);
+  }
 
   return (
     <article
@@ -373,61 +366,32 @@ function ResumeHero({ entry }: { entry: ResumeEntry }) {
             */}
             <m.button
               type="button"
-              onClick={() => (isCurrent ? toggle() : void play(playable))}
+              onClick={activate}
               whileTap={{ scale: press }}
               transition={settle}
               style={{ scale: pop }}
               className="flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-2.5 rounded-full border-0 bg-[var(--color-ink)] px-6 type-body-strong text-[var(--color-text-on-ink)] hover:opacity-90 sm:flex-none"
             >
-              {/*
-                The glyph is swapped, not redrawn — and the swap has to be big
-                enough to see.
-
-                The first version of this scaled and rotated the mark a little
-                and was genuinely imperceptible, for a reason worth writing
-                down: the glyph is twelve pixels tall. A 0.6 scale change on a
-                12px object is a seven-pixel movement, over in a fifth of a
-                second, on the thing your own finger is covering at the moment
-                it happens. The physics were right and there was nothing to
-                look at.
-
-                So the motion is carried by things that are *not* the glyph. A
-                ring expands out from under it, at a size the button itself
-                does not have, which puts movement outside the area the cursor
-                hides. The mark makes a full quarter-turn rather than a nudge,
-                and the pair of them pop the whole cluster slightly past its
-                resting size on the way back — see `pop` above.
-              */}
               <span className="relative grid h-5 w-5 shrink-0 place-items-center">
-                {/* The ring. Keyed so a fresh one runs on every toggle, and
-                    `pointer-events-none` because it briefly covers the button
-                    it belongs to. */}
-                <AnimatePresence initial={false}>
+                {activation > 0 && !reduced ? (
                   <m.span
-                    key={`ring-${isPlaying}`}
+                    key={`ring-${activation}`}
                     aria-hidden="true"
-                    initial={{ scale: 0.2, opacity: 0.55 }}
-                    animate={{ scale: 2.6, opacity: 0 }}
-                    transition={{ duration: 0.55, ease: 'easeOut' }}
-                    className="pointer-events-none absolute inset-0 col-start-1 row-start-1 rounded-full border-2 border-current"
+                    initial={{ scale: 0.4, opacity: 0.45 }}
+                    animate={{ scale: 2.2, opacity: 0 }}
+                    transition={{ duration: 0.4, ease: 'easeOut' }}
+                    className="pointer-events-none absolute inset-0 rounded-full border-2 border-current"
                   />
-                </AnimatePresence>
-
-                <AnimatePresence mode="popLayout" initial={false}>
-                  <m.span
-                    key={isPlaying ? 'pause' : 'play'}
-                    initial={{ scale: 0, opacity: 0, rotate: -90 }}
-                    animate={{ scale: 1, opacity: 1, rotate: 0 }}
-                    exit={{ scale: 0, opacity: 0, rotate: 90 }}
-                    // Sprung on scale and rotation, tweened on opacity: the
-                    // motion package's rule, and the reason this settles with
-                    // weight rather than easing flatly to a stop.
-                    transition={{ ...settle, opacity: { duration: duration.fast / 1000 } }}
-                    className="col-start-1 row-start-1 flex"
-                  >
-                    {isPlaying ? <PauseGlyph /> : <PlayGlyph />}
-                  </m.span>
-                </AnimatePresence>
+                ) : null}
+                <m.span
+                  key={activation}
+                  initial={activation > 0 && !reduced ? { scale: 0.65, rotate: -25 } : false}
+                  animate={{ scale: 1, rotate: 0 }}
+                  transition={settle}
+                  className="flex"
+                >
+                  {isPlaying ? <PauseGlyph /> : <PlayGlyph />}
+                </m.span>
               </span>
 
               {/* The word changes with the glyph and is deliberately not
@@ -508,11 +472,11 @@ function ProgressCard({ entry }: { entry: ContinueEntry }) {
       <div className="mt-auto flex items-center gap-3">
         <button
           type="button"
-          onClick={() => (isCurrent ? toggle() : void play(playableFromQueueEntry(entry)))}
+          onClick={() => (isCurrent ? toggle() : void play(playableFromQueueEntry(entry), entry))}
           aria-label={
             isPlaying ? t.t('episode.pause') : t.t('home.resume', { title: entry.episode.title })
           }
-          className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-[var(--color-ink)] text-[var(--color-text-on-ink)] transition-[transform,opacity] duration-[var(--duration-instant)] ease-standard hover:opacity-90 active:scale-[0.97] motion-reduce:active:scale-100"
+          className="cue-button flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-[var(--color-ink)] text-[var(--color-text-on-ink)] transition-[transform,opacity] duration-[var(--duration-instant)] ease-standard hover:opacity-90 active:scale-[0.97] motion-reduce:active:scale-100"
         >
           {isPlaying ? <PauseGlyph /> : <PlayGlyph />}
         </button>

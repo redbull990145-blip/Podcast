@@ -9,6 +9,7 @@ import { useHydrated } from '@/lib/hydrated';
 import { usePressScale, useTransition } from '@/lib/motion';
 import { usePlayerActions, usePlayerSelector } from '@/lib/player/store';
 import { useSession } from '@/lib/session';
+import { useEpisodeResume } from './listening-state';
 
 /**
  * Play an episode from a list.
@@ -47,6 +48,7 @@ export function PlayButton({
 }) {
   const t = useTranslator();
   const actions = usePlayerActions();
+  const knownProgress = useEpisodeResume(episode.id);
   const router = useRouter();
   const { isSignedIn, isLoading } = useSession();
   const press = usePressScale(0.9);
@@ -101,6 +103,8 @@ export function PlayButton({
   return (
     <m.button
       type="button"
+      onPointerEnter={() => { if (!locked && !isCurrent && knownProgress === undefined) actions.warm(episode.id); }}
+      onFocus={() => { if (!locked && !isCurrent && knownProgress === undefined) actions.warm(episode.id); }}
       onClick={() => {
         if (locked) {
           router.push('/signin');
@@ -112,7 +116,7 @@ export function PlayButton({
           actions.toggle();
           return;
         }
-        void actions.play(playable);
+        void actions.play(playable, knownProgress);
       }}
       /* The title is a parameter rather than a template literal, so the words
          around it can sit wherever the language puts them. Built in English

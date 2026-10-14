@@ -217,7 +217,7 @@ export function UpNext() {
               type="button"
               onClick={() => setDismissed(currentId)}
               aria-label={t.t('common.dismiss')}
-              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-[var(--color-text-tertiary)] transition-[transform,background-color,color] duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] active:scale-[0.94] motion-reduce:active:scale-100"
+              className="cue-button flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-[var(--color-text-tertiary)] transition-[transform,background-color,color] duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] active:scale-[0.94] motion-reduce:active:scale-100"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
                 <path d="M6 6l12 12M18 6L6 18" />

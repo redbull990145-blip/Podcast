@@ -1,7 +1,7 @@
 'use client';
 
 import { formatTimestamp } from '@cue/core';
-import { useMotionValue } from 'motion/react';
+import { useMotionValue, useTransform } from 'motion/react';
 import * as m from 'motion/react-m';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslator } from '@/components/i18n/locale-provider';
@@ -53,6 +53,8 @@ export function ProgressBar({
   const trackRef = useRef<HTMLDivElement>(null);
 
   const progress = useMotionValue(0);
+  const thumbX = useTransform(progress, (value) => `${value * 100}%`);
+  const scrubbingRef = useRef<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [scrubbing, setScrubbing] = useState<number | null>(null);
 
@@ -67,7 +69,7 @@ export function ProgressBar({
   const lastLabelRef = useRef(0);
 
   useFrameLoop(isPlaying && durationSec !== null && durationSec > 0, (timestamp) => {
-    if (durationSec === null || durationSec <= 0) return;
+    if (durationSec === null || durationSec <= 0 || scrubbingRef.current !== null) return;
 
     const position = readPosition();
     progress.set(Math.min(1, position / durationSec));
@@ -93,6 +95,7 @@ export function ProgressBar({
     if (!track || durationSec === null) return null;
 
     const rect = track.getBoundingClientRect();
+    if (rect.width <= 0) return null;
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     return ratio * durationSec;
   }
@@ -132,28 +135,66 @@ export function ProgressBar({
             interval, so choosing 10s back in Settings left the keyboard still
             jumping 15 and the two controls disagreeing about what a step is.
           */
-          if (event.key === 'ArrowRight') seek(readPosition() + preferences.skipForwardSec);
-          if (event.key === 'ArrowLeft') seek(readPosition() - preferences.skipBackSec);
+          let next: number;
+          if (event.key === 'ArrowRight') next = readPosition() + preferences.skipForwardSec;
+          else if (event.key === 'ArrowLeft') next = readPosition() - preferences.skipBackSec;
+          else if (event.key === 'Home') next = 0;
+          else if (event.key === 'End') next = durationSec!;
+          else return;
+          event.preventDefault();
+          next = Math.max(0, Math.min(durationSec!, next));
+          seek(next);
+          progress.set(next / durationSec!);
+          setElapsed(next);
         }}
         onPointerDown={(event) => {
-          if (!seekable) return;
+          if (!seekable || event.button !== 0) return;
+          event.preventDefault();
+          event.currentTarget.focus();
           event.currentTarget.setPointerCapture(event.pointerId);
           const next = positionFromPointer(event.clientX);
-          if (next !== null) setScrubbing(next);
-        }}
-        onPointerMove={(event) => {
-          if (scrubbing === null) return;
-          const next = positionFromPointer(event.clientX);
-          if (next !== null) setScrubbing(next);
-        }}
-        onPointerUp={() => {
-          if (scrubbing !== null) {
-            seek(scrubbing);
-            setScrubbing(null);
+          if (next !== null) {
+            scrubbingRef.current = next;
+            setScrubbing(next);
+            progress.set(next / durationSec!);
           }
         }}
+        onPointerMove={(event) => {
+          if (scrubbingRef.current === null) return;
+          const next = positionFromPointer(event.clientX);
+          if (next !== null) {
+            scrubbingRef.current = next;
+            setScrubbing(next);
+            progress.set(next / durationSec!);
+          }
+        }}
+        onPointerUp={(event) => {
+          if (scrubbingRef.current === null) return;
+          const next = positionFromPointer(event.clientX) ?? scrubbingRef.current;
+          scrubbingRef.current = null;
+          seek(next);
+          progress.set(next / durationSec!);
+          setElapsed(next);
+          setScrubbing(null);
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }}
+        onLostPointerCapture={() => {
+          scrubbingRef.current = null;
+          setScrubbing(null);
+          const position = readPosition();
+          if (durationSec) progress.set(position / durationSec);
+          setElapsed(position);
+        }}
+        onPointerCancel={() => {
+          scrubbingRef.current = null;
+          setScrubbing(null);
+          const position = readPosition();
+          if (durationSec) progress.set(position / durationSec);
+          setElapsed(position);
+        }}
+        data-dragging={scrubbing !== null || undefined}
         className={[
-          'group relative w-full min-w-0 cursor-pointer touch-none',
+          'cue-slider group relative w-full min-w-0 cursor-pointer touch-none',
           // A thin bar with a tall hit area: thin enough to be chrome, tall
           // enough to grab. Making the visible bar itself 16px would be a
           // ribbon across the player.
@@ -192,10 +233,15 @@ export function ProgressBar({
           <m.div
             className="h-full w-full origin-left rounded-full bg-[var(--color-text-primary)]"
             style={{
-              scaleX: scrubbing !== null && durationSec ? scrubbing / durationSec : progress,
+              scaleX: progress,
             }}
           />
         </div>
+        {seekable && !compact ? (
+          <m.div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-1/2" style={{ x: thumbX }}>
+            <span className="cue-slider-thumb" />
+          </m.div>
+        ) : null}
       </div>
 
       {inline ? (

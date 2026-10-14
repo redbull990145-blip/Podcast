@@ -117,7 +117,7 @@ function ShowPicker({ onPick }: { onPick: (podcast: LibraryPodcast) => void }) {
           <button
             type="button"
             onClick={() => onPick(show)}
-            className="flex w-full min-h-14 cursor-pointer items-center gap-3 rounded-[var(--radius-sm)] border-none bg-transparent px-2 text-start transition-colors hover:bg-[var(--color-surface-hover)]"
+            className="cue-button flex w-full min-h-14 cursor-pointer items-center gap-3 rounded-[var(--radius-sm)] border-none bg-transparent px-2 text-start transition-colors hover:bg-[var(--color-surface-hover)]"
           >
             <Artwork src={show.artworkUrl} alt={show.title} size={40} />
             <span className="type-body clamp-1 flex-1 text-[var(--color-text-primary)]">
@@ -194,7 +194,7 @@ function EpisodePicker({
       <button
         type="button"
         onClick={onBack}
-        className="type-caption mb-2 flex min-h-9 cursor-pointer items-center gap-1 border-none bg-transparent px-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+        className="cue-button type-caption mb-2 flex min-h-9 cursor-pointer items-center gap-1 border-none bg-transparent px-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
       >
         <svg
           width="14"

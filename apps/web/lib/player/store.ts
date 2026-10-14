@@ -18,6 +18,7 @@ import { currentFrameStamp } from './frame-clock';
 import { readPreferences, writePreferences } from './preferences';
 import { WebAudioEngine } from './web-engine';
 import { holdWebProgress } from './progress-sync';
+import { knownResumeProgress, readResumeProgress, rememberProgress } from './resume-progress';
 
 /**
  * The player singleton.
@@ -95,6 +96,7 @@ function reportProgress(episodeId: string, record: ProgressRecord, force: boolea
   // leave `lastWrite` set and swallow the first real write after a sign-in.
   if (!canSync()) return;
 
+  rememberProgress(episodeId, record);
   const now = Date.now();
   if (!force && now - lastWrite < PROGRESS_INTERVAL_MS) return;
   lastWrite = now;
@@ -385,32 +387,24 @@ export function usePlayerSelector<T>(selector: (state: PlayerState) => T): T {
  * child without it going stale, because it never changes identity at all.
  */
 const playerActions = {
-    play: async (episode: PlayableEpisode) => {
+    warm: (episodeId: string) => {
+      if (canSync()) void readResumeProgress(episodeId);
+    },
+    play: async (episode: PlayableEpisode, knownProgress?: { positionSec: number; durationSec: number | null; completed?: boolean; updatedAt?: string | number } | null) => {
       const intent = ++playIntent;
       const owner = accountScope.snapshot();
       const player = getPlayer();
-      // Resume where this listener left off, reconciled server-side. There is
-      // nothing stored for an anonymous listener, so the lookup is skipped
-      // rather than sent and refused.
+      if (player.getState().current?.id === episode.id && player.getState().status !== 'error') {
+        if (player.getState().status !== 'loading') await player.resume();
+        return;
+      }
+      // Home already knows the resume point. Other controls warm this lookup
+      // on hover/focus; a cold lookup can delay startup by at most 200ms.
       let resumeFrom: ProgressRecord | null = null;
       if (canSync()) {
-        try {
-          const { progress } = await api.getProgress(episode.id);
-          if (progress) {
-            resumeFrom = {
-              positionSec: progress.positionSec,
-              durationSec: progress.durationSec,
-              completed: progress.completed,
-              deviceId: progress.deviceId,
-              updatedAt: new Date(progress.updatedAt).getTime(),
-            };
-          }
-        } catch {
-          // The request failed. Starting from the beginning is the right
-          // fallback — better than refusing to play.
-        }
+        if (knownProgress === undefined) resumeFrom = await readResumeProgress(episode.id);
+        else resumeFrom = knownResumeProgress(episode.id, knownProgress);
       }
-
       if (intent === playIntent && accountScope.matches(owner)) await player.play(episode, resumeFrom);
     },
     /**
@@ -424,7 +418,7 @@ const playerActions = {
       playIntent += 1;
       await getPlayer().playAt(episode, positionSec);
     },
-    toggle: () => void getPlayer().toggle(),
+    toggle: () => { playIntent += 1; void getPlayer().toggle(); },
     pause: () => { playIntent += 1; getPlayer().pause(); },
     // Every deliberate move of the playhead re-anchors the smoothing model.
     // Without it a small backwards seek is indistinguishable from drift.

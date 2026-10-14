@@ -181,7 +181,7 @@ function Sheet({ episodeId }: { episodeId: string }) {
                   type="button"
                   onClick={() => toggle.mutate({ playlistId: playlist.id, add: !inIt })}
                   aria-pressed={inIt}
-                  className="flex w-full min-h-11 cursor-pointer items-center gap-3 rounded-[var(--radius-sm)] border-none bg-transparent px-3 text-start transition-colors hover:bg-[var(--color-surface-hover)] transition-transform duration-[var(--duration-instant)] ease-standard active:scale-[0.98] motion-reduce:active:scale-100"
+                  className="cue-button flex w-full min-h-11 cursor-pointer items-center gap-3 rounded-[var(--radius-sm)] border-none bg-transparent px-3 text-start transition-colors hover:bg-[var(--color-surface-hover)] transition-transform duration-[var(--duration-instant)] ease-standard active:scale-[0.98] motion-reduce:active:scale-100"
                 >
                   <span
                     aria-hidden="true"

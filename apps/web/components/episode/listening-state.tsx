@@ -79,6 +79,13 @@ function useProgress(episodeId: string): EpisodeProgress | null {
   return useContext(ListeningState)?.get(episodeId) ?? null;
 }
 
+/** Undefined means pending/outside a list; null means this episode is untouched. */
+export function useEpisodeResume(episodeId: string): EpisodeProgress | null | undefined {
+  const entries = useContext(ListeningState);
+  if (!entries || entries === NONE) return undefined;
+  return entries.get(episodeId) ?? null;
+}
+
 /**
  * How far through an episode you are, drawn on its own cover.
  *

@@ -1002,7 +1002,7 @@ export function Player() {
               type="button"
               onClick={() => setExpanded(false)}
               aria-label={t.t('player.close')}
-              className="group flex h-8 w-16 cursor-pointer items-center justify-center border-0 bg-transparent transition-transform duration-[var(--duration-instant)] ease-standard active:scale-y-[1.35] motion-reduce:active:scale-y-100"
+              className="cue-button group flex h-8 w-16 cursor-pointer items-center justify-center border-0 bg-transparent transition-transform duration-[var(--duration-instant)] ease-standard active:scale-y-[1.35] motion-reduce:active:scale-y-100"
             >
               {/* The handle answers hover by widening and darkening a step —
                   the same quiet invitation the scrubber gives when it thickens

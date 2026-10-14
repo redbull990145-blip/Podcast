@@ -144,9 +144,9 @@ function HistoryRow({ entry }: { entry: HistoryEntry }) {
           heard is available, not advised. */}
       <button
         type="button"
-        onClick={() => void play(playableFromQueueEntry(entry))}
+        onClick={() => void play(playableFromQueueEntry(entry), entry)}
         aria-label={t.t('home.resume', { title: entry.episode.title })}
-        className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full border border-[var(--color-border-strong)] bg-transparent text-[var(--color-text-primary)] transition-[transform,background-color] duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] active:scale-[0.97] motion-reduce:active:scale-100"
+        className="cue-button flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full border border-[var(--color-border-strong)] bg-transparent text-[var(--color-text-primary)] transition-[transform,background-color] duration-[var(--duration-instant)] ease-standard hover:bg-[var(--color-surface-hover)] active:scale-[0.97] motion-reduce:active:scale-100"
       >
         <svg width="9" height="10" viewBox="0 0 10 12" fill="currentColor" aria-hidden="true">
           <path d="M0 0 10 6 0 12Z" />

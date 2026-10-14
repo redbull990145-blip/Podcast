@@ -7,8 +7,8 @@ import {
   type MotionSpec,
   type SpringToken,
 } from '@cue/motion';
-import { useReducedMotion, type Transition } from 'motion/react';
-import { useMemo } from 'react';
+import type { Transition } from 'motion/react';
+import { useMemo, useSyncExternalStore } from 'react';
 
 /**
  * The web's binding to the shared motion policy.
@@ -24,14 +24,20 @@ import { useMemo } from 'react';
  * Motion's shapes.
  */
 
-/**
- * Motion's hook returns `null` until it has read the media query. Treating
- * that as "motion is fine" matches the browser default and avoids a frame of
- * reduced layout on first paint that then springs into place — which would be
- * motion introduced *by* the reduced-motion path.
- */
+// The installed Motion hook snapshots this setting only on mount. Subscribe
+// directly so an OS preference change also updates controls already on screen.
+function subscribeReducedMotion(onChange: () => void): () => void {
+  const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+
 export function usePrefersReducedMotion(): boolean {
-  return useReducedMotion() ?? false;
+  return useSyncExternalStore(
+    subscribeReducedMotion,
+    () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    () => false,
+  );
 }
 
 /**

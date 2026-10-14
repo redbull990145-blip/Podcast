@@ -934,7 +934,7 @@ function NudgeButton({
       // caption size, and a pair of full-size touch targets under the words
       // would out-weigh the transcript they are adjusting. It is a secondary
       // control on a surface that is not primarily touch-driven.
-      className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-[var(--color-border-strong)] bg-transparent type-caption leading-none text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)]"
+      className="cue-button flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-[var(--color-border-strong)] bg-transparent type-caption leading-none text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-surface-hover)]"
     >
       {glyph}
     </button>

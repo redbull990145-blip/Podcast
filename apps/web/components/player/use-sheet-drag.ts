@@ -31,6 +31,7 @@ export type SheetDrag = {
   onPointerMove: (event: ReactPointerEvent<HTMLElement>) => void;
   onPointerUp: (event: ReactPointerEvent<HTMLElement>) => void;
   onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => void;
+  onLostPointerCapture: (event: ReactPointerEvent<HTMLElement>) => void;
 };
 
 type Options = {
@@ -101,6 +102,7 @@ export function useSheetDrag({
     if (current.pending) {
       if (Math.abs(dy) < gesture.activationDistance) return;
       current.pending = false;
+      expansion.stop();
       event.currentTarget.setPointerCapture(event.pointerId);
     }
 
@@ -119,7 +121,7 @@ export function useSheetDrag({
     expansion.set(Math.max(0, Math.min(1, next)));
   }
 
-  function finish(event: ReactPointerEvent<HTMLElement>) {
+  function finish(event: ReactPointerEvent<HTMLElement>, cancelled = false) {
     const current = drag.current;
     if (!current || current.pointerId !== event.pointerId) return;
     drag.current = null;
@@ -143,16 +145,17 @@ export function useSheetDrag({
     const towardOther = startedExpanded
       ? event.clientY - current.startY
       : current.startY - event.clientY;
-    const velocityToward = startedExpanded ? current.velocity : -current.velocity;
+    const releaseVelocity = event.timeStamp - current.lastTime > 80 ? 0 : current.velocity;
+    const velocityToward = startedExpanded ? releaseVelocity : -releaseVelocity;
 
-    const flips = shouldCommit(towardOther, velocityToward, travelPx);
+    const flips = !cancelled && shouldCommit(towardOther, velocityToward, travelPx);
     const expanded = flips ? !startedExpanded : startedExpanded;
 
     animate(expansion, expanded ? 1 : 0, {
       ...settle,
       // Signed for the value, not the screen: the finger moving down is the
       // expansion falling, so the sign flips on the way through.
-      velocity: -settleVelocity(current.velocity, travelPx),
+      velocity: cancelled ? 0 : -settleVelocity(releaseVelocity, travelPx),
     });
 
     onCommit(expanded);
@@ -161,7 +164,8 @@ export function useSheetDrag({
   return {
     onPointerDown,
     onPointerMove,
-    onPointerUp: finish,
-    onPointerCancel: finish,
+    onPointerUp: (event) => finish(event),
+    onPointerCancel: (event) => finish(event, true),
+    onLostPointerCapture: (event) => finish(event, true),
   };
 }

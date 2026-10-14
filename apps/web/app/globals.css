@@ -655,6 +655,33 @@ body {
   }
 }
 
+.cue-slider-thumb {
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin: -5px;
+  border-radius: 50%;
+  background: var(--color-text-primary);
+  box-shadow: 0 1px 5px #0003;
+  opacity: 0;
+  transform: scale(0.65);
+  transition:
+    transform var(--spring-responsive-duration) var(--spring-responsive),
+    opacity var(--duration-instant) var(--ease-standard);
+}
+
+.cue-slider:is(:hover, :focus-visible, [data-dragging]) .cue-slider-thumb {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.cue-slider[data-dragging] { cursor: grabbing; }
+.cue-slider[data-dragging] .cue-slider-thumb { transform: scale(1.25); }
+
+@media (prefers-reduced-motion: reduce) {
+  .cue-slider-thumb { transition: none; transform: none !important; }
+}
+
 /* ------------------------------------------------------------- a11y ------ */
 
 /* Visible focus, but only for keyboard users — a mouse click on a button

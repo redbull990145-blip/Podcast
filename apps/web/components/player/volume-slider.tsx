@@ -59,6 +59,7 @@ export function VolumeSlider({ volume, onChange }: { volume: number; onChange: (
     if (!track) return null;
 
     const rect = track.getBoundingClientRect();
+    if (rect.width <= 0) return null;
     const ratio = (clientX - rect.left) / rect.width;
     // Right-to-left locales mirror the whole layout, so the geometry has to be
     // read the same way round the text is.
@@ -108,6 +109,9 @@ export function VolumeSlider({ volume, onChange }: { volume: number; onChange: (
           // Capture, so a drag that leaves the 6px track — which every drag
           // does — keeps delivering moves here instead of to whatever is
           // underneath.
+          if (event.button !== 0) return;
+          event.preventDefault();
+          event.currentTarget.focus();
           event.currentTarget.setPointerCapture(event.pointerId);
           draggingRef.current = true;
           setDragging(true);
@@ -127,10 +131,15 @@ export function VolumeSlider({ volume, onChange }: { volume: number; onChange: (
           draggingRef.current = false;
           setDragging(false);
         }}
+        onLostPointerCapture={() => {
+          draggingRef.current = false;
+          setDragging(false);
+        }}
+        data-dragging={dragging || undefined}
         // Focus is left to the global `:focus-visible` outline rather than
         // given a ring of its own, so this control gets the same one as every
         // other focusable thing in the app.
-        className="group relative flex-1 cursor-pointer touch-none py-2.5"
+        className="cue-slider group relative flex-1 cursor-pointer touch-none py-2.5"
       >
         {/*
           `scaleY` rather than a height change: the bar grows under the pointer,
@@ -159,6 +168,9 @@ export function VolumeSlider({ volume, onChange }: { volume: number; onChange: (
             // fill tracks a dragging finger without touching layout.
             style={{ transform: `scaleX(${volume})` }}
           />
+        </div>
+        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-1/2" style={{ transform: `translateX(${volume * 100}%)` }}>
+          <span className="cue-slider-thumb" />
         </div>
       </div>
 
